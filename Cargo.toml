@@ -66,6 +66,8 @@ members = [
   "crates/lsp",
   "crates/cli",
   "crates/managed-api",
+  # crates/ — internal benchmark harness (T-007 perf regression budget)
+  "crates/bench-harness",
   # bindings/ — Rust-shaped delivery vehicles
   "bindings/node-napi",
   "bindings/python",

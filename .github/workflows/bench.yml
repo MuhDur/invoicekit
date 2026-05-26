@@ -1,0 +1,98 @@
+name: Bench
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: bench-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  budget-tests:
+    name: perf-budget tooling tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pytest
+        run: pip install pytest
+      - name: Run perf-budget tests
+        run: pytest tools/perf-budget/tests -q
+
+  bench:
+    name: bench (${{ github.event_name }})
+    runs-on: ubuntu-latest
+    needs: budget-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install perf-budget dependencies
+        run: pip install tomli
+      - name: Restore baseline from main
+        id: baseline-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: baseline/criterion
+          key: bench-baseline-${{ github.event.repository.default_branch }}-v1
+      - name: Run criterion benches
+        run: cargo bench -p invoicekit-bench-harness --bench ir_round_trip -- --warm-up-time 1 --measurement-time 3 --sample-size 20
+      - name: Evaluate budget vs. baseline
+        id: budget
+        run: |
+          python tools/perf-budget/perf_budget.py \
+            --current target/criterion \
+            --baseline baseline/criterion \
+            --budget tools/perf-budget/budget.toml \
+            --summary-out perf-summary.md
+      - name: Post PR comment with results
+        if: github.event_name == 'pull_request' && always() && hashFiles('perf-summary.md') != ''
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: perf-budget
+          path: perf-summary.md
+      - name: Save baseline for main
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: actions/cache/save@v4
+        with:
+          path: target/criterion
+          key: bench-baseline-${{ github.event.repository.default_branch }}-v1
+
+  publish-pages:
+    name: Publish criterion HTML report to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: bench
+    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Regenerate criterion HTML report
+        run: cargo bench -p invoicekit-bench-harness --bench ir_round_trip -- --warm-up-time 1 --measurement-time 3 --sample-size 20
+      - name: Publish to GitHub Pages branch (gh-pages)
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: target/criterion
+          publish_branch: gh-pages
+          destination_dir: bench
+          force_orphan: false

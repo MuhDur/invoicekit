@@ -1,0 +1,29 @@
+# InvoiceKit performance regression budget.
+#
+# Each [operations.<name>] table configures the budget for one tracked
+# operation. The CI bench workflow (`.github/workflows/bench.yml`) runs the
+# criterion harness in `crates/bench-harness/benches/`, parses the
+# `target/criterion/<name>/new/estimates.json` file each bench leaves on disk,
+# compares the `mean.point_estimate` against the rolling baseline cached on
+# `main`, and fails the build when the regression exceeds the operation's
+# `max_regression_pct`.
+#
+# The defaults match T-007's acceptance criterion: a 10% regression vs. the
+# rolling 30-day median fails the build. Per-operation thresholds may tighten
+# or loosen this number when the underlying workload justifies it (for example,
+# canonicalization is allowed only 5% drift because downstream signatures hash
+# its output).
+
+default_max_regression_pct = 10.0
+
+[operations.ir-round-trip]
+# IR encode + validate + decode round-trip on a representative document.
+# Owned by `crates/bench-harness/benches/ir_round_trip.rs`.
+max_regression_pct = 10.0
+
+# Future tracked operations land here as their owning beads add benches:
+#   [operations.validate]
+#   [operations.render]
+#   [operations.canonicalize]
+#   [operations.transmit-enqueue]
+#   [operations.fingerprint]
