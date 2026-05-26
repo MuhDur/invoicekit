@@ -1,0 +1,22 @@
+{
+  "list": "peppol:participant-scheme",
+  "version": "seed-v9.6",
+  "effective_from": "2026-04-07",
+  "effective_to": null,
+  "source_url": "https://docs.peppol.eu/edelivery/codelists/v9.6/Peppol%20Code%20Lists%20-%20Participant%20identifier%20schemes%20v9.6.html",
+  "retrieved_at": "2026-05-26",
+  "signature_alg": "sha256:identity",
+  "signature": "ed8b7ef795d0b95f0d26120acc072e92ee907da562eafd87bac78513dd28bbaa",
+  "entries": [
+    { "code": "0002", "label": "System Information et Repertoire des Entreprise et des Etablissements: SIRENE", "valid_from": null, "valid_to": null, "attrs": { "country": "FR" } },
+    { "code": "0007", "label": "Organisationsnummer", "valid_from": null, "valid_to": null, "attrs": { "country": "SE" } },
+    { "code": "0088", "label": "EAN Location Code", "valid_from": null, "valid_to": null, "attrs": { "country": "International" } },
+    { "code": "0151", "label": "Australian Business Number", "valid_from": null, "valid_to": null, "attrs": { "country": "AU" } },
+    { "code": "0184", "label": "DIGSTORG", "valid_from": null, "valid_to": null, "attrs": { "country": "DK" } },
+    { "code": "0192", "label": "Norwegian Organization Number", "valid_from": null, "valid_to": null, "attrs": { "country": "NO" } },
+    { "code": "0208", "label": "Leitweg-ID", "valid_from": null, "valid_to": null, "attrs": { "country": "DE" } },
+    { "code": "0210", "label": "Codice Fiscale", "valid_from": null, "valid_to": null, "attrs": { "country": "IT" } },
+    { "code": "0211", "label": "Partita IVA", "valid_from": null, "valid_to": null, "attrs": { "country": "IT" } },
+    { "code": "0216", "label": "The Netherlands Chamber of Commerce and Industry establishment number", "valid_from": null, "valid_to": null, "attrs": { "country": "NL" } }
+  ]
+}

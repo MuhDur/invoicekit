@@ -1,0 +1,28 @@
+{
+  "list": "iso-3166-1:alpha2",
+  "version": "seed-2024",
+  "effective_from": "2024-01-01",
+  "effective_to": null,
+  "source_url": "https://www.iso.org/iso-3166-country-codes.html",
+  "retrieved_at": "2026-05-26",
+  "signature_alg": "sha256:identity",
+  "signature": "e6e7da3e46e7fec5b4c5ca2ef3fe61ce559b1c8767990c7a27f044e3f7ece718",
+  "entries": [
+    { "code": "BE", "label": "Belgium", "valid_from": null, "valid_to": null, "attrs": { "alpha3": "BEL", "numeric": "056" } },
+    { "code": "BR", "label": "Brazil", "valid_from": null, "valid_to": null, "attrs": { "alpha3": "BRA", "numeric": "076" } },
+    { "code": "DE", "label": "Germany", "valid_from": null, "valid_to": null, "attrs": { "alpha3": "DEU", "numeric": "276" } },
+    { "code": "ES", "label": "Spain", "valid_from": null, "valid_to": null, "attrs": { "alpha3": "ESP", "numeric": "724" } },
+    { "code": "FR", "label": "France", "valid_from": null, "valid_to": null, "attrs": { "alpha3": "FRA", "numeric": "250" } },
+    { "code": "GB", "label": "United Kingdom", "valid_from": null, "valid_to": null, "attrs": { "alpha3": "GBR", "numeric": "826" } },
+    { "code": "GR", "label": "Greece", "valid_from": null, "valid_to": null, "attrs": { "alpha3": "GRC", "numeric": "300" } },
+    { "code": "IN", "label": "India", "valid_from": null, "valid_to": null, "attrs": { "alpha3": "IND", "numeric": "356" } },
+    { "code": "IT", "label": "Italy", "valid_from": null, "valid_to": null, "attrs": { "alpha3": "ITA", "numeric": "380" } },
+    { "code": "JP", "label": "Japan", "valid_from": null, "valid_to": null, "attrs": { "alpha3": "JPN", "numeric": "392" } },
+    { "code": "MX", "label": "Mexico", "valid_from": null, "valid_to": null, "attrs": { "alpha3": "MEX", "numeric": "484" } },
+    { "code": "MY", "label": "Malaysia", "valid_from": null, "valid_to": null, "attrs": { "alpha3": "MYS", "numeric": "458" } },
+    { "code": "PL", "label": "Poland", "valid_from": null, "valid_to": null, "attrs": { "alpha3": "POL", "numeric": "616" } },
+    { "code": "SA", "label": "Saudi Arabia", "valid_from": null, "valid_to": null, "attrs": { "alpha3": "SAU", "numeric": "682" } },
+    { "code": "TR", "label": "Turkey", "valid_from": null, "valid_to": null, "attrs": { "alpha3": "TUR", "numeric": "792" } },
+    { "code": "US", "label": "United States", "valid_from": null, "valid_to": null, "attrs": { "alpha3": "USA", "numeric": "840" } }
+  ]
+}

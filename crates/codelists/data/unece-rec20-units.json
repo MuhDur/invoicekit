@@ -1,0 +1,22 @@
+{
+  "list": "unece-rec20:units",
+  "version": "seed-2024",
+  "effective_from": "2024-01-01",
+  "effective_to": null,
+  "source_url": "https://unece.org/trade/uncefact/cl-recommendations",
+  "retrieved_at": "2026-05-26",
+  "signature_alg": "sha256:identity",
+  "signature": "b5ddb605c17a1878ff9fbd0044f76d2e7898a69784263db395a28c90d9f7837a",
+  "entries": [
+    { "code": "C62", "label": "one", "valid_from": null, "valid_to": null, "attrs": { "kind": "unit" } },
+    { "code": "DAY", "label": "day", "valid_from": null, "valid_to": null, "attrs": { "kind": "time" } },
+    { "code": "H87", "label": "piece", "valid_from": null, "valid_to": null, "attrs": { "kind": "unit" } },
+    { "code": "HUR", "label": "hour", "valid_from": null, "valid_to": null, "attrs": { "kind": "time" } },
+    { "code": "KGM", "label": "kilogram", "valid_from": null, "valid_to": null, "attrs": { "kind": "mass" } },
+    { "code": "KWH", "label": "kilowatt hour", "valid_from": null, "valid_to": null, "attrs": { "kind": "energy" } },
+    { "code": "LTR", "label": "litre", "valid_from": null, "valid_to": null, "attrs": { "kind": "volume" } },
+    { "code": "MTR", "label": "metre", "valid_from": null, "valid_to": null, "attrs": { "kind": "length" } },
+    { "code": "MTK", "label": "square metre", "valid_from": null, "valid_to": null, "attrs": { "kind": "area" } },
+    { "code": "TNE", "label": "tonne", "valid_from": null, "valid_to": null, "attrs": { "kind": "mass" } }
+  ]
+}
