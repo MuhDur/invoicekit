@@ -27,3 +27,4 @@ serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision
 
 [lints]
 workspace = true
+# T-020 marker — re-trigger CI
