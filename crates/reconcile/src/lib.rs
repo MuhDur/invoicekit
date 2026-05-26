@@ -19,6 +19,13 @@ use invoicekit_ir::{CommercialDocument, Party};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod outbox;
+
+pub use outbox::{
+    all_outbox_migrations, outbox_migration, DatabaseDialect, DeadLetterRecord, OutboxEnvelope,
+    OutboxMigration, OutboxState, RetryDecision, RetryPolicy, OUTBOX_BEAD_ID,
+};
+
 /// Boxed future returned by gateway adapter operations.
 ///
 /// The boxed shape keeps [`GatewayAdapter`] object-safe, so the transmission
@@ -1642,6 +1649,26 @@ pub enum ReconcileError {
     /// The invoice document failed IR validation.
     #[error("invalid invoice document: {0}")]
     InvalidDocument(invoicekit_ir::IrError),
+    /// Retry policy parameters would make scheduling ambiguous or unsafe.
+    #[error("invalid retry policy field `{field}`: {message}; remediation: {remediation}")]
+    InvalidRetryPolicy {
+        /// Field that failed validation.
+        field: &'static str,
+        /// Human-readable diagnostic.
+        message: &'static str,
+        /// Human-readable remediation hint.
+        remediation: &'static str,
+    },
+    /// Retry attempt number was outside the configured retry policy.
+    #[error("invalid retry attempt `{attempt}`: {message}; remediation: {remediation}")]
+    InvalidRetryAttempt {
+        /// Attempt number supplied by the caller.
+        attempt: u16,
+        /// Human-readable diagnostic.
+        message: &'static str,
+        /// Human-readable remediation hint.
+        remediation: &'static str,
+    },
 }
 
 /// Canonical Cargo package name of this crate.

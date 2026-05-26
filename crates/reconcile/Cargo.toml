@@ -19,10 +19,14 @@ blake3 = "1"
 invoicekit-ir = { path = "../ir", version = "0.0.0" }
 serde = { version = "1", features = ["derive"] }
 thiserror.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 futures-task = "0.3"
+mysql = "28"
+postgres = "0.19"
 proptest = "1"
+rusqlite = "0.37"
 serde_json = "1"
 
 [lints]
