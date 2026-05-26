@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
 [package]
 name = "invoicekit-rulepack"
 version.workspace = true
@@ -7,12 +9,21 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit workspace member: invoicekit-rulepack"
+description = "InvoiceKit workspace member: invoicekit-rulepack — signed, versioned, effective-dated rule pack registry."
 publish = false
 
 [lib]
 name = "invoicekit_rulepack"
 path = "src/lib.rs"
+
+[dependencies]
+blake3 = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest = "1"
 
 [lints]
 workspace = true
