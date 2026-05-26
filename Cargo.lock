@@ -584,6 +584,7 @@ version = "0.0.0"
 dependencies = [
  "proptest",
  "ryu-js",
+ "serde",
  "serde_json",
  "thiserror",
 ]

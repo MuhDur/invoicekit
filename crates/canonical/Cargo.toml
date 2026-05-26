@@ -18,12 +18,13 @@ path = "src/lib.rs"
 
 [dependencies]
 ryu-js = "1"
+serde = "1"
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror.workspace = true
 
 [dev-dependencies]
 proptest = "1"
-serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
+serde_json = { version = "1", features = ["preserve_order"] }
 
 [lints]
 workspace = true
