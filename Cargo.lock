@@ -1430,8 +1430,10 @@ dependencies = [
 name = "invoicekit-reconcile"
 version = "0.0.0"
 dependencies = [
+ "blake3",
  "futures-task",
  "invoicekit-ir",
+ "proptest",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

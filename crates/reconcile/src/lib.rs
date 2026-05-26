@@ -15,7 +15,7 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 
-use invoicekit_ir::CommercialDocument;
+use invoicekit_ir::{CommercialDocument, Party};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -24,6 +24,144 @@ use thiserror::Error;
 /// The boxed shape keeps [`GatewayAdapter`] object-safe, so the transmission
 /// worker can store partner, native, and mock adapters behind one trait object.
 pub type GatewayFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, GatewayError>> + Send + 'a>>;
+
+/// BLAKE3 hash returned by [`fingerprint`].
+///
+/// This is the stable 32-byte digest used by reconciliation and evidence
+/// lookups. Use [`blake3::Hash::to_hex`] when a textual representation is
+/// needed.
+pub type Blake3Hash = blake3::Hash;
+
+const FINGERPRINT_DOMAIN: &[u8] = b"invoicekit:reconcile:fingerprint:v1";
+
+/// Computes the deterministic invoice fingerprint used for deduplication.
+///
+/// The fingerprint follows PLAN.md section 4.6:
+/// `blake3(supplier_VAT || customer_VAT || issue_date || document_number ||
+/// total_amount || currency)`. InvoiceKit prepends a domain tag and serializes
+/// each component with a length prefix before hashing, so adjacent fields cannot
+/// collide by concatenation ambiguity. `total_amount` is the normalized payable
+/// amount from [`invoicekit_ir::MonetaryTotal`].
+///
+/// If a party has multiple VAT tax IDs, the first tax ID whose scheme is `vat`
+/// (case-insensitive) is used. If no VAT ID is present, the component is the
+/// empty string; this preserves the pure no-error function shape required by
+/// the reconciliation contract while keeping the missing-value choice explicit.
+///
+/// Test vector committed in T-022:
+///
+/// * supplier VAT: `DE123456789`
+/// * customer VAT: `FR123456789`
+/// * issue date: `2026-05-26`
+/// * document number: `INV-2026-0001`
+/// * total amount: `119`
+/// * currency: `EUR`
+/// * fingerprint hex: `437ccffe5449042844eef1adb2181c7e9bfed6b097810145189c1f872ca58bde`
+///
+/// # Examples
+///
+/// ```
+/// use invoicekit_ir::CommercialDocument;
+/// use invoicekit_reconcile::fingerprint;
+/// use serde_json::json;
+///
+/// let document = CommercialDocument::try_from_value(json!({
+///     "schema_version": "1.0",
+///     "id": "doc_fingerprint_vector",
+///     "document_type": "invoice",
+///     "issue_date": "2026-05-26",
+///     "due_date": "2026-06-25",
+///     "document_number": "INV-2026-0001",
+///     "currency": "EUR",
+///     "supplier": {
+///         "id": "supplier-fingerprint",
+///         "name": "InvoiceKit GmbH",
+///         "tax_ids": [{ "scheme": "vat", "value": "DE123456789" }],
+///         "address": {
+///             "lines": ["Main Street 1"],
+///             "city": "Sample City",
+///             "postal_code": "10115",
+///             "country": "DE"
+///         }
+///     },
+///     "customer": {
+///         "id": "customer-fingerprint",
+///         "name": "ACME SAS",
+///         "tax_ids": [{ "scheme": "vat", "value": "FR123456789" }],
+///         "address": {
+///             "lines": ["Main Street 1"],
+///             "city": "Sample City",
+///             "postal_code": "10115",
+///             "country": "FR"
+///         }
+///     },
+///     "lines": [{
+///         "id": "1",
+///         "description": "Validation subscription",
+///         "quantity": "1",
+///         "unit_code": "EA",
+///         "unit_price": "119.00",
+///         "line_extension_amount": "119.00",
+///         "tax_category": "S"
+///     }],
+///     "tax_summary": [{
+///         "category_code": "S",
+///         "taxable_amount": "119.00",
+///         "tax_amount": "0.00",
+///         "tax_rate": "0.00"
+///     }],
+///     "monetary_total": {
+///         "line_extension_amount": "119.00",
+///         "tax_exclusive_amount": "119.00",
+///         "tax_inclusive_amount": "119.00",
+///         "payable_amount": "119.00"
+///     },
+///     "meta": {
+///         "tenant_id": "tenant_fingerprint",
+///         "trace_id": "trace_fingerprint",
+///         "source_system": "docs"
+///     }
+/// }))
+/// .unwrap();
+///
+/// assert_eq!(
+///     fingerprint(&document).to_hex().to_string(),
+///     "437ccffe5449042844eef1adb2181c7e9bfed6b097810145189c1f872ca58bde"
+/// );
+/// ```
+#[must_use]
+pub fn fingerprint(doc: &CommercialDocument) -> Blake3Hash {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(FINGERPRINT_DOMAIN);
+
+    update_fingerprint_field(&mut hasher, party_vat(&doc.supplier));
+    update_fingerprint_field(&mut hasher, party_vat(&doc.customer));
+    update_fingerprint_field(&mut hasher, doc.issue_date.as_str());
+    update_fingerprint_field(&mut hasher, doc.document_number.as_str());
+    let total_amount = doc
+        .monetary_total
+        .payable_amount
+        .inner()
+        .normalize()
+        .to_string();
+    update_fingerprint_field(&mut hasher, &total_amount);
+    update_fingerprint_field(&mut hasher, doc.currency.as_str());
+
+    hasher.finalize()
+}
+
+fn update_fingerprint_field(hasher: &mut blake3::Hasher, value: &str) {
+    hasher.update(&(value.len() as u64).to_be_bytes());
+    hasher.update(value.as_bytes());
+}
+
+fn party_vat(party: &Party) -> &str {
+    party
+        .tax_ids
+        .iter()
+        .find(|tax_id| tax_id.scheme.eq_ignore_ascii_case("vat"))
+        .map_or("", |tax_id| tax_id.value.as_str())
+}
 
 macro_rules! gateway_id_type {
     ($type_name:ident, $field_name:literal, $summary:literal, $example_value:literal) => {
@@ -1626,16 +1764,20 @@ mod tests {
 
     use futures_task::noop_waker_ref;
     use invoicekit_ir::CommercialDocument;
+    use proptest::prelude::*;
     use serde_json::{json, Value};
 
     use super::{
-        crate_name, CancelRequest, CorrectRequest, CountrySubState, CountrySubStateRegistry,
-        CountrySubStateTransition, GatewayAdapter, GatewayAttemptId, GatewayContext, GatewayError,
-        GatewayErrorKind, GatewayFuture, GatewayOperation, GatewayReceipt, GatewayRoute,
-        GatewayStatus, GatewaySubmissionId, IdempotencyKey, PollRequest, ReconcileError,
-        SubmitRequest, TenantId, TraceId, TransmissionBaseState, TransmissionState,
-        TransmissionStateMachine,
+        crate_name, fingerprint, Blake3Hash, CancelRequest, CorrectRequest, CountrySubState,
+        CountrySubStateRegistry, CountrySubStateTransition, GatewayAdapter, GatewayAttemptId,
+        GatewayContext, GatewayError, GatewayErrorKind, GatewayFuture, GatewayOperation,
+        GatewayReceipt, GatewayRoute, GatewayStatus, GatewaySubmissionId, IdempotencyKey,
+        PollRequest, ReconcileError, SubmitRequest, TenantId, TraceId, TransmissionBaseState,
+        TransmissionState, TransmissionStateMachine,
     };
+
+    const FINGERPRINT_TEST_VECTOR_HEX: &str =
+        "437ccffe5449042844eef1adb2181c7e9bfed6b097810145189c1f872ca58bde";
 
     #[test]
     fn crate_name_is_cargo_package_name() {
@@ -1665,6 +1807,111 @@ mod tests {
             n == "invoicekit" || n.starts_with("invoicekit-") || n.starts_with("invoicekit_"),
             "crate name does not advertise InvoiceKit family: {n}"
         );
+    }
+
+    #[test]
+    fn fingerprint_matches_committed_test_vector() {
+        let document = fingerprint_document(
+            "DE123456789",
+            "FR123456789",
+            "2026-05-26",
+            "INV-2026-0001",
+            "119.00",
+            "EUR",
+        );
+
+        assert_eq!(
+            fingerprint_hex(fingerprint(&document)),
+            FINGERPRINT_TEST_VECTOR_HEX
+        );
+    }
+
+    #[test]
+    fn fingerprint_is_deterministic_for_same_input() {
+        let document = fingerprint_document(
+            "DE123456789",
+            "FR123456789",
+            "2026-05-26",
+            "INV-2026-0001",
+            "119.00",
+            "EUR",
+        );
+
+        assert_eq!(fingerprint(&document), fingerprint(&document));
+    }
+
+    #[test]
+    fn fingerprint_changes_when_any_formula_field_changes() {
+        let base = fingerprint_document_value(
+            "DE123456789",
+            "FR123456789",
+            "2026-05-26",
+            "INV-2026-0001",
+            "119.00",
+            "EUR",
+        );
+        let base_hash = fingerprint(&CommercialDocument::try_from_value(base.clone()).unwrap());
+
+        let mut variants: Vec<(&str, Value)> = Vec::new();
+        let mut changed = base.clone();
+        changed["supplier"]["tax_ids"][0]["value"] = json!("DE987654321");
+        variants.push(("supplier VAT", changed));
+
+        let mut changed = base.clone();
+        changed["customer"]["tax_ids"][0]["value"] = json!("FR987654321");
+        variants.push(("customer VAT", changed));
+
+        let mut changed = base.clone();
+        changed["issue_date"] = json!("2026-05-27");
+        variants.push(("issue date", changed));
+
+        let mut changed = base.clone();
+        changed["document_number"] = json!("INV-2026-0002");
+        variants.push(("document number", changed));
+
+        let mut changed = base.clone();
+        changed["monetary_total"]["payable_amount"] = json!("120.00");
+        variants.push(("total amount", changed));
+
+        let mut changed = base;
+        changed["currency"] = json!("USD");
+        variants.push(("currency", changed));
+
+        for (field, value) in variants {
+            let changed_hash = fingerprint(&CommercialDocument::try_from_value(value).unwrap());
+            assert_ne!(
+                base_hash, changed_hash,
+                "{field} change should alter fingerprint"
+            );
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn generated_fingerprint_is_deterministic(
+            supplier_digits in "[0-9]{9}",
+            customer_digits in "[0-9]{9}",
+            invoice_suffix in 1_u32..1_000_000_u32,
+            day in 1_u8..=28,
+            cents in 1_u64..10_000_000_u64,
+            currency in prop_oneof![Just("EUR"), Just("USD"), Just("GBP")]
+        ) {
+            let supplier_vat = format!("DE{supplier_digits}");
+            let customer_vat = format!("FR{customer_digits}");
+            let issue_date = format!("2026-05-{day:02}");
+            let document_number = format!("INV-2026-{invoice_suffix:06}");
+            let amount = format!("{}.{:02}", cents / 100, cents % 100);
+            let document = fingerprint_document(
+                &supplier_vat,
+                &customer_vat,
+                &issue_date,
+                &document_number,
+                &amount,
+                currency,
+            );
+
+            prop_assert_eq!(fingerprint(&document), fingerprint(&document));
+        }
     }
 
     #[test]
@@ -2366,6 +2613,103 @@ mod tests {
             .unwrap(),
         ])
         .unwrap()
+    }
+
+    fn fingerprint_hex(hash: Blake3Hash) -> String {
+        hash.to_hex().to_string()
+    }
+
+    fn fingerprint_document(
+        supplier_vat: &str,
+        customer_vat: &str,
+        issue_date: &str,
+        document_number: &str,
+        total_amount: &str,
+        currency: &str,
+    ) -> CommercialDocument {
+        CommercialDocument::try_from_value(fingerprint_document_value(
+            supplier_vat,
+            customer_vat,
+            issue_date,
+            document_number,
+            total_amount,
+            currency,
+        ))
+        .unwrap()
+    }
+
+    fn fingerprint_document_value(
+        supplier_vat: &str,
+        customer_vat: &str,
+        issue_date: &str,
+        document_number: &str,
+        total_amount: &str,
+        currency: &str,
+    ) -> Value {
+        json!({
+            "schema_version": "1.0",
+            "id": "doc_fingerprint_vector",
+            "document_type": "invoice",
+            "issue_date": issue_date,
+            "due_date": "2026-06-25",
+            "document_number": document_number,
+            "currency": currency,
+            "supplier": party_with_vat_json(
+                "supplier-fingerprint",
+                "InvoiceKit GmbH",
+                "DE",
+                supplier_vat
+            ),
+            "customer": party_with_vat_json(
+                "customer-fingerprint",
+                "ACME SAS",
+                "FR",
+                customer_vat
+            ),
+            "lines": [{
+                "id": "1",
+                "description": "Validation subscription",
+                "quantity": "1",
+                "unit_code": "EA",
+                "unit_price": total_amount,
+                "line_extension_amount": total_amount,
+                "tax_category": "S"
+            }],
+            "tax_summary": [{
+                "category_code": "S",
+                "taxable_amount": total_amount,
+                "tax_amount": "0.00",
+                "tax_rate": "0.00"
+            }],
+            "monetary_total": {
+                "line_extension_amount": total_amount,
+                "tax_exclusive_amount": total_amount,
+                "tax_inclusive_amount": total_amount,
+                "payable_amount": total_amount
+            },
+            "meta": {
+                "tenant_id": "tenant_fingerprint",
+                "trace_id": "trace_fingerprint",
+                "source_system": "unit-test"
+            }
+        })
+    }
+
+    fn party_with_vat_json(id: &str, name: &str, country: &str, vat: &str) -> Value {
+        json!({
+            "id": id,
+            "name": name,
+            "tax_ids": [{
+                "scheme": "vat",
+                "value": vat
+            }],
+            "address": {
+                "lines": ["Main Street 1"],
+                "city": "Sample City",
+                "postal_code": "10115",
+                "country": country
+            }
+        })
     }
 
     fn synthetic_document() -> CommercialDocument {
