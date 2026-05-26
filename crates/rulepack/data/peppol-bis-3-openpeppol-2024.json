@@ -1,0 +1,33 @@
+{
+  "rulepack_id": "urn:invoicekit:rulepack:peppol:bis-3:openpeppol:2024-01",
+  "country": "global",
+  "profile": "urn:peppol.eu:2017:poacc:billing:3.0",
+  "upstream_version": "Peppol BIS Billing 3.0.18",
+  "effective_from": "2024-01-01",
+  "effective_to": null,
+  "source_url": "https://docs.peppol.eu/poacc/billing/3.0/",
+  "retrieved_at": "2026-05-26",
+  "codelist_versions": {
+    "iso-3166-1": "2024-01",
+    "iso-4217": "2024-01",
+    "peppol-codelists": "9.0",
+    "unece-rec20": "20-21-2024-01"
+  },
+  "upstream_checksum_blake3": "0000000000000000000000000000000000000000000000000000000000000000",
+  "generated_metadata": {
+    "generator": "invoicekit-rulepack",
+    "generated_at": "2026-05-26",
+    "notes": "Initial seed manifest. Body checksum is placeholder pending real upstream artifact ingestion."
+  },
+  "parity_fixtures": {
+    "oracle": "jvm:phive",
+    "fixture_set_id": "phive-peppol-bis-3-2024-01",
+    "expected_parity_pct": 99.9
+  },
+  "known_gaps": [],
+  "signature_alg": "blake3:identity",
+  "signature": "0000000000000000000000000000000000000000000000000000000000000000",
+  "body": {
+    "rules": []
+  }
+}

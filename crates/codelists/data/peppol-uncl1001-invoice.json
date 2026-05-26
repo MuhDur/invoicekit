@@ -1,0 +1,23 @@
+{
+  "list": "peppol:uncl1001-invoice",
+  "version": "seed-2024-q4",
+  "effective_from": "2024-01-01",
+  "effective_to": null,
+  "source_url": "https://docs.peppol.eu/poacc/billing/3.0/2024-Q4/codelist/UNCL1001-inv/",
+  "retrieved_at": "2026-05-26",
+  "signature_alg": "sha256:identity",
+  "signature": "c4aa8ed0db6e0acd96b78a09138f397f0c17221feb4781927cec37434ed99b6e",
+  "entries": [
+    { "code": "80", "label": "Debit note related to goods or services", "valid_from": null, "valid_to": null, "attrs": { "syntax": "BT-3" } },
+    { "code": "82", "label": "Metered services invoice", "valid_from": null, "valid_to": null, "attrs": { "syntax": "BT-3" } },
+    { "code": "84", "label": "Debit note related to financial adjustments", "valid_from": null, "valid_to": null, "attrs": { "syntax": "BT-3" } },
+    { "code": "380", "label": "Commercial invoice", "valid_from": null, "valid_to": null, "attrs": { "syntax": "BT-3" } },
+    { "code": "383", "label": "Debit note", "valid_from": null, "valid_to": null, "attrs": { "syntax": "BT-3" } },
+    { "code": "386", "label": "Prepayment invoice", "valid_from": null, "valid_to": null, "attrs": { "syntax": "BT-3" } },
+    { "code": "393", "label": "Factored invoice", "valid_from": null, "valid_to": null, "attrs": { "syntax": "BT-3" } },
+    { "code": "395", "label": "Consignment invoice", "valid_from": null, "valid_to": null, "attrs": { "syntax": "BT-3" } },
+    { "code": "575", "label": "Insurer's invoice", "valid_from": null, "valid_to": null, "attrs": { "syntax": "BT-3" } },
+    { "code": "623", "label": "Forwarder's invoice", "valid_from": null, "valid_to": null, "attrs": { "syntax": "BT-3" } },
+    { "code": "780", "label": "Freight invoice", "valid_from": null, "valid_to": null, "attrs": { "syntax": "BT-3" } }
+  ]
+}
