@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
 [package]
 name = "invoicekit-money"
 version.workspace = true
@@ -7,12 +9,23 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit workspace member: invoicekit-money"
+description = "InvoiceKit workspace member: invoicekit-money — Decimal-backed money type with currency-aware arithmetic, rounding policies, and Stripe-style allocation."
 publish = false
 
 [lib]
 name = "invoicekit_money"
 path = "src/lib.rs"
+
+[dependencies]
+invoicekit-ir = { path = "../ir", version = "0.0.0" }
+rust_decimal = { version = "1", default-features = false, features = ["serde-with-str", "std"] }
+serde = { version = "1", features = ["derive"] }
+thiserror.workspace = true
+serde_json = "1"
+
+[dev-dependencies]
+proptest = "1"
+serde_json = "1"
 
 [lints]
 workspace = true
