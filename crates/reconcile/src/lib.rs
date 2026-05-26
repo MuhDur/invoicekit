@@ -266,6 +266,277 @@ pub enum GatewayStatus {
     Corrected,
 }
 
+/// Canonical InvoiceKit transmission lifecycle state.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransmissionBaseState {
+    /// Invoice exists but has not passed validation.
+    Draft,
+    /// Invoice passed deterministic validation.
+    Validated,
+    /// Invoice payload and evidence material were signed.
+    Signed,
+    /// Idempotency and outbox slot were reserved before transmission.
+    Reserved,
+    /// Invoice was sent to a gateway adapter.
+    Sent,
+    /// Gateway accepted or delivered the invoice.
+    Delivered,
+    /// Recipient, authority, or partner acknowledged the delivery.
+    Acknowledged,
+    /// Gateway, authority, or recipient rejected the invoice.
+    Rejected,
+    /// Final evidence and receipts were archived.
+    Archived,
+}
+
+impl TransmissionBaseState {
+    /// Returns the stable serialized state name.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::TransmissionBaseState;
+    ///
+    /// assert_eq!(TransmissionBaseState::Delivered.as_str(), "delivered");
+    /// ```
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Draft => "draft",
+            Self::Validated => "validated",
+            Self::Signed => "signed",
+            Self::Reserved => "reserved",
+            Self::Sent => "sent",
+            Self::Delivered => "delivered",
+            Self::Acknowledged => "acknowledged",
+            Self::Rejected => "rejected",
+            Self::Archived => "archived",
+        }
+    }
+
+    /// Returns true when `next` is a valid base-state transition.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::TransmissionBaseState;
+    ///
+    /// assert!(TransmissionBaseState::Sent.can_transition_to(TransmissionBaseState::Delivered));
+    /// assert!(!TransmissionBaseState::Draft.can_transition_to(TransmissionBaseState::Sent));
+    /// ```
+    #[must_use]
+    pub const fn can_transition_to(self, next: Self) -> bool {
+        matches!(
+            (self, next),
+            (Self::Draft, Self::Validated)
+                | (Self::Validated, Self::Signed)
+                | (Self::Signed, Self::Reserved)
+                | (Self::Reserved, Self::Sent)
+                | (Self::Sent, Self::Delivered | Self::Rejected)
+                | (Self::Delivered, Self::Acknowledged | Self::Rejected)
+                | (Self::Acknowledged | Self::Rejected, Self::Archived)
+        )
+    }
+
+    /// Returns true when no further state transition is valid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::TransmissionBaseState;
+    ///
+    /// assert!(TransmissionBaseState::Archived.is_terminal());
+    /// assert!(!TransmissionBaseState::Sent.is_terminal());
+    /// ```
+    #[must_use]
+    pub const fn is_terminal(self) -> bool {
+        matches!(self, Self::Archived)
+    }
+}
+
+impl fmt::Display for TransmissionBaseState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Country or network-specific state layered on top of the canonical state.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CountrySubState {
+    /// Gateway, authority, or network namespace, such as `KSEF`, `SDI`, or
+    /// `ZATCA`.
+    pub system: String,
+    /// Stable country-system state code.
+    pub code: String,
+    /// Human-readable label for logs and support views.
+    pub label: String,
+}
+
+impl CountrySubState {
+    /// Builds a validated country-specific sub-state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReconcileError::MissingRequiredField`] for blank fields, or
+    /// [`ReconcileError::InvalidIdentifier`] when a field contains control
+    /// characters or identifier whitespace.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::CountrySubState;
+    ///
+    /// let substate = CountrySubState::new("KSEF", "session_opened", "KSeF session opened").unwrap();
+    /// assert_eq!(substate.system, "KSEF");
+    /// ```
+    pub fn new(
+        system: impl Into<String>,
+        code: impl Into<String>,
+        label: impl Into<String>,
+    ) -> Result<Self, ReconcileError> {
+        let system = system.into();
+        let code = code.into();
+        let label = label.into();
+        validate_identifier(&system, "country_substate.system")?;
+        validate_identifier(&code, "country_substate.code")?;
+        validate_text(&label, "country_substate.label")?;
+        Ok(Self {
+            system,
+            code,
+            label,
+        })
+    }
+}
+
+/// Full transmission state, including optional country-specific sub-state.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TransmissionState {
+    /// Canonical state used by the outbox and evidence bundle.
+    pub base: TransmissionBaseState,
+    /// Optional country, authority, or network state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country_substate: Option<CountrySubState>,
+}
+
+impl TransmissionState {
+    /// Builds a state with no country-specific sub-state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::{TransmissionBaseState, TransmissionState};
+    ///
+    /// let state = TransmissionState::new(TransmissionBaseState::Draft);
+    /// assert_eq!(state.base, TransmissionBaseState::Draft);
+    /// ```
+    #[must_use]
+    pub const fn new(base: TransmissionBaseState) -> Self {
+        Self {
+            base,
+            country_substate: None,
+        }
+    }
+
+    /// Attaches a country-specific sub-state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::{CountrySubState, TransmissionBaseState, TransmissionState};
+    ///
+    /// let state = TransmissionState::new(TransmissionBaseState::Sent)
+    ///     .with_country_substate(CountrySubState::new("SDI", "RC", "Ricevuta consegna").unwrap());
+    /// assert_eq!(state.country_substate.unwrap().system, "SDI");
+    /// ```
+    #[must_use]
+    pub fn with_country_substate(mut self, country_substate: CountrySubState) -> Self {
+        self.country_substate = Some(country_substate);
+        self
+    }
+
+    /// Validates and builds a transition to `next`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReconcileError::InvalidTransition`] when the base-state move
+    /// is not allowed, or [`ReconcileError::MissingRequiredField`] when
+    /// `reason` is blank.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::{TransmissionBaseState, TransmissionState};
+    ///
+    /// let transition = TransmissionState::new(TransmissionBaseState::Draft)
+    ///     .transition_to(
+    ///         TransmissionState::new(TransmissionBaseState::Validated),
+    ///         "validation passed",
+    ///     )
+    ///     .unwrap();
+    /// assert_eq!(transition.to.base, TransmissionBaseState::Validated);
+    /// ```
+    pub fn transition_to(
+        self,
+        next: Self,
+        reason: impl Into<String>,
+    ) -> Result<TransmissionTransition, ReconcileError> {
+        TransmissionTransition::new(self, next, reason)
+    }
+}
+
+/// Validated transition between two transmission states.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TransmissionTransition {
+    /// State before the transition.
+    pub from: TransmissionState,
+    /// State after the transition.
+    pub to: TransmissionState,
+    /// Operator or system reason for the transition.
+    pub reason: String,
+}
+
+impl TransmissionTransition {
+    /// Builds and validates a state transition.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReconcileError::InvalidTransition`] when the base-state move
+    /// is not allowed, or [`ReconcileError::MissingRequiredField`] when
+    /// `reason` is blank.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::{
+    ///     TransmissionBaseState, TransmissionState, TransmissionTransition,
+    /// };
+    ///
+    /// let transition = TransmissionTransition::new(
+    ///     TransmissionState::new(TransmissionBaseState::Sent),
+    ///     TransmissionState::new(TransmissionBaseState::Delivered),
+    ///     "gateway accepted",
+    /// )
+    /// .unwrap();
+    /// assert_eq!(transition.from.base, TransmissionBaseState::Sent);
+    /// ```
+    pub fn new(
+        from: TransmissionState,
+        to: TransmissionState,
+        reason: impl Into<String>,
+    ) -> Result<Self, ReconcileError> {
+        let reason = reason.into();
+        validate_non_empty(&reason, "transition.reason")?;
+        if !from.base.can_transition_to(to.base) {
+            return Err(ReconcileError::InvalidTransition {
+                from: from.base,
+                to: to.base,
+            });
+        }
+        Ok(Self { from, to, reason })
+    }
+}
+
 /// Receipt normalized from a gateway response.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct GatewayReceipt {
@@ -777,6 +1048,14 @@ pub enum ReconcileError {
         /// Rejected value.
         value: String,
     },
+    /// A transmission state transition was not allowed.
+    #[error("invalid transmission transition from `{from}` to `{to}`")]
+    InvalidTransition {
+        /// State before the rejected transition.
+        from: TransmissionBaseState,
+        /// State after the rejected transition.
+        to: TransmissionBaseState,
+    },
     /// A gateway country code was not uppercase ISO 3166-1 alpha-2 shaped text.
     #[error("invalid ISO 3166-1 alpha-2 gateway country code `{0}`")]
     InvalidCountryCode(String),
@@ -830,6 +1109,17 @@ fn validate_non_empty(value: &str, field: &'static str) -> Result<(), ReconcileE
     }
 }
 
+fn validate_text(value: &str, field: &'static str) -> Result<(), ReconcileError> {
+    validate_non_empty(value, field)?;
+    if value.chars().any(char::is_control) {
+        return Err(ReconcileError::InvalidIdentifier {
+            field,
+            value: value.to_owned(),
+        });
+    }
+    Ok(())
+}
+
 fn validate_country_code(value: &str) -> Result<(), ReconcileError> {
     if value.len() == 2 && value.bytes().all(|b| b.is_ascii_uppercase()) {
         Ok(())
@@ -879,10 +1169,11 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{
-        crate_name, CancelRequest, CorrectRequest, GatewayAdapter, GatewayAttemptId,
-        GatewayContext, GatewayError, GatewayErrorKind, GatewayFuture, GatewayOperation,
-        GatewayReceipt, GatewayRoute, GatewayStatus, GatewaySubmissionId, IdempotencyKey,
-        PollRequest, ReconcileError, SubmitRequest, TenantId, TraceId,
+        crate_name, CancelRequest, CorrectRequest, CountrySubState, GatewayAdapter,
+        GatewayAttemptId, GatewayContext, GatewayError, GatewayErrorKind, GatewayFuture,
+        GatewayOperation, GatewayReceipt, GatewayRoute, GatewayStatus, GatewaySubmissionId,
+        IdempotencyKey, PollRequest, ReconcileError, SubmitRequest, TenantId, TraceId,
+        TransmissionBaseState, TransmissionState,
     };
 
     #[test]
@@ -946,6 +1237,162 @@ mod tests {
         assert!(matches!(
             GatewayRoute::new("peppol", "peppol-bis-3", Some("de")),
             Err(ReconcileError::InvalidCountryCode(country)) if country == "de"
+        ));
+    }
+
+    #[test]
+    fn transmission_base_state_allows_canonical_happy_path() {
+        let transitions = [
+            (
+                TransmissionBaseState::Draft,
+                TransmissionBaseState::Validated,
+            ),
+            (
+                TransmissionBaseState::Validated,
+                TransmissionBaseState::Signed,
+            ),
+            (
+                TransmissionBaseState::Signed,
+                TransmissionBaseState::Reserved,
+            ),
+            (TransmissionBaseState::Reserved, TransmissionBaseState::Sent),
+            (
+                TransmissionBaseState::Sent,
+                TransmissionBaseState::Delivered,
+            ),
+            (
+                TransmissionBaseState::Delivered,
+                TransmissionBaseState::Acknowledged,
+            ),
+            (
+                TransmissionBaseState::Acknowledged,
+                TransmissionBaseState::Archived,
+            ),
+        ];
+
+        for (from, to) in transitions {
+            let transition = TransmissionState::new(from)
+                .transition_to(TransmissionState::new(to), "canonical transition")
+                .unwrap();
+
+            assert_eq!(transition.from.base, from);
+            assert_eq!(transition.to.base, to);
+        }
+    }
+
+    #[test]
+    fn rejected_transmission_can_be_archived() {
+        let transition = TransmissionState::new(TransmissionBaseState::Sent)
+            .transition_to(
+                TransmissionState::new(TransmissionBaseState::Rejected),
+                "gateway rejection",
+            )
+            .unwrap()
+            .to
+            .transition_to(
+                TransmissionState::new(TransmissionBaseState::Archived),
+                "archive rejection evidence",
+            )
+            .unwrap();
+
+        assert_eq!(transition.from.base, TransmissionBaseState::Rejected);
+        assert_eq!(transition.to.base, TransmissionBaseState::Archived);
+    }
+
+    #[test]
+    fn invalid_transition_returns_typed_error() {
+        let err = TransmissionState::new(TransmissionBaseState::Draft)
+            .transition_to(
+                TransmissionState::new(TransmissionBaseState::Sent),
+                "skip validation",
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ReconcileError::InvalidTransition {
+                from: TransmissionBaseState::Draft,
+                to: TransmissionBaseState::Sent,
+            }
+        ));
+    }
+
+    #[test]
+    fn archived_state_is_terminal() {
+        assert!(TransmissionBaseState::Archived.is_terminal());
+        assert!(!TransmissionBaseState::Sent.is_terminal());
+
+        let err = TransmissionState::new(TransmissionBaseState::Archived)
+            .transition_to(
+                TransmissionState::new(TransmissionBaseState::Sent),
+                "attempt reopen",
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ReconcileError::InvalidTransition {
+                from: TransmissionBaseState::Archived,
+                to: TransmissionBaseState::Sent,
+            }
+        ));
+    }
+
+    #[test]
+    fn country_substate_hook_covers_ksef_sdi_and_zatca_cases() {
+        let ksef_sent = TransmissionState::new(TransmissionBaseState::Sent)
+            .with_country_substate(country_substate("KSEF", "session_opened"));
+        let ksef_delivered = TransmissionState::new(TransmissionBaseState::Delivered)
+            .with_country_substate(country_substate("KSEF", "upo_received"));
+        let ksef_transition = ksef_sent
+            .transition_to(ksef_delivered, "KSeF UPO received")
+            .unwrap();
+        assert_eq!(
+            ksef_transition.to.country_substate.as_ref().unwrap().code,
+            "upo_received"
+        );
+
+        let sdi_transition = TransmissionState::new(TransmissionBaseState::Sent)
+            .with_country_substate(country_substate("SDI", "presa_in_carico"))
+            .transition_to(
+                TransmissionState::new(TransmissionBaseState::Delivered)
+                    .with_country_substate(country_substate("SDI", "ricevuta_consegna")),
+                "SDI delivery receipt",
+            )
+            .unwrap();
+        assert_eq!(
+            sdi_transition.to.country_substate.as_ref().unwrap().system,
+            "SDI"
+        );
+
+        let zatca_transition = TransmissionState::new(TransmissionBaseState::Delivered)
+            .with_country_substate(country_substate("ZATCA", "cleared"))
+            .transition_to(
+                TransmissionState::new(TransmissionBaseState::Acknowledged)
+                    .with_country_substate(country_substate("ZATCA", "reported")),
+                "ZATCA clearance acknowledged",
+            )
+            .unwrap();
+        assert_eq!(
+            zatca_transition.to.country_substate.as_ref().unwrap().code,
+            "reported"
+        );
+    }
+
+    #[test]
+    fn country_substate_rejects_blank_or_control_values() {
+        assert!(matches!(
+            CountrySubState::new("KSEF", "", "KSeF state"),
+            Err(ReconcileError::MissingRequiredField(
+                "country_substate.code"
+            ))
+        ));
+        assert!(matches!(
+            CountrySubState::new("SDI", "ricevuta", "bad\nlabel"),
+            Err(ReconcileError::InvalidIdentifier {
+                field: "country_substate.label",
+                ..
+            })
         ));
     }
 
@@ -1202,6 +1649,10 @@ mod tests {
             format!("{kind} test failure"),
             "apply the normalized adapter remediation",
         )
+    }
+
+    fn country_substate(system: &str, code: &str) -> CountrySubState {
+        CountrySubState::new(system, code, format!("{system} {code}")).unwrap()
     }
 
     fn synthetic_document() -> CommercialDocument {
