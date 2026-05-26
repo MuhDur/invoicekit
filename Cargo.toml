@@ -1,0 +1,120 @@
+[workspace]
+resolver = "2"
+members = [
+  # crates/ — engine and runtime artifacts
+  "crates/invoicekit-engine",
+  "crates/invoicekit-ffi",
+  "crates/invoicekit-wasm",
+  "crates/money",
+  "crates/codelists",
+  "crates/tax-calculation",
+  "crates/rulepack",
+  "crates/ir",
+  "crates/canonical",
+  "crates/validate",
+  "crates/validate-ubl-cii",
+  "crates/render-pdf",
+  "crates/render-pdf-postproc",
+  "crates/render-verify",
+  "crates/intake-pdf",
+  "crates/intake-ocr",
+  "crates/intake-vlm",
+  "crates/transmit-peppol",
+  "crates/transmit-mock",
+  "crates/transmit-email",
+  # crates/report-* — national clearance and reporting formats
+  "crates/report-fr-ctc",
+  "crates/report-it-sdi",
+  "crates/report-es-verifactu",
+  "crates/report-pl-ksef",
+  "crates/report-gr-mydata",
+  "crates/report-ro-efactura",
+  "crates/report-hu-nav",
+  "crates/report-sa-zatca",
+  "crates/report-in-gst",
+  "crates/report-mx-cfdi",
+  "crates/report-br-nfe",
+  "crates/report-cl-dte",
+  "crates/report-co-dian",
+  "crates/report-pe-sunat",
+  "crates/report-ar-afip",
+  "crates/report-ec-sri",
+  "crates/report-cr-hacienda",
+  "crates/report-do-dgii",
+  "crates/report-my-myinvois",
+  "crates/report-id-djp",
+  "crates/report-ph-bir",
+  "crates/report-vn-gdt",
+  "crates/report-th-rd",
+  "crates/report-kr-nts",
+  "crates/report-jp-qis",
+  "crates/report-cn-fapiao",
+  "crates/report-tw-mof",
+  "crates/report-eg-eta",
+  "crates/report-tr-efatura",
+  "crates/report-il-ita",
+  "crates/report-ke-etims",
+  "crates/report-ng-firs",
+  "crates/report-za-sars",
+  # crates/ — reconciliation, evidence, archive, verification, replay, migration
+  "crates/reconcile",
+  "crates/evidence",
+  "crates/archive",
+  "crates/verify",
+  "crates/replay",
+  "crates/migration",
+  "crates/lsp",
+  "crates/cli",
+  "crates/managed-api",
+  # bindings/ — Rust-shaped delivery vehicles
+  "bindings/node-napi",
+  "bindings/python",
+  "bindings/wasm-browser",
+  "bindings/rest-shim",
+  # services/ — Rust-shaped sidecars (Java sidecars live under services/ but outside the workspace)
+  "services/invoicekit-signer-agent",
+  "services/managed-api-server",
+  # bridges/ — billing-platform adapters
+  "bridges/stripe-invoicing",
+  "bridges/lago",
+  "bridges/maxio",
+  "bridges/chargebee",
+  "bridges/recurly",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.83"
+license = "Apache-2.0"
+repository = "https://github.com/MuhDur/invoicekit"
+homepage = "https://github.com/MuhDur/invoicekit"
+authors = ["The InvoiceKit Authors"]
+
+[workspace.dependencies]
+thiserror = "2"
+tracing = "0.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unreachable_pub = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+missing_const_for_fn = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "debuginfo"
+overflow-checks = false
+
+[profile.dev]
+opt-level = 0
+debug = "line-tables-only"

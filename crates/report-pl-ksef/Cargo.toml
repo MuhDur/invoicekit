@@ -1,0 +1,18 @@
+[package]
+name = "invoicekit-report-pl-ksef"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "InvoiceKit workspace member: invoicekit-report-pl-ksef"
+publish = false
+
+[lib]
+name = "invoicekit_report_pl_ksef"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

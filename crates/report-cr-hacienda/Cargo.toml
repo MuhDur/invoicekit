@@ -1,0 +1,18 @@
+[package]
+name = "invoicekit-report-cr-hacienda"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "InvoiceKit workspace member: invoicekit-report-cr-hacienda"
+publish = false
+
+[lib]
+name = "invoicekit_report_cr_hacienda"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

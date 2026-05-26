@@ -31,3 +31,11 @@ venv/
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# Rust
+/target/
+**/target/
+**/*.rs.bk
+
+# Tooling caches
+.cargo/registry/

@@ -1,0 +1,18 @@
+[package]
+name = "invoicekit-bridge-recurly"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "InvoiceKit workspace member: invoicekit-bridge-recurly"
+publish = false
+
+[lib]
+name = "invoicekit_bridge_recurly"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

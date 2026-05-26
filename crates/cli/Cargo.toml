@@ -1,0 +1,22 @@
+[package]
+name = "invoicekit-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "InvoiceKit workspace CLI member: invoicekit-cli"
+publish = false
+
+[lib]
+name = "invoicekit_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "invoicekit"
+path = "src/main.rs"
+
+[lints]
+workspace = true

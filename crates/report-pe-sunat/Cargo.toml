@@ -1,0 +1,18 @@
+[package]
+name = "invoicekit-report-pe-sunat"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "InvoiceKit workspace member: invoicekit-report-pe-sunat"
+publish = false
+
+[lib]
+name = "invoicekit_report_pe_sunat"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

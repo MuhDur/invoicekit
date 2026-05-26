@@ -1,0 +1,18 @@
+[package]
+name = "invoicekit-transmit-email"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "InvoiceKit workspace member: invoicekit-transmit-email"
+publish = false
+
+[lib]
+name = "invoicekit_transmit_email"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

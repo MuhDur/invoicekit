@@ -1,0 +1,18 @@
+[package]
+name = "invoicekit-managed-api-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "InvoiceKit workspace binary: invoicekit-managed-api-server"
+publish = false
+
+[[bin]]
+name = "invoicekit-managed-api-server"
+path = "src/main.rs"
+
+[lints]
+workspace = true

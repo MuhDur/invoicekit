@@ -1,0 +1,18 @@
+[package]
+name = "invoicekit-binding-node-napi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "InvoiceKit workspace member: invoicekit-binding-node-napi"
+publish = false
+
+[lib]
+name = "invoicekit_binding_node_napi"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

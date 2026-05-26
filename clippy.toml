@@ -1,0 +1,29 @@
+avoid-breaking-exported-api = false
+msrv = "1.83"
+
+# Product / acronym identifiers that clippy::doc_markdown should not flag as
+# missing-backtick typos. Extend cautiously: only add tokens that are
+# genuinely product names or domain initialisms, not generic words.
+doc-valid-idents = [
+  "InvoiceKit",
+  "PLAN.md",
+  "EN16931",
+  "UBL",
+  "CII",
+  "Peppol",
+  "ZUGFeRD",
+  "XRechnung",
+  "FacturaE",
+  "FatturaPA",
+  "ZATCA",
+  "KSeF",
+  "MyDATA",
+  "CFDI",
+  "JSON-RPC",
+  "OAuth",
+  "OAuth2",
+  "OpenAPI",
+  "WebAssembly",
+  "WORM",
+  ".."
+]
