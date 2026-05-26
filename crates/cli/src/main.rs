@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The InvoiceKit Authors
+
 //! `invoicekit` CLI entry point. Backed by the `invoicekit_cli` library
 //! crate so the dispatcher can be exercised as a library from tests.
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The InvoiceKit Authors
+
 //! `invoicekit-validate-ubl-cii` — InvoiceKit workspace member.
 //!
 //! See [`plans/PLAN.md`](../../plans/PLAN.md) for the architectural role of
