@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ValidationResult",
+  "description": "One validation finding emitted by a backend.",
+  "type": "object",
+  "properties": {
+    "rule_id": {
+      "description": "Identifier of the rule that produced this finding.",
+      "type": "string"
+    },
+    "severity": {
+      "description": "Severity that the rule pack assigned to the finding.",
+      "$ref": "#/$defs/Severity"
+    },
+    "term": {
+      "description": "EN 16931 business term or business group implicated.",
+      "$ref": "#/$defs/BusinessTerm"
+    },
+    "location": {
+      "description": "Pointer into the source document at which the finding applies.",
+      "$ref": "#/$defs/Location"
+    },
+    "suggested_fix": {
+      "description": "Optional remediation hint shown to humans and consumed by autofixers.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SuggestedFix"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "citation": {
+      "description": "Citation back to the authoritative source for this rule.",
+      "$ref": "#/$defs/Citation"
+    },
+    "trace": {
+      "description": "Optional per-result trace context, owned by the T-032a trace extension.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ValidationTrace"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "rule_id",
+    "severity",
+    "term",
+    "location",
+    "citation"
+  ],
+  "$defs": {
+    "Severity": {
+      "description": "Severity assigned by the rule pack.",
+      "oneOf": [
+        {
+          "description": "Hard failure that prevents the document from being signed or transmitted.",
+          "type": "string",
+          "const": "fatal"
+        },
+        {
+          "description": "Document is invalid but reconciliation may still proceed.",
+          "type": "string",
+          "const": "error"
+        },
+        {
+          "description": "Document is valid but the rule pack flags a quality concern.",
+          "type": "string",
+          "const": "warning"
+        },
+        {
+          "description": "Purely informational; never blocks workflow.",
+          "type": "string",
+          "const": "info"
+        }
+      ]
+    },
+    "BusinessTerm": {
+      "description": "EN 16931 business term (BT) or business group (BG) reference.",
+      "oneOf": [
+        {
+          "description": "Business term — an atomic invoice field.",
+          "type": "object",
+          "properties": {
+            "code": {
+              "description": "Term code, e.g. `BT-1`.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "business_term"
+            }
+          },
+          "required": [
+            "kind",
+            "code"
+          ]
+        },
+        {
+          "description": "Business group — a structured collection of business terms.",
+          "type": "object",
+          "properties": {
+            "code": {
+              "description": "Group code, e.g. `BG-25`.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "business_group"
+            }
+          },
+          "required": [
+            "kind",
+            "code"
+          ]
+        }
+      ]
+    },
+    "Location": {
+      "description": "Source-document pointer.\n\n XML-backed documents use XPath; JSON-backed documents use RFC 6901 JSON\n Pointer. The two forms are distinct types so a backend cannot mix them\n up by accident.",
+      "oneOf": [
+        {
+          "description": "RFC 6901 JSON Pointer (`/path/to/field`).",
+          "type": "object",
+          "properties": {
+            "pointer": {
+              "description": "Pointer body, beginning with `/`.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "json_pointer"
+            }
+          },
+          "required": [
+            "kind",
+            "pointer"
+          ]
+        },
+        {
+          "description": "XPath 1.0 expression (`/Invoice/cbc:ID/text()`).",
+          "type": "object",
+          "properties": {
+            "expression": {
+              "description": "XPath expression as written by the backend.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "x_path"
+            }
+          },
+          "required": [
+            "kind",
+            "expression"
+          ]
+        }
+      ]
+    },
+    "SuggestedFix": {
+      "description": "Concrete remediation hint.\n\n Backends populate this when they can deterministically infer a fix\n (e.g. set `currency` to `EUR`, drop the duplicate allowance line); UIs\n can then offer the user a one-click apply.",
+      "type": "object",
+      "properties": {
+        "summary": {
+          "description": "Short human-readable summary.",
+          "type": "string"
+        },
+        "patch": {
+          "description": "Optional patch body — JSON Patch (RFC 6902) for JSON Pointer\n locations, XSLT for XPath locations. Format is owned by the\n consuming UI; this crate only stores the bytes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "summary"
+      ]
+    },
+    "Citation": {
+      "description": "Authoritative citation for the rule.",
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "Source document (e.g. `EN 16931`, `Peppol BIS 3.0`, `XRechnung 3.0`).",
+          "type": "string"
+        },
+        "section": {
+          "description": "Section identifier inside the source (e.g. `BR-01`, `§5.2`).",
+          "type": "string"
+        },
+        "url": {
+          "description": "Optional URL that resolves to the cited section online.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "source",
+        "section"
+      ]
+    },
+    "ValidationTrace": {
+      "description": "Optional trace context owned by the T-032a extension.\n\n Carries the backend identifier (`rust-native`, `jvm:kosit`, …), the\n trace identifier the backend assigned, and any backend-specific\n debug fields. The schema deliberately leaves the inner shape opaque so\n new backends can ship without modifying this crate.",
+      "type": "object",
+      "properties": {
+        "backend": {
+          "description": "Backend identifier, e.g. `rust-native`, `jvm:kosit`, `rest:official`,\n `partner`, `cli:invoicekit`, `none`.",
+          "type": "string"
+        },
+        "trace_id": {
+          "description": "Trace identifier emitted by the backend; correlated by the\n `invoicekit-reconcile` outbox.",
+          "type": "string"
+        },
+        "details": {
+          "description": "Backend-specific debug payload. Schema is opaque to this crate;\n the trace consumer (typically the support bundle redactor) owns\n any further structure."
+        }
+      },
+      "required": [
+        "backend",
+        "trace_id"
+      ]
+    }
+  }
+}

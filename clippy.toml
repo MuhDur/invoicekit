@@ -25,5 +25,13 @@ doc-valid-idents = [
   "OpenAPI",
   "WebAssembly",
   "WORM",
+  "KoSIT",
+  "phive",
+  "Saxon",
+  "VeriFactu",
+  "XPath",
+  "XSLT",
+  "veraPDF",
+  "JSON-Patch",
   ".."
 ]
