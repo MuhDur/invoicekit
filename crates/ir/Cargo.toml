@@ -14,5 +14,11 @@ publish = false
 name = "invoicekit_ir"
 path = "src/lib.rs"
 
+[dependencies]
+rust_decimal = { version = "1", default-features = false, features = ["serde-with-str", "std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
+
 [lints]
 workspace = true
