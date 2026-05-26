@@ -4,9 +4,13 @@
 //! `invoicekit-render-pdf` — InvoiceKit workspace member.
 //!
 //! This crate owns the deterministic Typst rendering path. It currently exposes
-//! the smallest useful surface: compile an in-memory Typst template using only
-//! embedded Typst fonts and export PDF bytes with a stable identifier and fixed
-//! timestamp.
+//! the smallest useful public surface: render the built-in T-050 smoke invoice
+//! using only embedded Typst fonts and export PDF bytes with a stable identifier
+//! and fixed timestamp.
+//!
+//! The internal Typst source renderer is intentionally not public. Typst source
+//! execution is a trusted-template operation, not a sandbox for user-authored
+//! templates; T-051 owns the public template trust boundary.
 
 use std::path::PathBuf;
 
@@ -65,56 +69,23 @@ pub const HELLO_WORLD_INVOICE_TEMPLATE: &str = r#"
 Total due: *EUR 1.00*
 "#;
 
-/// PDF conformance mode requested from Typst's PDF exporter.
-///
-/// InvoiceKit still verifies PDF/A-3 with veraPDF in T-052. This enum selects
-/// the mode Typst should attempt to emit; it is not a replacement for reference
-/// conformance verification.
-///
-/// # Examples
-///
-/// ```
-/// let request = invoicekit_render_pdf::RenderRequest::new("#set page(width: 10mm, height: 10mm)\nHi", "example")
-///     .with_profile(invoicekit_render_pdf::PdfProfile::Pdf17);
-/// assert_eq!(request.profile(), invoicekit_render_pdf::PdfProfile::Pdf17);
-/// ```
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum PdfProfile {
-    /// Ordinary PDF 1.7 output.
+enum PdfProfile {
+    #[cfg(test)]
     Pdf17,
-    /// PDF/A-3b output as emitted by Typst.
     PdfA3b,
 }
 
-/// A request to render an in-memory Typst source to PDF bytes.
-///
-/// # Examples
-///
-/// ```
-/// let request = invoicekit_render_pdf::RenderRequest::new("Hello", "hello");
-/// assert_eq!(request.stable_id(), "hello");
-/// ```
 #[derive(Debug, Clone, Copy)]
-pub struct RenderRequest<'a> {
+struct RenderRequest<'a> {
     source: &'a str,
     stable_id: &'a str,
     profile: PdfProfile,
 }
 
 impl<'a> RenderRequest<'a> {
-    /// Creates a render request using the default PDF/A-3b profile.
-    ///
-    /// The `stable_id` should remain identical for identical logical documents;
-    /// Typst hashes it into the PDF document identifier.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let request = invoicekit_render_pdf::RenderRequest::new("Hello", "invoice-1");
-    /// assert_eq!(request.profile(), invoicekit_render_pdf::PdfProfile::PdfA3b);
-    /// ```
     #[must_use]
-    pub const fn new(source: &'a str, stable_id: &'a str) -> Self {
+    const fn new(source: &'a str, stable_id: &'a str) -> Self {
         Self {
             source,
             stable_id,
@@ -122,58 +93,11 @@ impl<'a> RenderRequest<'a> {
         }
     }
 
-    /// Selects a different Typst PDF export profile.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let request = invoicekit_render_pdf::RenderRequest::new("Hello", "invoice-1")
-    ///     .with_profile(invoicekit_render_pdf::PdfProfile::Pdf17);
-    /// assert_eq!(request.profile(), invoicekit_render_pdf::PdfProfile::Pdf17);
-    /// ```
     #[must_use]
-    pub const fn with_profile(mut self, profile: PdfProfile) -> Self {
+    #[cfg(test)]
+    const fn with_profile(mut self, profile: PdfProfile) -> Self {
         self.profile = profile;
         self
-    }
-
-    /// Returns the Typst source that will be rendered.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let request = invoicekit_render_pdf::RenderRequest::new("Hello", "invoice-1");
-    /// assert_eq!(request.source(), "Hello");
-    /// ```
-    #[must_use]
-    pub const fn source(&self) -> &'a str {
-        self.source
-    }
-
-    /// Returns the stable document identifier used for PDF export.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let request = invoicekit_render_pdf::RenderRequest::new("Hello", "invoice-1");
-    /// assert_eq!(request.stable_id(), "invoice-1");
-    /// ```
-    #[must_use]
-    pub const fn stable_id(&self) -> &'a str {
-        self.stable_id
-    }
-
-    /// Returns the requested PDF profile.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let request = invoicekit_render_pdf::RenderRequest::new("Hello", "invoice-1");
-    /// assert_eq!(request.profile(), invoicekit_render_pdf::PdfProfile::PdfA3b);
-    /// ```
-    #[must_use]
-    pub const fn profile(&self) -> PdfProfile {
-        self.profile
     }
 }
 
@@ -190,11 +114,11 @@ pub enum RenderPdfError {
     },
     /// The requested PDF profile is not supported by the Typst exporter.
     #[error(
-        "PDF profile {profile:?} is not supported by Typst: {message}. Hint: choose a compatible PDF profile or add the missing renderer support before enabling this profile."
+        "PDF profile {profile} is not supported by Typst: {message}. Hint: choose a compatible PDF profile or add the missing renderer support before enabling this profile."
     )]
     Profile {
         /// Requested profile.
-        profile: PdfProfile,
+        profile: &'static str,
         /// Typst profile error.
         message: String,
     },
@@ -228,35 +152,15 @@ pub enum RenderPdfError {
 /// fixed deterministic timestamp cannot be constructed, or Typst cannot export
 /// the compiled document to PDF bytes.
 pub fn render_hello_world_invoice() -> Result<Vec<u8>, RenderPdfError> {
-    render_typst_pdf(RenderRequest::new(
+    render_trusted_typst_pdf(RenderRequest::new(
         HELLO_WORLD_INVOICE_TEMPLATE,
         "invoicekit:t-050:hello-world",
     ))
 }
 
-/// Renders an in-memory Typst source to PDF bytes.
-///
-/// The renderer does not read templates from disk and does not load system
-/// fonts. This keeps the first Typst integration deterministic and reviewable;
-/// richer template loading belongs in T-051.
-///
-/// # Examples
-///
-/// ```
-/// let request = invoicekit_render_pdf::RenderRequest::new(
-///     "#set page(width: 30mm, height: 20mm)\nHello",
-///     "example",
-/// ).with_profile(invoicekit_render_pdf::PdfProfile::Pdf17);
-/// let pdf = invoicekit_render_pdf::render_typst_pdf(request).unwrap();
-/// assert!(pdf.starts_with(b"%PDF-"));
-/// ```
-///
-/// # Errors
-///
-/// Returns [`RenderPdfError`] when Typst rejects the source, when deterministic
-/// PDF metadata cannot be constructed, or when PDF export fails for the selected
-/// profile.
-pub fn render_typst_pdf(request: RenderRequest<'_>) -> Result<Vec<u8>, RenderPdfError> {
+// Internal trusted-template renderer. Do not expose this as a public API for
+// user-authored Typst until T-051 defines the template trust boundary.
+fn render_trusted_typst_pdf(request: RenderRequest<'_>) -> Result<Vec<u8>, RenderPdfError> {
     let world = InMemoryWorld::new(request.source);
     let warned = typst::compile::<PagedDocument>(&world);
     let document = warned
@@ -360,14 +264,25 @@ impl World for InMemoryWorld {
 
 fn pdf_standards(profile: PdfProfile) -> Result<PdfStandards, RenderPdfError> {
     let standards = match profile {
+        #[cfg(test)]
         PdfProfile::Pdf17 => &[PdfStandard::V_1_7],
         PdfProfile::PdfA3b => &[PdfStandard::A_3b],
     };
 
     PdfStandards::new(standards).map_err(|message| RenderPdfError::Profile {
-        profile,
+        profile: profile.name(),
         message: message.to_string(),
     })
+}
+
+impl PdfProfile {
+    const fn name(self) -> &'static str {
+        match self {
+            #[cfg(test)]
+            Self::Pdf17 => "PDF 1.7",
+            Self::PdfA3b => "PDF/A-3b",
+        }
+    }
 }
 
 fn fixed_datetime() -> Result<Datetime, RenderPdfError> {
@@ -390,8 +305,8 @@ fn join_diagnostics(diagnostics: &[SourceDiagnostic]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        crate_name, render_hello_world_invoice, render_typst_pdf, PdfProfile, RenderPdfError,
-        RenderRequest,
+        crate_name, render_hello_world_invoice, render_trusted_typst_pdf, PdfProfile,
+        RenderPdfError, RenderRequest,
     };
 
     #[test]
@@ -452,7 +367,7 @@ mod tests {
         )
         .with_profile(PdfProfile::Pdf17);
 
-        let pdf = render_typst_pdf(request).expect("PDF 1.7 render should succeed");
+        let pdf = render_trusted_typst_pdf(request).expect("PDF 1.7 render should succeed");
 
         assert!(pdf.starts_with(b"%PDF-"));
     }
@@ -460,7 +375,7 @@ mod tests {
     #[test]
     fn invalid_template_returns_typed_compile_error() {
         let request = RenderRequest::new("#let broken = )", "invoicekit:test:broken");
-        let error = render_typst_pdf(request).expect_err("invalid Typst should fail");
+        let error = render_trusted_typst_pdf(request).expect_err("invalid Typst should fail");
 
         assert!(matches!(error, RenderPdfError::Compile { .. }));
         assert!(error.to_string().contains("Hint:"));
@@ -469,7 +384,7 @@ mod tests {
     #[test]
     fn imported_files_are_rejected_as_missing() {
         let request = RenderRequest::new("#read(\"/etc/passwd\")", "invoicekit:test:read");
-        let error = render_typst_pdf(request).expect_err("file access should fail");
+        let error = render_trusted_typst_pdf(request).expect_err("file access should fail");
 
         assert!(matches!(error, RenderPdfError::Compile { .. }));
     }
@@ -480,7 +395,7 @@ mod tests {
             "#set page(width: \"wide\")\nHello",
             "invoicekit:test:invalid-page",
         );
-        let error = render_typst_pdf(request).expect_err("invalid page width should fail");
+        let error = render_trusted_typst_pdf(request).expect_err("invalid page width should fail");
 
         assert!(matches!(error, RenderPdfError::Compile { .. }));
     }
