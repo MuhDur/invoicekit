@@ -29,13 +29,21 @@
 //!   what `serde_json` already enforces.
 //! * It does not transcode strings — the input must already be valid UTF-8
 //!   (which every `&str` is).
-//! * It does not deduplicate object members; duplicate keys are a
-//!   `serde_json` input violation that this crate surfaces as an error.
+//! * It does not deduplicate object members; [`canonicalize`] rejects
+//!   duplicate object names before the parsed [`Value`] can collapse them.
+//!   [`canonicalize_value`] accepts an already-parsed [`Value`], where
+//!   duplicate object names are no longer representable.
 
-use std::fmt::Write as _;
+use std::collections::BTreeSet;
+use std::fmt::{self, Write as _};
 
+use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::Value;
 use thiserror::Error;
+
+const DUPLICATE_MEMBER_ERROR_PREFIX: &str = "invoicekit duplicate object member: ";
+const MAX_SAFE_INTEGER: i128 = 9_007_199_254_740_991;
+const MIN_SAFE_INTEGER: i128 = -MAX_SAFE_INTEGER;
 
 /// Errors returned by [`canonicalize`] and [`canonicalize_value`].
 #[derive(Debug, Error)]
@@ -43,6 +51,20 @@ pub enum CanonicalizeError {
     /// The input was not valid JSON.
     #[error("input was not valid JSON: {0}")]
     InvalidJson(#[from] serde_json::Error),
+    /// The input contained the same object member name more than once.
+    ///
+    /// RFC 8785 builds on I-JSON, which forbids duplicate object names.
+    /// Rejecting them before `serde_json::Value` construction prevents
+    /// silent last-write-wins data loss in signed payloads.
+    #[error("duplicate object member `{0}` is not valid RFC 8785/I-JSON input")]
+    DuplicateObjectMember(String),
+    /// An integer was outside the I-JSON interoperable safe range.
+    ///
+    /// RFC 8785 inherits I-JSON's IEEE-754 double-precision number domain.
+    /// JSON integer values are interoperable only in
+    /// `[-9007199254740991, 9007199254740991]`.
+    #[error("integer `{0}` is outside the RFC 8785/I-JSON safe range")]
+    UnsafeInteger(String),
     /// A JSON number could not be represented under RFC 8785 number rules.
     ///
     /// RFC 8785 §3.2.2.4 forbids serializing `NaN`, `+Infinity`, and
@@ -58,8 +80,11 @@ pub enum CanonicalizeError {
 /// # Errors
 ///
 /// Returns [`CanonicalizeError::InvalidJson`] when the input does not parse
-/// as JSON, or [`CanonicalizeError::NonFiniteNumber`] when the input
-/// contains a non-finite number.
+/// as JSON, [`CanonicalizeError::DuplicateObjectMember`] when an object
+/// repeats a member name, [`CanonicalizeError::UnsafeInteger`] when an
+/// integer is outside the I-JSON safe range, or
+/// [`CanonicalizeError::NonFiniteNumber`] when the input contains a
+/// non-finite number.
 ///
 /// # Examples
 ///
@@ -69,7 +94,7 @@ pub enum CanonicalizeError {
 /// assert_eq!(canonical, r#"{"a":1,"b":2}"#);
 /// ```
 pub fn canonicalize(input: &str) -> Result<String, CanonicalizeError> {
-    let value: Value = serde_json::from_str(input)?;
+    let value = parse_value_rejecting_duplicate_members(input)?;
     canonicalize_value(&value)
 }
 
@@ -77,8 +102,9 @@ pub fn canonicalize(input: &str) -> Result<String, CanonicalizeError> {
 ///
 /// # Errors
 ///
-/// Returns [`CanonicalizeError::NonFiniteNumber`] when the value contains a
-/// non-finite number.
+/// Returns [`CanonicalizeError::UnsafeInteger`] when an integer is outside
+/// the I-JSON safe range, or [`CanonicalizeError::NonFiniteNumber`] when
+/// the value contains a non-finite number.
 ///
 /// # Examples
 ///
@@ -92,6 +118,144 @@ pub fn canonicalize_value(value: &Value) -> Result<String, CanonicalizeError> {
     let mut out = String::new();
     write_value(value, &mut out)?;
     Ok(out)
+}
+
+fn parse_value_rejecting_duplicate_members(input: &str) -> Result<Value, CanonicalizeError> {
+    match serde_json::from_str::<CheckedValue>(input) {
+        Ok(CheckedValue(value)) => Ok(value),
+        Err(error) => {
+            if let Some(member) = duplicate_member_from_error(&error) {
+                return Err(CanonicalizeError::DuplicateObjectMember(member));
+            }
+            Err(CanonicalizeError::InvalidJson(error))
+        }
+    }
+}
+
+fn duplicate_member_from_error(error: &serde_json::Error) -> Option<String> {
+    let message = error.to_string();
+    let payload = message.strip_prefix(DUPLICATE_MEMBER_ERROR_PREFIX)?;
+    let payload = payload
+        .rsplit_once(" at line ")
+        .map_or(payload, |(payload, _)| payload);
+    serde_json::from_str(payload).ok()
+}
+
+fn duplicate_member_error<E>(member: &str) -> E
+where
+    E: de::Error,
+{
+    let encoded = serde_json::to_string(member).expect("serializing a string is infallible");
+    E::custom(format!("{DUPLICATE_MEMBER_ERROR_PREFIX}{encoded}"))
+}
+
+struct CheckedValue(Value);
+
+impl<'de> Deserialize<'de> for CheckedValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(CheckedValueVisitor).map(Self)
+    }
+}
+
+struct CheckedValueVisitor;
+
+impl<'de> Visitor<'de> for CheckedValueVisitor {
+    type Value = Value;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a JSON value without duplicate object member names")
+    }
+
+    fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+        Ok(Value::Bool(value))
+    }
+
+    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+        Ok(Value::Number(value.into()))
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+        Ok(Value::Number(value.into()))
+    }
+
+    fn visit_i128<E>(self, value: i128) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let value = i64::try_from(value).map_err(|_| E::custom("integer does not fit i64"))?;
+        Ok(Value::Number(value.into()))
+    }
+
+    fn visit_u128<E>(self, value: u128) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let value = u64::try_from(value).map_err(|_| E::custom("integer does not fit u64"))?;
+        Ok(Value::Number(value.into()))
+    }
+
+    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let number = serde_json::Number::from_f64(value)
+            .ok_or_else(|| E::custom("non-finite JSON number"))?;
+        Ok(Value::Number(number))
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> {
+        Ok(Value::String(value.to_owned()))
+    }
+
+    fn visit_string<E>(self, value: String) -> Result<Self::Value, E> {
+        Ok(Value::String(value))
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let CheckedValue(value) = CheckedValue::deserialize(deserializer)?;
+        Ok(value)
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let mut items = Vec::new();
+        while let Some(CheckedValue(value)) = seq.next_element::<CheckedValue>()? {
+            items.push(value);
+        }
+        Ok(Value::Array(items))
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut object = serde_json::Map::new();
+        let mut seen = BTreeSet::new();
+        while let Some(member) = map.next_key::<String>()? {
+            if !seen.insert(member.clone()) {
+                return Err(duplicate_member_error(&member));
+            }
+            let CheckedValue(value) = map.next_value::<CheckedValue>()?;
+            object.insert(member, value);
+        }
+        Ok(Value::Object(object))
+    }
 }
 
 fn write_value(value: &Value, out: &mut String) -> Result<(), CanonicalizeError> {
@@ -132,13 +296,13 @@ fn write_value(value: &Value, out: &mut String) -> Result<(), CanonicalizeError>
 
 fn write_number(n: &serde_json::Number, out: &mut String) -> Result<(), CanonicalizeError> {
     if let Some(i) = n.as_i64() {
-        // Integers always serialize as their decimal form; ECMAScript's
-        // Number.prototype.toString agrees with the natural integer form
-        // for any value representable as f64 without loss.
+        ensure_safe_integer(i128::from(i), n)?;
         write!(out, "{i}").expect("write to String is infallible");
         return Ok(());
     }
     if let Some(u) = n.as_u64() {
+        let value = i128::from(u);
+        ensure_safe_integer(value, n)?;
         write!(out, "{u}").expect("write to String is infallible");
         return Ok(());
     }
@@ -152,9 +316,25 @@ fn write_number(n: &serde_json::Number, out: &mut String) -> Result<(), Canonica
         out.push_str(s);
         return Ok(());
     }
-    // `serde_json::Number` covers all numeric variants; reaching here means
-    // the upstream library introduced a new variant we have not learned.
-    Err(CanonicalizeError::NonFiniteNumber(n.to_string()))
+    let rendered = n.to_string();
+    if rendered
+        .bytes()
+        .all(|byte| byte == b'-' || byte.is_ascii_digit())
+    {
+        return Err(CanonicalizeError::UnsafeInteger(rendered));
+    }
+    Err(CanonicalizeError::NonFiniteNumber(rendered))
+}
+
+fn ensure_safe_integer(
+    value: i128,
+    original: &serde_json::Number,
+) -> Result<(), CanonicalizeError> {
+    if (MIN_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(&value) {
+        Ok(())
+    } else {
+        Err(CanonicalizeError::UnsafeInteger(original.to_string()))
+    }
 }
 
 fn write_string(s: &str, out: &mut String) {
@@ -317,6 +497,64 @@ mod tests {
     fn invalid_json_is_rejected() {
         let err = canonicalize("not json").unwrap_err();
         assert!(matches!(err, CanonicalizeError::InvalidJson(_)));
+    }
+
+    fn duplicate_member_name(error: CanonicalizeError) -> Option<String> {
+        match error {
+            CanonicalizeError::DuplicateObjectMember(member) => Some(member),
+            _ => None,
+        }
+    }
+
+    /// Duplicate object members are rejected before `Value` can collapse them.
+    #[test]
+    fn duplicate_object_members_are_rejected() {
+        let err = canonicalize(r#"{"a":1,"a":2}"#).unwrap_err();
+        assert_eq!(duplicate_member_name(err).as_deref(), Some("a"));
+    }
+
+    /// Duplicate detection recurses through nested objects and arrays.
+    #[test]
+    fn nested_duplicate_object_members_are_rejected() {
+        let err = canonicalize(r#"{"outer":[{"b":1,"b":2}]}"#).unwrap_err();
+        assert_eq!(duplicate_member_name(err).as_deref(), Some("b"));
+    }
+
+    /// I-JSON's interoperable integer range ends at 2^53 - 1.
+    #[test]
+    fn safe_integer_boundaries_are_accepted() {
+        assert_eq!(
+            canonicalize("9007199254740991").unwrap(),
+            "9007199254740991"
+        );
+        assert_eq!(
+            canonicalize("-9007199254740991").unwrap(),
+            "-9007199254740991"
+        );
+    }
+
+    /// Integers outside the I-JSON safe range are rejected from text.
+    #[test]
+    fn unsafe_integer_text_is_rejected() {
+        let err = canonicalize("9007199254740992").unwrap_err();
+        assert!(
+            matches!(err, CanonicalizeError::UnsafeInteger(value) if value == "9007199254740992")
+        );
+
+        let err = canonicalize("-9007199254740992").unwrap_err();
+        assert!(
+            matches!(err, CanonicalizeError::UnsafeInteger(value) if value == "-9007199254740992")
+        );
+    }
+
+    /// In-memory `Value` inputs use the same integer-domain guard.
+    #[test]
+    fn unsafe_integer_value_is_rejected() {
+        let value = Value::Number(serde_json::Number::from(9_007_199_254_740_992_u64));
+        let err = canonicalize_value(&value).unwrap_err();
+        assert!(
+            matches!(err, CanonicalizeError::UnsafeInteger(value) if value == "9007199254740992")
+        );
     }
 
     /// Determinism: canonicalize twice on the same input -> identical bytes.
