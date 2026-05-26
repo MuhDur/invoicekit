@@ -666,6 +666,13 @@ version = "0.0.0"
 [[package]]
 name = "invoicekit-reconcile"
 version = "0.0.0"
+dependencies = [
+ "futures-task",
+ "invoicekit-ir",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
 
 [[package]]
 name = "invoicekit-render-pdf"
