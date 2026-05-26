@@ -14,5 +14,16 @@ publish = false
 name = "invoicekit_engine"
 path = "src/lib.rs"
 
+[dependencies]
+invoicekit-canonical = { path = "../canonical", version = "0.0.0" }
+invoicekit-ir = { path = "../ir", version = "0.0.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+proptest = "1"
+
 [lints]
 workspace = true
