@@ -30,10 +30,41 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-cyclonedx (CycloneDX SBOM generator)
+        run: cargo install --locked cargo-cyclonedx
+      - name: Install cosign (sigstore keyless signer)
+        uses: sigstore/cosign-installer@v3
       - name: Build release artifacts
         run: cargo build --release --workspace --locked --target ${{ matrix.target }}
+      - name: Generate CycloneDX SBOM
+        run: |
+          mkdir -p target/sbom
+          cargo cyclonedx --format json --output-pattern bom --output-cdx
+          # cargo-cyclonedx drops a bom.json per workspace member next to each
+          # Cargo.toml; collect them under target/sbom for the release upload.
+          find . -name 'bom.json' -not -path './target/*' -print0 \
+            | tar --null --files-from - -cf target/sbom/invoicekit.cdx.tar
+      - name: Sign release artifacts with cosign (keyless OIDC)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          for bin in target/${{ matrix.target }}/release/invoicekit*; do
+            if [ -f "$bin" ] && [ ! -d "$bin" ]; then
+              cosign sign-blob --yes \
+                --bundle "${bin}.cosign.bundle" \
+                "${bin}"
+            fi
+          done
       - name: Generate provenance attestation
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: target/${{ matrix.target }}/release/invoicekit*
         continue-on-error: true
+      - name: Attach SBOM + signed artifacts to GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/${{ matrix.target }}/release/invoicekit*
+            target/${{ matrix.target }}/release/invoicekit*.cosign.bundle
+            target/sbom/invoicekit.cdx.tar

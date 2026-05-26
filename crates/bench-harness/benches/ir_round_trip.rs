@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The InvoiceKit Authors
+
 //! Tracked operation: `ir-round-trip`.
 //!
 //! Measures the cost of decoding a representative commercial document from a
