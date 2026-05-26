@@ -1495,6 +1495,7 @@ version = "0.0.0"
 dependencies = [
  "criterion",
  "invoicekit-canonical",
+ "invoicekit-format-cii",
  "invoicekit-format-ubl",
  "invoicekit-ir",
  "rust_decimal",
@@ -1608,6 +1609,20 @@ dependencies = [
  "invoicekit-engine",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "invoicekit-format-cii"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-canonical",
+ "invoicekit-ir",
+ "proptest",
+ "quick-xml 0.40.1",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

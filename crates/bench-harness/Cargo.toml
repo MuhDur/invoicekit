@@ -23,6 +23,7 @@ criterion = { version = "0.5", default-features = false, features = ["cargo_benc
 # `version` is required alongside `path` so cargo-deny does not flag this as a
 # wildcard dependency in the workspace bans check.
 invoicekit-canonical = { path = "../canonical", version = "0.0.0" }
+invoicekit-format-cii = { path = "../format-cii", version = "0.0.0" }
 invoicekit-format-ubl = { path = "../format-ubl", version = "0.0.0" }
 invoicekit-ir = { path = "../ir", version = "0.0.0" }
 rust_decimal = "1"
@@ -38,6 +39,10 @@ harness = false
 
 [[bench]]
 name = "ubl_parse"
+harness = false
+
+[[bench]]
+name = "cii_parse"
 harness = false
 
 [lints]
