@@ -89,6 +89,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test -p invoicekit-reconcile --test outbox_migrations --locked
 
+  validator-sidecars:
+    name: validator sidecar images
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_BUILDKIT: 1
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f services/validator-kosit/Dockerfile -t invoicekit/validator-kosit:ci .
+      - run: docker build -f services/validator-phive/Dockerfile -t invoicekit/validator-phive:ci .
+      - run: docker build -f services/validator-saxon/Dockerfile -t invoicekit/validator-saxon:ci .
+      - run: python3 services/validator-smoke.py
+
   abi-golden:
     name: engine ABI golden suite
     runs-on: ubuntu-latest
