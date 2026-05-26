@@ -7,7 +7,7 @@
 
 fn main() {
     let schema = invoicekit_validate::validation_result_schema();
-    let pretty = serde_json::to_string_pretty(&schema)
-        .expect("schemars output is always serializable");
+    let pretty =
+        serde_json::to_string_pretty(&schema).expect("schemars output is always serializable");
     println!("{pretty}");
 }
