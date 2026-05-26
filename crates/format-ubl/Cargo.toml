@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+[package]
+name = "invoicekit-format-ubl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "InvoiceKit UBL 2.1 parser and serializer for the core invoice IR."
+publish = false
+
+[lib]
+name = "invoicekit_format_ubl"
+path = "src/lib.rs"
+
+[dependencies]
+invoicekit-canonical = { path = "../canonical", version = "0.0.0" }
+invoicekit-ir = { path = "../ir", version = "0.0.0" }
+quick-xml = "0.40.1"
+rust_decimal = "1"
+serde = "1"
+serde_json = "1"
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest = "1"
+
+[lints]
+workspace = true

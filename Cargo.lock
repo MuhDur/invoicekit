@@ -539,7 +539,9 @@ version = "0.0.0"
 dependencies = [
  "criterion",
  "invoicekit-canonical",
+ "invoicekit-format-ubl",
  "invoicekit-ir",
+ "rust_decimal",
  "serde_json",
 ]
 
@@ -617,6 +619,20 @@ version = "0.0.0"
 [[package]]
 name = "invoicekit-ffi"
 version = "0.0.0"
+
+[[package]]
+name = "invoicekit-format-ubl"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-canonical",
+ "invoicekit-ir",
+ "proptest",
+ "quick-xml",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
 
 [[package]]
 name = "invoicekit-intake-ocr"

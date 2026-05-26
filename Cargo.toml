@@ -11,6 +11,7 @@ members = [
   "crates/rulepack",
   "crates/ir",
   "crates/canonical",
+  "crates/format-ubl",
   "crates/validate",
   "crates/validate-ubl-cii",
   "crates/render-pdf",
