@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The InvoiceKit Authors
+
 //! `invoicekit-ir` - layered invoice data model.
 //!
 //! The IR is the Rust source of truth for the InvoiceKit commercial document
