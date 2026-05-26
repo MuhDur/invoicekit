@@ -9,7 +9,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit workspace member: invoicekit-canonical — pure-Rust RFC 8785 JSON Canonicalization Scheme."
+description = "InvoiceKit workspace member: invoicekit-canonical — byte-stable JSON and XML canonicalization."
 publish = false
 
 [lib]
@@ -17,6 +17,7 @@ name = "invoicekit_canonical"
 path = "src/lib.rs"
 
 [dependencies]
+quick-xml = "0.40.1"
 ryu-js = "1"
 serde = "1"
 serde_json = { version = "1", features = ["preserve_order"] }

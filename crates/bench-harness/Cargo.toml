@@ -22,11 +22,16 @@ bench = false
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support", "html_reports"] }
 # `version` is required alongside `path` so cargo-deny does not flag this as a
 # wildcard dependency in the workspace bans check.
+invoicekit-canonical = { path = "../canonical", version = "0.0.0" }
 invoicekit-ir = { path = "../ir", version = "0.0.0" }
 serde_json = "1"
 
 [[bench]]
 name = "ir_round_trip"
+harness = false
+
+[[bench]]
+name = "xml_canonicalization"
 harness = false
 
 [lints]

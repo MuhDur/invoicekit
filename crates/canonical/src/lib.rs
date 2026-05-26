@@ -1,13 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The InvoiceKit Authors
-//! `invoicekit-canonical` — RFC 8785 JSON Canonicalization Scheme.
+//! `invoicekit-canonical` — byte-stable JSON and XML canonicalization.
 //!
 //! Every InvoiceKit operation that signs, hashes, or audits a JSON document
 //! first canonicalizes it through this crate. The output is a byte-stable
 //! UTF-8 string that two independent implementations should produce
 //! bit-identically given the same input.
 //!
-//! ## What this crate guarantees
+//! XML invoices use [`canonicalize_xml`], which implements the InvoiceKit
+//! no-comments XML Canonicalization 1.1 profile plus the invoice overlay from
+//! `plans/PLAN.md`: deterministic namespace prefixes for UBL/CII families,
+//! namespace declarations and attributes in canonical order, normalized text
+//! escaping, expanded empty elements, and no inter-element formatting whitespace.
+//!
+//! ## What this crate guarantees for JSON
 //!
 //! * Object members are emitted in lexicographic order by UTF-16 code unit
 //!   sequence of the member name, exactly as RFC 8785 §3.2.3 specifies.
@@ -34,9 +40,11 @@
 //!   [`canonicalize_value`] accepts an already-parsed [`Value`], where
 //!   duplicate object names are no longer representable.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
 
+use quick_xml::events::{attributes::AttrError, BytesStart, Event};
+use quick_xml::{Reader, XmlVersion};
 use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::Value;
 use thiserror::Error;
@@ -44,6 +52,25 @@ use thiserror::Error;
 const DUPLICATE_MEMBER_ERROR_PREFIX: &str = "invoicekit duplicate object member: ";
 const MAX_SAFE_INTEGER: i128 = 9_007_199_254_740_991;
 const MIN_SAFE_INTEGER: i128 = -MAX_SAFE_INTEGER;
+const XML_NAMESPACE_URI: &str = "http://www.w3.org/XML/1998/namespace";
+const XMLNS_NAMESPACE_URI: &str = "http://www.w3.org/2000/xmlns/";
+const UBL_INVOICE_NAMESPACE_URI: &str = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2";
+const UBL_CAC_NAMESPACE_URI: &str =
+    "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2";
+const UBL_CBC_NAMESPACE_URI: &str =
+    "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2";
+const UBL_EXT_NAMESPACE_URI: &str =
+    "urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2";
+const UBL_QDT_NAMESPACE_URI: &str =
+    "urn:oasis:names:specification:ubl:schema:xsd:QualifiedDataTypes-2";
+const UBL_UDT_NAMESPACE_URI: &str =
+    "urn:oasis:names:specification:ubl:schema:xsd:UnqualifiedDataTypes-2";
+const CII_RSM_NAMESPACE_URI: &str = "urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100";
+const CII_RAM_NAMESPACE_URI: &str =
+    "urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100";
+const CII_UDT_NAMESPACE_URI: &str = "urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100";
+const XMLDSIG_NAMESPACE_URI: &str = "http://www.w3.org/2000/09/xmldsig#";
+const XADES_NAMESPACE_URI: &str = "http://uri.etsi.org/01903/v1.3.2#";
 
 /// Errors returned by [`canonicalize`] and [`canonicalize_value`].
 #[derive(Debug, Error)]
@@ -73,6 +100,41 @@ pub enum CanonicalizeError {
     /// [`Value`]s constructed by other code this error surfaces them.
     #[error("number `{0}` is not representable under RFC 8785 (NaN/Infinity)")]
     NonFiniteNumber(String),
+}
+
+/// Errors returned by [`canonicalize_xml`].
+#[derive(Debug, Error)]
+pub enum XmlCanonicalizeError {
+    /// The input was not well-formed XML.
+    #[error("input was not valid XML: {0}")]
+    InvalidXml(#[from] quick_xml::Error),
+    /// An XML attribute could not be parsed.
+    #[error("invalid XML attribute: {0}")]
+    InvalidAttribute(#[from] AttrError),
+    /// Text or attribute content could not be decoded as UTF-8 XML content.
+    #[error("invalid XML encoding: {0}")]
+    InvalidEncoding(#[from] quick_xml::encoding::EncodingError),
+    /// A tag or attribute name was not valid UTF-8.
+    #[error("invalid XML name `{0}`")]
+    InvalidName(String),
+    /// The document referenced a namespace prefix that is not in scope.
+    #[error("XML namespace prefix `{0}` is not declared")]
+    UnboundPrefix(String),
+    /// Canonical prefix overlay would create two attributes with the same name.
+    #[error("duplicate canonical XML attribute `{0}`")]
+    DuplicateAttribute(String),
+    /// The XML document ended before a start tag was closed.
+    #[error("XML document ended with unclosed element `{0}`")]
+    UnclosedElement(String),
+    /// The XML document contained an end tag without a matching start tag.
+    #[error("unexpected XML end tag `{0}`")]
+    UnexpectedEndTag(String),
+    /// The XML document contained a DTD, which InvoiceKit canonicalization rejects.
+    #[error("XML DTD declarations are not supported in invoice canonicalization")]
+    UnsupportedDoctype,
+    /// The XML document contained an entity reference outside the predefined XML set.
+    #[error("XML entity reference `&{0};` is not supported")]
+    UnsupportedEntityReference(String),
 }
 
 /// Canonicalize a JSON string into its RFC 8785 form.
@@ -118,6 +180,431 @@ pub fn canonicalize_value(value: &Value) -> Result<String, CanonicalizeError> {
     let mut out = String::new();
     write_value(value, &mut out)?;
     Ok(out)
+}
+
+/// Canonicalize XML using InvoiceKit's no-comments XML C14N 1.1 invoice profile.
+///
+/// The profile is deterministic over semantically equivalent invoice XML:
+/// declarations and comments are omitted, empty elements are expanded, namespace
+/// declarations and attributes are sorted, UBL/CII namespace prefixes are
+/// normalized to stable invoice prefixes, and whitespace-only text nodes between
+/// elements are removed.
+///
+/// # Errors
+///
+/// Returns [`XmlCanonicalizeError`] when the input is not well-formed XML, uses
+/// an undeclared namespace prefix, contains unsupported DTD or custom entity
+/// references, or canonical prefix normalization would produce duplicate
+/// attribute names.
+///
+/// # Examples
+///
+/// ```
+/// let raw = r#"<Invoice xmlns:x="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"><x:AccountingSupplierParty/></Invoice>"#;
+/// let canonical = invoicekit_canonical::canonicalize_xml(raw).unwrap();
+/// assert_eq!(
+///     canonical,
+///     r#"<Invoice><cac:AccountingSupplierParty xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"></cac:AccountingSupplierParty></Invoice>"#
+/// );
+/// ```
+#[allow(clippy::too_many_lines)]
+pub fn canonicalize_xml(input: &str) -> Result<String, XmlCanonicalizeError> {
+    let mut reader = Reader::from_str(input);
+    reader.config_mut().trim_text(false);
+
+    let mut xml_version = XmlVersion::default();
+    let mut out = String::new();
+    let mut namespace_frames = vec![NamespaceFrame::root()];
+    let mut open_elements = Vec::new();
+
+    loop {
+        match reader.read_event()? {
+            Event::Start(start) => {
+                let current = namespace_frames
+                    .last()
+                    .ok_or_else(|| XmlCanonicalizeError::UnexpectedEndTag(String::new()))?;
+                let (element, frame) =
+                    write_xml_start(&reader, &start, xml_version, current, &mut out)?;
+                namespace_frames.push(frame);
+                open_elements.push(element);
+            }
+            Event::Empty(start) => {
+                let current = namespace_frames
+                    .last()
+                    .ok_or_else(|| XmlCanonicalizeError::UnexpectedEndTag(String::new()))?;
+                let (element, _) =
+                    write_xml_start(&reader, &start, xml_version, current, &mut out)?;
+                write_xml_end(&element.rendered_name, &mut out);
+            }
+            Event::End(end) => {
+                let name = end.name();
+                let end_name = decode_xml_name(name.as_ref())?.to_owned();
+                let element = open_elements
+                    .pop()
+                    .ok_or(XmlCanonicalizeError::UnexpectedEndTag(end_name))?;
+                namespace_frames.pop();
+                write_xml_end(&element.rendered_name, &mut out);
+            }
+            Event::Text(text) => {
+                let text = text.xml_content(xml_version)?;
+                write_xml_text_node(&text, &mut out);
+            }
+            Event::CData(cdata) => {
+                let text = cdata.xml_content(xml_version)?;
+                write_xml_text_node(&text, &mut out);
+            }
+            Event::GeneralRef(reference) => {
+                let reference = reference.xml_content(xml_version)?;
+                let resolved = resolve_xml_reference(&reference)?;
+                write_xml_text_node(&resolved, &mut out);
+            }
+            Event::PI(instruction) => {
+                let instruction = decode_xml_name(instruction.content())?;
+                out.push_str("<?");
+                out.push_str(instruction.trim());
+                out.push_str("?>");
+            }
+            Event::Decl(decl) => {
+                let version = decl.version()?;
+                if version.as_ref() == b"1.1" {
+                    xml_version = XmlVersion::Explicit1_1;
+                } else {
+                    xml_version = XmlVersion::Explicit1_0;
+                }
+            }
+            Event::DocType(_) => return Err(XmlCanonicalizeError::UnsupportedDoctype),
+            Event::Comment(_) => {}
+            Event::Eof => break,
+        }
+    }
+
+    if let Some(element) = open_elements.pop() {
+        return Err(XmlCanonicalizeError::UnclosedElement(element.rendered_name));
+    }
+
+    Ok(out)
+}
+
+#[derive(Clone, Debug)]
+struct NamespaceFrame {
+    input: BTreeMap<String, String>,
+    output: BTreeMap<String, String>,
+}
+
+impl NamespaceFrame {
+    fn root() -> Self {
+        let mut input = BTreeMap::new();
+        input.insert("xml".to_owned(), XML_NAMESPACE_URI.to_owned());
+        let mut output = BTreeMap::new();
+        output.insert("xml".to_owned(), XML_NAMESPACE_URI.to_owned());
+        Self { input, output }
+    }
+}
+
+#[derive(Debug)]
+struct OpenXmlElement {
+    rendered_name: String,
+}
+
+#[derive(Debug)]
+struct RawXmlAttribute {
+    prefix: String,
+    local_name: String,
+    value: String,
+}
+
+#[derive(Debug)]
+struct CanonicalXmlAttribute {
+    rendered_name: String,
+    namespace_uri: String,
+    local_name: String,
+    value: String,
+}
+
+#[allow(clippy::too_many_lines)]
+fn write_xml_start(
+    reader: &Reader<&[u8]>,
+    start: &BytesStart<'_>,
+    xml_version: XmlVersion,
+    current: &NamespaceFrame,
+    out: &mut String,
+) -> Result<(OpenXmlElement, NamespaceFrame), XmlCanonicalizeError> {
+    let mut frame = current.clone();
+    let mut raw_attributes = Vec::new();
+
+    for attr in start.attributes().with_checks(true) {
+        let attr = attr?;
+        let key = decode_xml_name(attr.key.as_ref())?;
+        let value = attr
+            .decoded_and_normalized_value(xml_version, reader.decoder())?
+            .into_owned();
+
+        if key == "xmlns" {
+            frame.input.insert(String::new(), value);
+            continue;
+        }
+        if let Some(prefix) = key.strip_prefix("xmlns:") {
+            if prefix != "xml" && prefix != "xmlns" {
+                frame.input.insert(prefix.to_owned(), value);
+            }
+            continue;
+        }
+
+        let (prefix, local_name) = split_xml_qname(key);
+        raw_attributes.push(RawXmlAttribute {
+            prefix: prefix.to_owned(),
+            local_name: local_name.to_owned(),
+            value,
+        });
+    }
+
+    let name = start.name();
+    let raw_name = decode_xml_name(name.as_ref())?;
+    let (element_prefix, element_local_name) = split_xml_qname(raw_name);
+    let element_namespace_uri = lookup_element_namespace(&frame, element_prefix)?;
+    let rendered_element_prefix = element_namespace_uri
+        .as_ref()
+        .map_or_else(String::new, |uri| {
+            preferred_invoice_prefix(uri, element_prefix, false)
+        });
+    let rendered_element_name = render_xml_qname(&rendered_element_prefix, element_local_name);
+
+    let mut namespace_declarations = BTreeMap::new();
+    if let Some(uri) = element_namespace_uri.as_deref() {
+        ensure_output_namespace(
+            &mut frame,
+            &mut namespace_declarations,
+            &rendered_element_prefix,
+            uri,
+        )?;
+    } else if frame.output.get("").is_some_and(|uri| !uri.is_empty()) {
+        namespace_declarations.insert(String::new(), String::new());
+        frame.output.remove("");
+    }
+
+    let mut rendered_attribute_names = BTreeSet::new();
+    let mut canonical_attributes = Vec::with_capacity(raw_attributes.len());
+    for attr in raw_attributes {
+        let namespace_uri = lookup_attribute_namespace(&frame, &attr.prefix)?;
+        let rendered_prefix = namespace_uri.as_ref().map_or_else(String::new, |uri| {
+            preferred_invoice_prefix(uri, &attr.prefix, true)
+        });
+        let rendered_name = render_xml_qname(&rendered_prefix, &attr.local_name);
+
+        if !rendered_attribute_names.insert(rendered_name.clone()) {
+            return Err(XmlCanonicalizeError::DuplicateAttribute(rendered_name));
+        }
+
+        if let Some(uri) = namespace_uri.as_deref() {
+            ensure_output_namespace(
+                &mut frame,
+                &mut namespace_declarations,
+                &rendered_prefix,
+                uri,
+            )?;
+        }
+
+        canonical_attributes.push(CanonicalXmlAttribute {
+            rendered_name,
+            namespace_uri: namespace_uri.unwrap_or_default(),
+            local_name: attr.local_name,
+            value: attr.value,
+        });
+    }
+
+    canonical_attributes.sort_by(|left, right| {
+        left.namespace_uri
+            .cmp(&right.namespace_uri)
+            .then_with(|| left.local_name.cmp(&right.local_name))
+            .then_with(|| left.rendered_name.cmp(&right.rendered_name))
+    });
+
+    out.push('<');
+    out.push_str(&rendered_element_name);
+    for (prefix, uri) in namespace_declarations {
+        out.push(' ');
+        if prefix.is_empty() {
+            out.push_str("xmlns");
+        } else {
+            out.push_str("xmlns:");
+            out.push_str(&prefix);
+        }
+        out.push_str("=\"");
+        write_xml_attr_value(&uri, out);
+        out.push('"');
+    }
+    for attr in canonical_attributes {
+        out.push(' ');
+        out.push_str(&attr.rendered_name);
+        out.push_str("=\"");
+        write_xml_attr_value(&attr.value, out);
+        out.push('"');
+    }
+    out.push('>');
+
+    Ok((
+        OpenXmlElement {
+            rendered_name: rendered_element_name,
+        },
+        frame,
+    ))
+}
+
+fn ensure_output_namespace(
+    frame: &mut NamespaceFrame,
+    declarations: &mut BTreeMap<String, String>,
+    prefix: &str,
+    uri: &str,
+) -> Result<(), XmlCanonicalizeError> {
+    if prefix == "xmlns" || uri == XMLNS_NAMESPACE_URI {
+        return Err(XmlCanonicalizeError::UnboundPrefix(prefix.to_owned()));
+    }
+    if prefix == "xml" || uri == XML_NAMESPACE_URI {
+        return Ok(());
+    }
+    if frame
+        .output
+        .get(prefix)
+        .is_none_or(|current| current != uri)
+    {
+        declarations.insert(prefix.to_owned(), uri.to_owned());
+        frame.output.insert(prefix.to_owned(), uri.to_owned());
+    }
+    Ok(())
+}
+
+fn lookup_element_namespace(
+    frame: &NamespaceFrame,
+    prefix: &str,
+) -> Result<Option<String>, XmlCanonicalizeError> {
+    if prefix.is_empty() {
+        return Ok(frame.input.get("").filter(|uri| !uri.is_empty()).cloned());
+    }
+    frame
+        .input
+        .get(prefix)
+        .cloned()
+        .map(Some)
+        .ok_or_else(|| XmlCanonicalizeError::UnboundPrefix(prefix.to_owned()))
+}
+
+fn lookup_attribute_namespace(
+    frame: &NamespaceFrame,
+    prefix: &str,
+) -> Result<Option<String>, XmlCanonicalizeError> {
+    if prefix.is_empty() {
+        return Ok(None);
+    }
+    frame
+        .input
+        .get(prefix)
+        .cloned()
+        .map(Some)
+        .ok_or_else(|| XmlCanonicalizeError::UnboundPrefix(prefix.to_owned()))
+}
+
+fn preferred_invoice_prefix(uri: &str, original_prefix: &str, is_attribute: bool) -> String {
+    let prefix = match uri {
+        UBL_INVOICE_NAMESPACE_URI if !is_attribute => "",
+        UBL_CAC_NAMESPACE_URI => "cac",
+        UBL_CBC_NAMESPACE_URI => "cbc",
+        UBL_EXT_NAMESPACE_URI => "ext",
+        UBL_QDT_NAMESPACE_URI => "qdt",
+        UBL_UDT_NAMESPACE_URI | CII_UDT_NAMESPACE_URI => "udt",
+        CII_RSM_NAMESPACE_URI => "rsm",
+        CII_RAM_NAMESPACE_URI => "ram",
+        XMLDSIG_NAMESPACE_URI => "ds",
+        XADES_NAMESPACE_URI => "xades",
+        XML_NAMESPACE_URI => "xml",
+        _ => original_prefix,
+    };
+    if is_attribute && prefix.is_empty() && !uri.is_empty() {
+        original_prefix.to_owned()
+    } else {
+        prefix.to_owned()
+    }
+}
+
+fn render_xml_qname(prefix: &str, local_name: &str) -> String {
+    if prefix.is_empty() {
+        local_name.to_owned()
+    } else {
+        format!("{prefix}:{local_name}")
+    }
+}
+
+fn split_xml_qname(name: &str) -> (&str, &str) {
+    name.split_once(':')
+        .map_or(("", name), |(prefix, local_name)| (prefix, local_name))
+}
+
+fn decode_xml_name(raw: &[u8]) -> Result<&str, XmlCanonicalizeError> {
+    std::str::from_utf8(raw)
+        .map_err(|_| XmlCanonicalizeError::InvalidName(String::from_utf8_lossy(raw).into_owned()))
+}
+
+fn resolve_xml_reference(reference: &str) -> Result<String, XmlCanonicalizeError> {
+    match reference {
+        "amp" => Ok("&".to_owned()),
+        "lt" => Ok("<".to_owned()),
+        "gt" => Ok(">".to_owned()),
+        "apos" => Ok("'".to_owned()),
+        "quot" => Ok("\"".to_owned()),
+        value if value.starts_with("#x") => value
+            .strip_prefix("#x")
+            .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+            .and_then(char::from_u32)
+            .map(|character| character.to_string())
+            .ok_or_else(|| XmlCanonicalizeError::UnsupportedEntityReference(value.to_owned())),
+        value if value.starts_with('#') => value
+            .strip_prefix('#')
+            .and_then(|decimal| decimal.parse::<u32>().ok())
+            .and_then(char::from_u32)
+            .map(|character| character.to_string())
+            .ok_or_else(|| XmlCanonicalizeError::UnsupportedEntityReference(value.to_owned())),
+        value => Err(XmlCanonicalizeError::UnsupportedEntityReference(
+            value.to_owned(),
+        )),
+    }
+}
+
+fn write_xml_text_node(text: &str, out: &mut String) {
+    if text.chars().all(is_xml_whitespace) {
+        return;
+    }
+    for character in text.chars() {
+        match character {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '\r' => out.push_str("&#xD;"),
+            character => out.push(character),
+        }
+    }
+}
+
+fn write_xml_attr_value(value: &str, out: &mut String) {
+    for character in value.chars() {
+        match character {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '"' => out.push_str("&quot;"),
+            '\t' => out.push_str("&#x9;"),
+            '\n' => out.push_str("&#xA;"),
+            '\r' => out.push_str("&#xD;"),
+            character => out.push(character),
+        }
+    }
+}
+
+fn write_xml_end(rendered_name: &str, out: &mut String) {
+    out.push_str("</");
+    out.push_str(rendered_name);
+    out.push('>');
+}
+
+fn is_xml_whitespace(character: char) -> bool {
+    matches!(character, ' ' | '\t' | '\n' | '\r')
 }
 
 fn parse_value_rejecting_duplicate_members(input: &str) -> Result<Value, CanonicalizeError> {
@@ -403,6 +890,73 @@ mod tests {
         assert_eq!(crate_name(), "invoicekit-canonical");
     }
 
+    #[test]
+    fn xml_invoice_overlay_normalizes_namespace_prefixes_and_attribute_order() {
+        let invoice = UBL_INVOICE_NAMESPACE_URI;
+        let cac = UBL_CAC_NAMESPACE_URI;
+        let cbc = UBL_CBC_NAMESPACE_URI;
+        let input = format!(
+            r#"
+            <Invoice xmlns="{invoice}" xmlns:x="{cac}" xmlns:b="{cbc}">
+                <x:AccountingSupplierParty z="2" b:schemeID="0088" a="1"/>
+                <!-- formatting comment must not affect signatures -->
+            </Invoice>
+            "#
+        );
+        let canonical = canonicalize_xml(&input).unwrap();
+        let expected = format!(
+            r#"<Invoice xmlns="{invoice}"><cac:AccountingSupplierParty xmlns:cac="{cac}" xmlns:cbc="{cbc}" a="1" z="2" cbc:schemeID="0088"></cac:AccountingSupplierParty></Invoice>"#
+        );
+        assert_eq!(canonical, expected);
+    }
+
+    #[test]
+    fn xml_namespace_aliases_canonicalize_to_identical_bytes() {
+        let cac = UBL_CAC_NAMESPACE_URI;
+        let first = format!(r#"<Invoice xmlns:c="{cac}"><c:AccountingCustomerParty/></Invoice>"#);
+        let second = format!(
+            r#"<Invoice xmlns:cac="{cac}"><cac:AccountingCustomerParty></cac:AccountingCustomerParty></Invoice>"#
+        );
+
+        assert_eq!(
+            canonicalize_xml(&first).unwrap(),
+            canonicalize_xml(&second).unwrap()
+        );
+    }
+
+    #[test]
+    fn xml_text_cdata_and_attributes_use_canonical_escaping() {
+        let input = r#"<?xml version="1.0"?><r b="&quot;" a="&lt;&amp;"><![CDATA[x<y]]>&amp;z<!--ignored--></r>"#;
+        let canonical = canonicalize_xml(input).unwrap();
+        assert_eq!(canonical, r#"<r a="&lt;&amp;" b="&quot;">x&lt;y&amp;z</r>"#);
+    }
+
+    #[test]
+    fn xml_cross_platform_fixture_is_byte_stable() {
+        let invoice = UBL_INVOICE_NAMESPACE_URI;
+        let cbc = UBL_CBC_NAMESPACE_URI;
+        let input = format!(
+            r#"<n:Invoice xmlns:n="{invoice}" xmlns:q="{cbc}"><q:ID>INV-001</q:ID><q:Note>same bytes</q:Note></n:Invoice>"#
+        );
+        let canonical = canonicalize_xml(&input).unwrap();
+        let expected = format!(
+            r#"<Invoice xmlns="{invoice}"><cbc:ID xmlns:cbc="{cbc}">INV-001</cbc:ID><cbc:Note xmlns:cbc="{cbc}">same bytes</cbc:Note></Invoice>"#
+        );
+        assert_eq!(canonical.as_bytes(), expected.as_bytes());
+    }
+
+    #[test]
+    fn xml_invalid_inputs_are_rejected_with_typed_errors() {
+        let err = canonicalize_xml("<r><unclosed></r>").unwrap_err();
+        assert!(matches!(err, XmlCanonicalizeError::InvalidXml(_)));
+
+        let err = canonicalize_xml("<p:Invoice/>").unwrap_err();
+        assert!(matches!(err, XmlCanonicalizeError::UnboundPrefix(prefix) if prefix == "p"));
+
+        let err = canonicalize_xml("<!DOCTYPE r [<!ENTITY x \"x\">]><r/>").unwrap_err();
+        assert!(matches!(err, XmlCanonicalizeError::UnsupportedDoctype));
+    }
+
     /// RFC 8785 §3.3 test vector: object member ordering.
     #[test]
     fn rfc8785_member_ordering() {
@@ -600,6 +1154,24 @@ mod tests {
             let first = canonicalize_value(&value).unwrap();
             let reparsed: Value = serde_json::from_str(&first).unwrap();
             let second = canonicalize_value(&reparsed).unwrap();
+            prop_assert_eq!(first, second);
+        }
+
+        /// Generated valid XML canonicalizes, reparses, and canonicalizes to identical bytes.
+        #[test]
+        fn generated_xml_round_trips_to_identical_canonical_output(seed in 0_u16..500_u16) {
+            let invoice = UBL_INVOICE_NAMESPACE_URI;
+            let cbc = UBL_CBC_NAMESPACE_URI;
+            let a = seed % 17;
+            let input = format!(
+                r#"<x:Invoice xmlns:x="{invoice}" xmlns:basic="{cbc}" z="{seed}" a="{a}">
+                    <basic:ID>INV-{seed:04}</basic:ID>
+                    <basic:Note>line {seed}</basic:Note>
+                    <basic:DocumentCurrencyCode>EUR</basic:DocumentCurrencyCode>
+                </x:Invoice>"#
+            );
+            let first = canonicalize_xml(&input).unwrap();
+            let second = canonicalize_xml(&first).unwrap();
             prop_assert_eq!(first, second);
         }
     }

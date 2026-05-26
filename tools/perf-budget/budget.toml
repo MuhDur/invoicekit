@@ -21,9 +21,13 @@ default_max_regression_pct = 10.0
 # Owned by `crates/bench-harness/benches/ir_round_trip.rs`.
 max_regression_pct = 10.0
 
+[operations.xml-canonicalization]
+# XML Canonicalization 1.1 invoice profile on a synthetic 1 MiB UBL invoice.
+# Owned by `crates/bench-harness/benches/xml_canonicalization.rs`.
+max_regression_pct = 5.0
+
 # Future tracked operations land here as their owning beads add benches:
 #   [operations.validate]
 #   [operations.render]
-#   [operations.canonicalize]
 #   [operations.transmit-enqueue]
 #   [operations.fingerprint]
