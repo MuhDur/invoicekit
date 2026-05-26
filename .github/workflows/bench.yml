@@ -53,7 +53,9 @@ jobs:
           path: baseline/criterion
           key: bench-baseline-${{ github.event.repository.default_branch }}-v1
       - name: Run criterion benches
-        run: cargo bench -p invoicekit-bench-harness --bench ir_round_trip -- --warm-up-time 1 --measurement-time 3 --sample-size 20
+        run: |
+          cargo bench -p invoicekit-bench-harness --bench ir_round_trip -- --warm-up-time 1 --measurement-time 3 --sample-size 20
+          cargo bench -p invoicekit-bench-harness --bench xml_canonicalization -- --warm-up-time 1 --measurement-time 3 --sample-size 20
       - name: Evaluate budget vs. baseline
         id: budget
         run: |
@@ -87,7 +89,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Regenerate criterion HTML report
-        run: cargo bench -p invoicekit-bench-harness --bench ir_round_trip -- --warm-up-time 1 --measurement-time 3 --sample-size 20
+        run: |
+          cargo bench -p invoicekit-bench-harness --bench ir_round_trip -- --warm-up-time 1 --measurement-time 3 --sample-size 20
+          cargo bench -p invoicekit-bench-harness --bench xml_canonicalization -- --warm-up-time 1 --measurement-time 3 --sample-size 20
       - name: Publish to GitHub Pages branch (gh-pages)
         uses: peaceiris/actions-gh-pages@v4
         with:
