@@ -101,18 +101,18 @@ def test_typst_advisory_scope_passes_for_render_pdf_path() -> None:
         if crate == "paste":
             return (
                 0,
-                "paste v1.0.15\n"
-                "└── hayagriva v0.8.1\n"
-                "    └── typst-library v0.13.1\n"
-                "        └── invoicekit-render-pdf v0.0.0 (/repo/crates/render-pdf)\n",
+                "0paste v1.0.15\n"
+                "1hayagriva v0.8.1\n"
+                "2typst-library v0.13.1\n"
+                "3invoicekit-render-pdf v0.0.0 (/repo/crates/render-pdf)\n",
                 "",
             )
         return (
             0,
-            f"{crate} v0.0.0\n"
-            "└── syntect v5.3.0\n"
-            "    └── typst-library v0.13.1\n"
-            "        └── invoicekit-render-pdf v0.0.0 (/repo/crates/render-pdf)\n",
+            f"0{crate} v0.0.0\n"
+            "1syntect v5.3.0\n"
+            "2typst-library v0.13.1\n"
+            "3invoicekit-render-pdf v0.0.0 (/repo/crates/render-pdf)\n",
             "",
         )
 
@@ -126,11 +126,11 @@ def test_typst_advisory_scope_fails_for_other_workspace_crate() -> None:
     def fake_cargo_tree(_repo_root: Path, crate: str) -> tuple[int, str, str]:
         return (
             0,
-            f"{crate} v0.0.0\n"
-            "└── syntect v5.3.0\n"
-            "    ├── typst-library v0.13.1\n"
-            "    │   └── invoicekit-render-pdf v0.0.0 (/repo/crates/render-pdf)\n"
-            "    └── invoicekit-engine v0.0.0 (/repo/crates/invoicekit-engine)\n",
+            f"0{crate} v0.0.0\n"
+            "1syntect v5.3.0\n"
+            "2typst-library v0.13.1\n"
+            "3invoicekit-render-pdf v0.0.0 (/repo/crates/render-pdf)\n"
+            "2invoicekit-engine v0.0.0 (/repo/crates/invoicekit-engine)\n",
             "",
         )
 
@@ -138,3 +138,23 @@ def test_typst_advisory_scope_fails_for_other_workspace_crate() -> None:
 
     if not any("invoicekit-engine" in message for message in messages):
         raise AssertionError(f"expected invoicekit-engine scope failure, got {messages}")
+
+
+def test_typst_advisory_scope_fails_for_non_typst_renderer_path() -> None:
+    def fake_cargo_tree(_repo_root: Path, crate: str) -> tuple[int, str, str]:
+        required = "hayagriva" if crate == "paste" else "syntect"
+        return (
+            0,
+            f"0{crate} v0.0.0\n"
+            f"1{required} v1.0.0\n"
+            "2typst-library v0.13.1\n"
+            "3invoicekit-render-pdf v0.0.0 (/repo/crates/render-pdf)\n"
+            "1non-typst-render-helper v1.0.0\n"
+            "2invoicekit-render-pdf v0.0.0 (/repo/crates/render-pdf)\n",
+            "",
+        )
+
+    messages = guard.check_advisory_waiver_scope(cargo_tree_runner=fake_cargo_tree)
+
+    if not any("non-typst-render-helper" in message for message in messages):
+        raise AssertionError(f"expected non-Typst renderer path failure, got {messages}")

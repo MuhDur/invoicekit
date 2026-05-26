@@ -45,7 +45,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 DENY_TOML = REPO_ROOT / "deny.toml"
 AUDIT_TOML = REPO_ROOT / ".cargo" / "audit.toml"
-WORKSPACE_CRATE_RE = re.compile(r"\b(invoicekit-[a-z0-9-]+)\s+v[0-9]")
+DEPTH_TREE_LINE_RE = re.compile(r"^(?P<depth>\d+)(?P<package>[A-Za-z0-9_.-]+)\s+v[0-9]")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -107,7 +107,7 @@ def run_cargo_tree(repo_root: Path, crate: str) -> tuple[int, str, str]:
     """Return inverse cargo tree output for one crate."""
     try:
         completed = subprocess.run(
-            ["cargo", "tree", "--locked", "--workspace", "-i", crate],
+            ["cargo", "tree", "--locked", "--workspace", "-i", crate, "--prefix", "depth"],
             cwd=repo_root,
             text=True,
             capture_output=True,
@@ -117,6 +117,26 @@ def run_cargo_tree(repo_root: Path, crate: str) -> tuple[int, str, str]:
     except subprocess.TimeoutExpired as error:
         return 124, str(error.stdout or ""), str(error.stderr or "cargo tree timed out")
     return completed.returncode, completed.stdout, completed.stderr
+
+
+def workspace_dependency_paths(cargo_tree_stdout: str) -> list[tuple[str, ...]]:
+    """Return inverse-tree paths that terminate in an InvoiceKit workspace crate."""
+    stack: list[str] = []
+    paths: list[tuple[str, ...]] = []
+    for line in cargo_tree_stdout.splitlines():
+        match = DEPTH_TREE_LINE_RE.match(line)
+        if match is None:
+            continue
+
+        depth = int(match.group("depth"))
+        package = match.group("package")
+        stack = stack[:depth]
+        stack.append(package)
+
+        if package.startswith("invoicekit-"):
+            paths.append(tuple(stack))
+
+    return paths
 
 
 def check_advisory_waiver_scope(
@@ -142,7 +162,8 @@ def check_advisory_waiver_scope(
             messages.append(f"cargo tree failed for `{waiver.crate}`: {detail}")
             continue
 
-        workspace_crates = set(WORKSPACE_CRATE_RE.findall(stdout))
+        workspace_paths = workspace_dependency_paths(stdout)
+        workspace_crates = {path[-1] for path in workspace_paths}
         allowed = set(waiver.allowed_workspace_crates)
         unexpected = sorted(workspace_crates - allowed)
         if unexpected:
@@ -156,11 +177,18 @@ def check_advisory_waiver_scope(
                 f"{', '.join(waiver.allowed_workspace_crates)}"
             )
 
-        for required_crate in waiver.required_crates:
-            if required_crate not in stdout:
+        for path in workspace_paths:
+            if path[-1] not in allowed:
+                continue
+            missing_required = [
+                required_crate
+                for required_crate in waiver.required_crates
+                if required_crate not in path
+            ]
+            if missing_required:
                 messages.append(
-                    f"{waiver.advisory}/{waiver.crate} missing required Typst-path crate "
-                    f"`{required_crate}`"
+                    f"{waiver.advisory}/{waiver.crate} reaches {path[-1]} without required "
+                    f"Typst-path crates {', '.join(missing_required)}: {' -> '.join(path)}"
                 )
 
     return messages
