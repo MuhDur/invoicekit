@@ -52,6 +52,57 @@ jobs:
       - run: cargo build --workspace --all-targets --locked
       - run: cargo test --workspace --locked
 
+  abi-golden:
+    name: engine ABI golden suite
+    runs-on: ubuntu-latest
+    env:
+      INVOICEKIT_FFI_LIB: ${{ github.workspace }}/target/debug/libinvoicekit_ffi.so
+      LD_LIBRARY_PATH: ${{ github.workspace }}/target/debug
+      CGO_ENABLED: 1
+      CGO_LDFLAGS: -L${{ github.workspace }}/target/debug -linvoicekit_ffi
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p invoicekit-ffi --locked
+      - run: >
+          cargo test --locked
+          -p invoicekit-engine
+          -p invoicekit-ffi
+          -p invoicekit-wasm
+          -p invoicekit-binding-node-napi
+          -p invoicekit-binding-python
+          -p invoicekit-binding-wasm-browser
+          -p invoicekit-binding-rest-shim
+      - run: python3 bindings/python/tests/test_engine_abi.py
+      - run: bun test bindings/node-napi/tests/engine_abi_golden.test.ts
+      - run: go test .
+        working-directory: bindings/go
+      - run: mkdir -p "$RUNNER_TEMP/invoicekit-java-abi-test"
+      - run: >
+          javac --add-modules jdk.incubator.foreign
+          -d "$RUNNER_TEMP/invoicekit-java-abi-test"
+          bindings/java/src/test/java/dev/invoicekit/AbiGoldenTest.java
+      - run: >
+          java --add-modules jdk.incubator.foreign
+          --enable-native-access=ALL-UNNAMED
+          -cp "$RUNNER_TEMP/invoicekit-java-abi-test"
+          AbiGoldenTest
+      - run: dotnet run --project bindings/dotnet/InvoiceKit.AbiGolden/InvoiceKit.AbiGolden.csproj
+
   docs:
     name: rustdoc
     runs-on: ubuntu-latest

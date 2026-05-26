@@ -1,12 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The InvoiceKit Authors
 
-//! `invoicekit-binding-python` — InvoiceKit workspace member.
+//! `invoicekit-binding-python` — Python delivery wrapper over the engine ABI.
 //!
-//! See [`plans/PLAN.md`](../../plans/PLAN.md) for the architectural role of
-//! this crate. The exported API below is the stable workspace-identity
-//! helper every InvoiceKit crate carries; downstream beads layer their
-//! domain logic on top of it without touching this surface.
+//! The Python SDK bead will add the pyo3 and maturin package surface. This
+//! crate already runs the shared engine ABI golden fixture so Python delivery
+//! is pinned to the byte contract.
+
+/// Process an Engine ABI JSON request through the Python binding wrapper.
+///
+/// # Examples
+///
+/// ```
+/// let response = invoicekit_binding_python::process_engine_abi_json(
+///     br#"{"abi_version":1,"operation":"unknown","payload":{}}"#,
+/// );
+/// assert!(std::str::from_utf8(&response).unwrap().contains(r#""status":"error""#));
+/// ```
+#[must_use]
+pub fn process_engine_abi_json(request_bytes: &[u8]) -> Vec<u8> {
+    invoicekit_engine::process_abi_json(request_bytes)
+}
 
 /// Canonical Cargo package name of this crate.
 ///
@@ -26,7 +40,21 @@ pub const fn crate_name() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::crate_name;
+    use super::{crate_name, process_engine_abi_json};
+    use serde::Deserialize;
+
+    const GOLDEN_FIXTURE: &str =
+        include_str!("../../../conformance-corpus/golden/engine-abi-v1-commercial-document.json");
+
+    #[derive(Debug, Deserialize)]
+    struct GoldenFixture {
+        request_bytes: String,
+        expected_response_bytes: String,
+    }
+
+    fn golden_fixture() -> GoldenFixture {
+        serde_json::from_str(GOLDEN_FIXTURE).expect("golden fixture is valid JSON")
+    }
 
     #[test]
     fn crate_name_is_cargo_package_name() {
@@ -55,6 +83,15 @@ mod tests {
         assert!(
             n == "invoicekit" || n.starts_with("invoicekit-") || n.starts_with("invoicekit_"),
             "crate name does not advertise InvoiceKit family: {n}"
+        );
+    }
+
+    #[test]
+    fn python_wrapper_matches_engine_abi_golden_fixture() {
+        let fixture = golden_fixture();
+        assert_eq!(
+            process_engine_abi_json(fixture.request_bytes.as_bytes()),
+            fixture.expected_response_bytes.as_bytes()
         );
     }
 }

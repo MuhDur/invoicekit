@@ -1,12 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The InvoiceKit Authors
 
-//! `invoicekit-wasm` — InvoiceKit workspace member.
+//! `invoicekit-wasm` — WebAssembly-shaped wrapper over the engine ABI.
 //!
-//! See [`plans/PLAN.md`](../../plans/PLAN.md) for the architectural role of
-//! this crate. The exported API below is the stable workspace-identity
-//! helper every InvoiceKit crate carries; downstream beads layer their
-//! domain logic on top of it without touching this surface.
+//! The dedicated WebAssembly artifact bead will add `wasm-bindgen` exports and
+//! feature-gated country bundles. This crate already consumes the same engine
+//! ABI golden fixture so browser delivery cannot drift from the Rust source of
+//! truth.
+
+/// Process an Engine ABI JSON request through the WebAssembly delivery wrapper.
+///
+/// # Examples
+///
+/// ```
+/// let response = invoicekit_wasm::process_engine_abi_json(
+///     br#"{"abi_version":1,"operation":"unknown","payload":{}}"#,
+/// );
+/// assert!(std::str::from_utf8(&response).unwrap().contains(r#""status":"error""#));
+/// ```
+#[must_use]
+pub fn process_engine_abi_json(request_bytes: &[u8]) -> Vec<u8> {
+    invoicekit_engine::process_abi_json(request_bytes)
+}
 
 /// Canonical Cargo package name of this crate.
 ///
@@ -26,7 +41,21 @@ pub const fn crate_name() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::crate_name;
+    use super::{crate_name, process_engine_abi_json};
+    use serde::Deserialize;
+
+    const GOLDEN_FIXTURE: &str =
+        include_str!("../../../conformance-corpus/golden/engine-abi-v1-commercial-document.json");
+
+    #[derive(Debug, Deserialize)]
+    struct GoldenFixture {
+        request_bytes: String,
+        expected_response_bytes: String,
+    }
+
+    fn golden_fixture() -> GoldenFixture {
+        serde_json::from_str(GOLDEN_FIXTURE).expect("golden fixture is valid JSON")
+    }
 
     #[test]
     fn crate_name_is_cargo_package_name() {
@@ -55,6 +84,15 @@ mod tests {
         assert!(
             n == "invoicekit" || n.starts_with("invoicekit-") || n.starts_with("invoicekit_"),
             "crate name does not advertise InvoiceKit family: {n}"
+        );
+    }
+
+    #[test]
+    fn wasm_wrapper_matches_engine_abi_golden_fixture() {
+        let fixture = golden_fixture();
+        assert_eq!(
+            process_engine_abi_json(fixture.request_bytes.as_bytes()),
+            fixture.expected_response_bytes.as_bytes()
         );
     }
 }
