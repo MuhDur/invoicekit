@@ -1,0 +1,27 @@
+[package]
+name = "invoicekit-bench-harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "InvoiceKit cross-crate criterion benchmark harness; backs the T-007 performance regression budget."
+publish = false
+
+[lib]
+name = "invoicekit_bench_harness"
+path = "src/lib.rs"
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support", "html_reports"] }
+invoicekit-ir = { path = "../ir" }
+serde_json = "1"
+
+[[bench]]
+name = "ir_round_trip"
+harness = false
+
+[lints]
+workspace = true
