@@ -52,6 +52,43 @@ jobs:
       - run: cargo build --workspace --all-targets --locked
       - run: cargo test --workspace --locked
 
+  outbox-db-migrations:
+    name: outbox DB migrations
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: invoicekit
+          POSTGRES_DB: invoicekit_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d invoicekit_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: invoicekit
+          MYSQL_DATABASE: invoicekit_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pinvoicekit"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      INVOICEKIT_POSTGRES_URL: postgresql://postgres:invoicekit@127.0.0.1:5432/invoicekit_test
+      INVOICEKIT_MYSQL_URL: mysql://root:invoicekit@127.0.0.1:3306/invoicekit_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p invoicekit-reconcile --test outbox_migrations --locked
+
   abi-golden:
     name: engine ABI golden suite
     runs-on: ubuntu-latest
