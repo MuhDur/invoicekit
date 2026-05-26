@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+SPDX-License-Identifier: Apache-2.0
+Copyright 2026 The InvoiceKit Authors
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>dev.invoicekit</groupId>
+  <artifactId>invoicekit-validator-sidecar</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+
+  <properties>
+    <jackson.version>2.17.2</jackson.version>
+    <kosit.validator.version>1.6.2</kosit.validator.version>
+    <phive.rules.peppol.version>3.2.2</phive.rules.peppol.version>
+    <saxon.he.version>12.9</saxon.he.version>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
+  </dependencies>
+
+  <profiles>
+    <profile>
+      <id>kosit</id>
+      <dependencies>
+        <dependency>
+          <groupId>org.kosit</groupId>
+          <artifactId>validator</artifactId>
+          <version>${kosit.validator.version}</version>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <id>phive</id>
+      <dependencies>
+        <dependency>
+          <groupId>com.helger.phive.rules</groupId>
+          <artifactId>phive-rules-peppol</artifactId>
+          <version>${phive.rules.peppol.version}</version>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <id>saxon</id>
+      <dependencies>
+        <dependency>
+          <groupId>net.sf.saxon</groupId>
+          <artifactId>Saxon-HE</artifactId>
+          <version>${saxon.he.version}</version>
+        </dependency>
+      </dependencies>
+    </profile>
+  </profiles>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <version>3.8.0</version>
+        <executions>
+          <execution>
+            <id>copy-runtime-dependencies</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <includeScope>runtime</includeScope>
+              <outputDirectory>${project.build.directory}/dependency</outputDirectory>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
