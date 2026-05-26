@@ -1,0 +1,28 @@
+name: Property tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: proptest-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  # T-021: run 10 000 cases per PR against the canonicalizer property suite.
+  PROPTEST_CASES: 10000
+
+jobs:
+  canonical-proptest:
+    name: canonical proptest (10 000 cases)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p invoicekit-canonical --test proptest_canonical --release
