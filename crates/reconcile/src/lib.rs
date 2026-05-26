@@ -10,6 +10,7 @@
 //! machine and outbox beads build on this stable contract instead of allowing
 //! each country gateway to invent its own error language.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -537,6 +538,409 @@ impl TransmissionTransition {
     }
 }
 
+/// A permitted country-specific sub-state transition layered on a base move.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CountrySubStateTransition {
+    /// Gateway, authority, or network namespace this rule applies to.
+    pub system: String,
+    /// Required base state before the transition.
+    pub from_base: TransmissionBaseState,
+    /// Required country-specific code before the transition, if one exists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_code: Option<String>,
+    /// Required base state after the transition.
+    pub to_base: TransmissionBaseState,
+    /// Required country-specific code after the transition.
+    pub to_code: String,
+}
+
+impl CountrySubStateTransition {
+    /// Builds a rule for the first country-specific code in a flow.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReconcileError::InvalidTransition`] if the base states are
+    /// not a valid transition, or identifier errors for blank/unsafe values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::{CountrySubStateTransition, TransmissionBaseState};
+    ///
+    /// let rule = CountrySubStateTransition::initial(
+    ///     "KSEF",
+    ///     TransmissionBaseState::Reserved,
+    ///     TransmissionBaseState::Sent,
+    ///     "reserved",
+    /// )
+    /// .unwrap();
+    /// assert_eq!(rule.to_code, "reserved");
+    /// ```
+    pub fn initial(
+        system: impl Into<String>,
+        from_base: TransmissionBaseState,
+        to_base: TransmissionBaseState,
+        to_code: impl Into<String>,
+    ) -> Result<Self, ReconcileError> {
+        Self::build(system, from_base, None, to_base, to_code)
+    }
+
+    /// Builds a rule from one country-specific code to the next.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReconcileError::InvalidTransition`] if the base states are
+    /// not a valid transition, or identifier errors for blank/unsafe values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::{CountrySubStateTransition, TransmissionBaseState};
+    ///
+    /// let rule = CountrySubStateTransition::from_code(
+    ///     "ZATCA",
+    ///     TransmissionBaseState::Delivered,
+    ///     "cleared",
+    ///     TransmissionBaseState::Acknowledged,
+    ///     "reported",
+    /// )
+    /// .unwrap();
+    /// assert_eq!(rule.from_code.as_deref(), Some("cleared"));
+    /// ```
+    pub fn from_code(
+        system: impl Into<String>,
+        from_base: TransmissionBaseState,
+        from_code: impl Into<String>,
+        to_base: TransmissionBaseState,
+        to_code: impl Into<String>,
+    ) -> Result<Self, ReconcileError> {
+        Self::build(system, from_base, Some(from_code.into()), to_base, to_code)
+    }
+
+    fn build(
+        system: impl Into<String>,
+        from_base: TransmissionBaseState,
+        from_code: Option<String>,
+        to_base: TransmissionBaseState,
+        to_code: impl Into<String>,
+    ) -> Result<Self, ReconcileError> {
+        let system = system.into();
+        let to_code = to_code.into();
+        validate_identifier(&system, "country_substate_transition.system")?;
+        if let Some(from_code) = &from_code {
+            validate_identifier(from_code, "country_substate_transition.from_code")?;
+        }
+        validate_identifier(&to_code, "country_substate_transition.to_code")?;
+        if !from_base.can_transition_to(to_base) {
+            return Err(ReconcileError::InvalidTransition {
+                from: from_base,
+                to: to_base,
+            });
+        }
+        Ok(Self {
+            system,
+            from_base,
+            from_code,
+            to_base,
+            to_code,
+        })
+    }
+
+    fn matches_states(&self, from: &TransmissionState, to: &TransmissionState) -> bool {
+        if self.from_base != from.base || self.to_base != to.base {
+            return false;
+        }
+        let Some(to_substate) = &to.country_substate else {
+            return false;
+        };
+        let system_matches = to_substate.system == self.system;
+        let code_matches = to_substate.code == self.to_code;
+        if !(system_matches && code_matches) {
+            return false;
+        }
+        match (&self.from_code, &from.country_substate) {
+            (None, None) => true,
+            (Some(expected), Some(from_substate)) => {
+                from_substate.system == self.system && from_substate.code == *expected
+            }
+            _ => false,
+        }
+    }
+
+    fn rule_key(&self) -> String {
+        format!(
+            "{}|{}|{}|{}|{}",
+            self.system,
+            self.from_base,
+            self.from_code.as_deref().unwrap_or(""),
+            self.to_base,
+            self.to_code
+        )
+    }
+}
+
+/// Registry of country-specific sub-state transition rules.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CountrySubStateRegistry {
+    transitions: Vec<CountrySubStateTransition>,
+}
+
+impl CountrySubStateRegistry {
+    /// Builds a registry from country-specific transition rules.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReconcileError::DuplicateCountrySubStateTransition`] when two
+    /// rules describe the same system/from/to edge.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::{
+    ///     CountrySubStateRegistry, CountrySubStateTransition, TransmissionBaseState,
+    /// };
+    ///
+    /// let registry = CountrySubStateRegistry::new(vec![
+    ///     CountrySubStateTransition::initial(
+    ///         "SDI",
+    ///         TransmissionBaseState::Sent,
+    ///         TransmissionBaseState::Delivered,
+    ///         "accepted",
+    ///     )
+    ///     .unwrap(),
+    /// ])
+    /// .unwrap();
+    /// assert_eq!(registry.transitions().len(), 1);
+    /// ```
+    pub fn new(transitions: Vec<CountrySubStateTransition>) -> Result<Self, ReconcileError> {
+        let mut seen = BTreeSet::new();
+        for transition in &transitions {
+            if !seen.insert(transition.rule_key()) {
+                return Err(ReconcileError::DuplicateCountrySubStateTransition {
+                    system: transition.system.clone(),
+                    from: format_country_rule_endpoint(
+                        transition.from_base,
+                        transition.from_code.as_deref(),
+                    ),
+                    to: format_country_rule_endpoint(transition.to_base, Some(&transition.to_code)),
+                });
+            }
+        }
+        Ok(Self { transitions })
+    }
+
+    /// Returns the configured country-specific transition rules.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::CountrySubStateRegistry;
+    ///
+    /// let registry = CountrySubStateRegistry::default();
+    /// assert!(registry.transitions().is_empty());
+    /// ```
+    #[must_use]
+    pub fn transitions(&self) -> &[CountrySubStateTransition] {
+        &self.transitions
+    }
+
+    /// Validates a country-specific sub-state transition.
+    ///
+    /// Systems with no configured rules remain open extension points. Once a
+    /// system has at least one configured rule, transitions for that system
+    /// must match a configured rule.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReconcileError::CountrySubStateSystemMismatch`] when a move
+    /// changes country systems, or
+    /// [`ReconcileError::InvalidCountrySubStateTransition`] when a configured
+    /// system does not allow the requested country code transition.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::{
+    ///     CountrySubState, CountrySubStateRegistry, CountrySubStateTransition,
+    ///     TransmissionBaseState, TransmissionState,
+    /// };
+    ///
+    /// let registry = CountrySubStateRegistry::new(vec![
+    ///     CountrySubStateTransition::initial(
+    ///         "KSEF",
+    ///         TransmissionBaseState::Reserved,
+    ///         TransmissionBaseState::Sent,
+    ///         "reserved",
+    ///     )
+    ///     .unwrap(),
+    /// ])
+    /// .unwrap();
+    /// let from = TransmissionState::new(TransmissionBaseState::Reserved);
+    /// let to = TransmissionState::new(TransmissionBaseState::Sent)
+    ///     .with_country_substate(CountrySubState::new("KSEF", "reserved", "reserved").unwrap());
+    /// registry.validate_transition(&from, &to).unwrap();
+    /// ```
+    pub fn validate_transition(
+        &self,
+        from: &TransmissionState,
+        to: &TransmissionState,
+    ) -> Result<(), ReconcileError> {
+        let Some(system) = transition_country_system(from, to)? else {
+            return Ok(());
+        };
+        let has_rules = self
+            .transitions
+            .iter()
+            .any(|transition| transition.system == system);
+        if !has_rules {
+            return Ok(());
+        }
+        if self
+            .transitions
+            .iter()
+            .any(|transition| transition.matches_states(from, to))
+        {
+            Ok(())
+        } else {
+            Err(ReconcileError::InvalidCountrySubStateTransition {
+                system,
+                from: describe_country_state(from),
+                to: describe_country_state(to),
+            })
+        }
+    }
+}
+
+/// Executable transmission state machine with transition history.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TransmissionStateMachine {
+    current: TransmissionState,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    history: Vec<TransmissionTransition>,
+    #[serde(default)]
+    country_registry: CountrySubStateRegistry,
+}
+
+impl TransmissionStateMachine {
+    /// Builds a state machine with no configured country-specific rules.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::{TransmissionBaseState, TransmissionState, TransmissionStateMachine};
+    ///
+    /// let machine = TransmissionStateMachine::new(
+    ///     TransmissionState::new(TransmissionBaseState::Draft),
+    /// );
+    /// assert_eq!(machine.current().base, TransmissionBaseState::Draft);
+    /// ```
+    #[must_use]
+    pub fn new(initial: TransmissionState) -> Self {
+        Self {
+            current: initial,
+            history: Vec::new(),
+            country_registry: CountrySubStateRegistry::default(),
+        }
+    }
+
+    /// Builds a state machine with configured country-specific rules.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::{
+    ///     CountrySubStateRegistry, TransmissionBaseState, TransmissionState, TransmissionStateMachine,
+    /// };
+    ///
+    /// let machine = TransmissionStateMachine::with_country_registry(
+    ///     TransmissionState::new(TransmissionBaseState::Draft),
+    ///     CountrySubStateRegistry::default(),
+    /// );
+    /// assert!(machine.history().is_empty());
+    /// ```
+    #[must_use]
+    pub fn with_country_registry(
+        initial: TransmissionState,
+        country_registry: CountrySubStateRegistry,
+    ) -> Self {
+        Self {
+            current: initial,
+            history: Vec::new(),
+            country_registry,
+        }
+    }
+
+    /// Returns the current transmission state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::{TransmissionBaseState, TransmissionState, TransmissionStateMachine};
+    ///
+    /// let machine = TransmissionStateMachine::new(
+    ///     TransmissionState::new(TransmissionBaseState::Validated),
+    /// );
+    /// assert_eq!(machine.current().base, TransmissionBaseState::Validated);
+    /// ```
+    #[must_use]
+    pub const fn current(&self) -> &TransmissionState {
+        &self.current
+    }
+
+    /// Returns the validated transition history.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::{TransmissionBaseState, TransmissionState, TransmissionStateMachine};
+    ///
+    /// let machine = TransmissionStateMachine::new(
+    ///     TransmissionState::new(TransmissionBaseState::Draft),
+    /// );
+    /// assert!(machine.history().is_empty());
+    /// ```
+    #[must_use]
+    pub fn history(&self) -> &[TransmissionTransition] {
+        &self.history
+    }
+
+    /// Applies a validated transition and records it in history.
+    ///
+    /// # Errors
+    ///
+    /// Returns typed transition errors when the base state or configured
+    /// country-specific state does not allow the requested move.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_reconcile::{TransmissionBaseState, TransmissionState, TransmissionStateMachine};
+    ///
+    /// let mut machine = TransmissionStateMachine::new(
+    ///     TransmissionState::new(TransmissionBaseState::Draft),
+    /// );
+    /// machine
+    ///     .apply(
+    ///         TransmissionState::new(TransmissionBaseState::Validated),
+    ///         "validation passed",
+    ///     )
+    ///     .unwrap();
+    /// assert_eq!(machine.history().len(), 1);
+    /// ```
+    pub fn apply(
+        &mut self,
+        next: TransmissionState,
+        reason: impl Into<String>,
+    ) -> Result<TransmissionTransition, ReconcileError> {
+        let transition = TransmissionTransition::new(self.current.clone(), next, reason)?;
+        self.country_registry
+            .validate_transition(&transition.from, &transition.to)?;
+        self.current = transition.to.clone();
+        self.history.push(transition.clone());
+        Ok(transition)
+    }
+}
+
 /// Receipt normalized from a gateway response.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct GatewayReceipt {
@@ -1056,6 +1460,34 @@ pub enum ReconcileError {
         /// State after the rejected transition.
         to: TransmissionBaseState,
     },
+    /// A country-specific sub-state transition was not allowed.
+    #[error("invalid country sub-state transition for `{system}` from `{from}` to `{to}`")]
+    InvalidCountrySubStateTransition {
+        /// Country, authority, or network namespace.
+        system: String,
+        /// State before the rejected transition.
+        from: String,
+        /// State after the rejected transition.
+        to: String,
+    },
+    /// A transition attempted to move between two country-specific systems.
+    #[error("country sub-state system mismatch from `{from}` to `{to}`")]
+    CountrySubStateSystemMismatch {
+        /// System carried by the current state.
+        from: String,
+        /// System carried by the next state.
+        to: String,
+    },
+    /// Two country-specific sub-state rules described the same edge.
+    #[error("duplicate country sub-state transition for `{system}` from `{from}` to `{to}`")]
+    DuplicateCountrySubStateTransition {
+        /// Country, authority, or network namespace.
+        system: String,
+        /// Duplicate source edge.
+        from: String,
+        /// Duplicate target edge.
+        to: String,
+    },
     /// A gateway country code was not uppercase ISO 3166-1 alpha-2 shaped text.
     #[error("invalid ISO 3166-1 alpha-2 gateway country code `{0}`")]
     InvalidCountryCode(String),
@@ -1120,6 +1552,34 @@ fn validate_text(value: &str, field: &'static str) -> Result<(), ReconcileError>
     Ok(())
 }
 
+fn transition_country_system(
+    from: &TransmissionState,
+    to: &TransmissionState,
+) -> Result<Option<String>, ReconcileError> {
+    match (&from.country_substate, &to.country_substate) {
+        (Some(from_substate), Some(to_substate)) if from_substate.system != to_substate.system => {
+            Err(ReconcileError::CountrySubStateSystemMismatch {
+                from: from_substate.system.clone(),
+                to: to_substate.system.clone(),
+            })
+        }
+        (Some(from_substate), _) => Ok(Some(from_substate.system.clone())),
+        (_, Some(to_substate)) => Ok(Some(to_substate.system.clone())),
+        (None, None) => Ok(None),
+    }
+}
+
+fn describe_country_state(state: &TransmissionState) -> String {
+    state.country_substate.as_ref().map_or_else(
+        || state.base.to_string(),
+        |substate| format!("{}:{}/{}", state.base, substate.system, substate.code),
+    )
+}
+
+fn format_country_rule_endpoint(base: TransmissionBaseState, code: Option<&str>) -> String {
+    code.map_or_else(|| base.to_string(), |code| format!("{base}/{code}"))
+}
+
 fn validate_country_code(value: &str) -> Result<(), ReconcileError> {
     if value.len() == 2 && value.bytes().all(|b| b.is_ascii_uppercase()) {
         Ok(())
@@ -1169,11 +1629,12 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{
-        crate_name, CancelRequest, CorrectRequest, CountrySubState, GatewayAdapter,
-        GatewayAttemptId, GatewayContext, GatewayError, GatewayErrorKind, GatewayFuture,
-        GatewayOperation, GatewayReceipt, GatewayRoute, GatewayStatus, GatewaySubmissionId,
-        IdempotencyKey, PollRequest, ReconcileError, SubmitRequest, TenantId, TraceId,
-        TransmissionBaseState, TransmissionState,
+        crate_name, CancelRequest, CorrectRequest, CountrySubState, CountrySubStateRegistry,
+        CountrySubStateTransition, GatewayAdapter, GatewayAttemptId, GatewayContext, GatewayError,
+        GatewayErrorKind, GatewayFuture, GatewayOperation, GatewayReceipt, GatewayRoute,
+        GatewayStatus, GatewaySubmissionId, IdempotencyKey, PollRequest, ReconcileError,
+        SubmitRequest, TenantId, TraceId, TransmissionBaseState, TransmissionState,
+        TransmissionStateMachine,
     };
 
     #[test]
@@ -1393,6 +1854,208 @@ mod tests {
                 field: "country_substate.label",
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn state_machine_implements_every_base_transition() {
+        let transitions = [
+            (
+                TransmissionBaseState::Draft,
+                TransmissionBaseState::Validated,
+            ),
+            (
+                TransmissionBaseState::Validated,
+                TransmissionBaseState::Signed,
+            ),
+            (
+                TransmissionBaseState::Signed,
+                TransmissionBaseState::Reserved,
+            ),
+            (TransmissionBaseState::Reserved, TransmissionBaseState::Sent),
+            (
+                TransmissionBaseState::Sent,
+                TransmissionBaseState::Delivered,
+            ),
+            (TransmissionBaseState::Sent, TransmissionBaseState::Rejected),
+            (
+                TransmissionBaseState::Delivered,
+                TransmissionBaseState::Acknowledged,
+            ),
+            (
+                TransmissionBaseState::Delivered,
+                TransmissionBaseState::Rejected,
+            ),
+            (
+                TransmissionBaseState::Acknowledged,
+                TransmissionBaseState::Archived,
+            ),
+            (
+                TransmissionBaseState::Rejected,
+                TransmissionBaseState::Archived,
+            ),
+        ];
+
+        for (from, to) in transitions {
+            let mut machine = TransmissionStateMachine::new(TransmissionState::new(from));
+            let transition = machine
+                .apply(TransmissionState::new(to), "allowed transition")
+                .unwrap();
+
+            assert_eq!(machine.current().base, to);
+            assert_eq!(machine.history().len(), 1);
+            assert_eq!(machine.history()[0], transition);
+        }
+    }
+
+    #[test]
+    fn state_machine_rejects_invalid_base_transition_without_advancing() {
+        let mut machine =
+            TransmissionStateMachine::new(TransmissionState::new(TransmissionBaseState::Draft));
+        let err = machine
+            .apply(
+                TransmissionState::new(TransmissionBaseState::Sent),
+                "skip required states",
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ReconcileError::InvalidTransition {
+                from: TransmissionBaseState::Draft,
+                to: TransmissionBaseState::Sent,
+            }
+        ));
+        assert_eq!(machine.current().base, TransmissionBaseState::Draft);
+        assert!(machine.history().is_empty());
+    }
+
+    #[test]
+    fn country_substate_registry_drives_ksef_sdi_and_zatca_extensions() {
+        let registry = country_registry();
+
+        let mut ksef = TransmissionStateMachine::with_country_registry(
+            TransmissionState::new(TransmissionBaseState::Reserved),
+            registry.clone(),
+        );
+        ksef.apply(
+            TransmissionState::new(TransmissionBaseState::Sent)
+                .with_country_substate(country_substate("KSEF", "reserved")),
+            "KSeF submission reserved",
+        )
+        .unwrap();
+        ksef.apply(
+            TransmissionState::new(TransmissionBaseState::Delivered)
+                .with_country_substate(country_substate("KSEF", "committed")),
+            "KSeF committed UPO",
+        )
+        .unwrap();
+        assert_eq!(
+            ksef.current().country_substate.as_ref().unwrap().code,
+            "committed"
+        );
+
+        let mut sdi = TransmissionStateMachine::with_country_registry(
+            TransmissionState::new(TransmissionBaseState::Sent),
+            registry.clone(),
+        );
+        sdi.apply(
+            TransmissionState::new(TransmissionBaseState::Rejected)
+                .with_country_substate(country_substate("SDI", "rejected")),
+            "SDI scarto receipt",
+        )
+        .unwrap();
+        assert_eq!(
+            sdi.current().country_substate.as_ref().unwrap().system,
+            "SDI"
+        );
+
+        let mut zatca = TransmissionStateMachine::with_country_registry(
+            TransmissionState::new(TransmissionBaseState::Sent),
+            registry,
+        );
+        zatca
+            .apply(
+                TransmissionState::new(TransmissionBaseState::Delivered)
+                    .with_country_substate(country_substate("ZATCA", "cleared")),
+                "ZATCA cleared invoice",
+            )
+            .unwrap();
+        zatca
+            .apply(
+                TransmissionState::new(TransmissionBaseState::Acknowledged)
+                    .with_country_substate(country_substate("ZATCA", "reported")),
+                "ZATCA reported clearance",
+            )
+            .unwrap();
+        assert_eq!(
+            zatca.current().country_substate.as_ref().unwrap().code,
+            "reported"
+        );
+    }
+
+    #[test]
+    fn country_substate_registry_rejects_unconfigured_code_transition() {
+        let registry = country_registry();
+        let mut machine = TransmissionStateMachine::with_country_registry(
+            TransmissionState::new(TransmissionBaseState::Reserved),
+            registry,
+        );
+
+        let err = machine
+            .apply(
+                TransmissionState::new(TransmissionBaseState::Sent)
+                    .with_country_substate(country_substate("KSEF", "unknown")),
+                "unknown KSeF code",
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ReconcileError::InvalidCountrySubStateTransition { system, .. } if system == "KSEF"
+        ));
+        assert_eq!(machine.current().base, TransmissionBaseState::Reserved);
+    }
+
+    #[test]
+    fn country_substate_registry_rejects_system_switches() {
+        let registry = country_registry();
+        let mut machine = TransmissionStateMachine::with_country_registry(
+            TransmissionState::new(TransmissionBaseState::Sent)
+                .with_country_substate(country_substate("KSEF", "reserved")),
+            registry,
+        );
+
+        let err = machine
+            .apply(
+                TransmissionState::new(TransmissionBaseState::Delivered)
+                    .with_country_substate(country_substate("SDI", "accepted")),
+                "switch systems",
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ReconcileError::CountrySubStateSystemMismatch { from, to }
+                if from == "KSEF" && to == "SDI"
+        ));
+    }
+
+    #[test]
+    fn country_substate_registry_rejects_duplicate_rules() {
+        let rule = CountrySubStateTransition::initial(
+            "KSEF",
+            TransmissionBaseState::Reserved,
+            TransmissionBaseState::Sent,
+            "reserved",
+        )
+        .unwrap();
+
+        let err = CountrySubStateRegistry::new(vec![rule.clone(), rule]).unwrap_err();
+
+        assert!(matches!(
+            err,
+            ReconcileError::DuplicateCountrySubStateTransition { system, .. } if system == "KSEF"
         ));
     }
 
@@ -1653,6 +2316,56 @@ mod tests {
 
     fn country_substate(system: &str, code: &str) -> CountrySubState {
         CountrySubState::new(system, code, format!("{system} {code}")).unwrap()
+    }
+
+    fn country_registry() -> CountrySubStateRegistry {
+        CountrySubStateRegistry::new(vec![
+            CountrySubStateTransition::initial(
+                "KSEF",
+                TransmissionBaseState::Reserved,
+                TransmissionBaseState::Sent,
+                "reserved",
+            )
+            .unwrap(),
+            CountrySubStateTransition::from_code(
+                "KSEF",
+                TransmissionBaseState::Sent,
+                "reserved",
+                TransmissionBaseState::Delivered,
+                "committed",
+            )
+            .unwrap(),
+            CountrySubStateTransition::initial(
+                "SDI",
+                TransmissionBaseState::Sent,
+                TransmissionBaseState::Delivered,
+                "accepted",
+            )
+            .unwrap(),
+            CountrySubStateTransition::initial(
+                "SDI",
+                TransmissionBaseState::Sent,
+                TransmissionBaseState::Rejected,
+                "rejected",
+            )
+            .unwrap(),
+            CountrySubStateTransition::initial(
+                "ZATCA",
+                TransmissionBaseState::Sent,
+                TransmissionBaseState::Delivered,
+                "cleared",
+            )
+            .unwrap(),
+            CountrySubStateTransition::from_code(
+                "ZATCA",
+                TransmissionBaseState::Delivered,
+                "cleared",
+                TransmissionBaseState::Acknowledged,
+                "reported",
+            )
+            .unwrap(),
+        ])
+        .unwrap()
     }
 
     fn synthetic_document() -> CommercialDocument {
