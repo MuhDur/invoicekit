@@ -761,6 +761,65 @@ mod tests {
     }
 
     #[test]
+    fn dialects_have_stable_names_and_display_values() {
+        let cases = [
+            (DatabaseDialect::Postgres, "postgres"),
+            (DatabaseDialect::Mysql, "mysql"),
+            (DatabaseDialect::Sqlite, "sqlite"),
+        ];
+
+        for (dialect, expected) in cases {
+            assert_eq!(dialect.as_str(), expected);
+            assert_eq!(dialect.to_string(), expected);
+            assert_eq!(outbox_migration(dialect).dialect, dialect);
+        }
+    }
+
+    #[test]
+    fn outbox_states_have_stable_names_display_values_and_terminal_flags() {
+        let cases = [
+            (OutboxState::Draft, "draft", false),
+            (OutboxState::Validated, "validated", false),
+            (OutboxState::Signed, "signed", false),
+            (OutboxState::Reserved, "reserved", false),
+            (OutboxState::Sent, "sent", false),
+            (OutboxState::Delivered, "delivered", true),
+            (OutboxState::Acknowledged, "acknowledged", true),
+            (OutboxState::Rejected, "rejected", false),
+            (OutboxState::Archived, "archived", true),
+            (OutboxState::DeadLetter, "dead_letter", true),
+        ];
+
+        for (state, expected, terminal) in cases {
+            assert_eq!(state.as_str(), expected);
+            assert_eq!(state.to_string(), expected);
+            assert_eq!(state.is_terminal(), terminal, "{state:?}");
+        }
+    }
+
+    #[test]
+    fn outbox_states_map_every_base_transmission_state() {
+        let cases = [
+            (TransmissionBaseState::Draft, OutboxState::Draft),
+            (TransmissionBaseState::Validated, OutboxState::Validated),
+            (TransmissionBaseState::Signed, OutboxState::Signed),
+            (TransmissionBaseState::Reserved, OutboxState::Reserved),
+            (TransmissionBaseState::Sent, OutboxState::Sent),
+            (TransmissionBaseState::Delivered, OutboxState::Delivered),
+            (
+                TransmissionBaseState::Acknowledged,
+                OutboxState::Acknowledged,
+            ),
+            (TransmissionBaseState::Rejected, OutboxState::Rejected),
+            (TransmissionBaseState::Archived, OutboxState::Archived),
+        ];
+
+        for (base, expected) in cases {
+            assert_eq!(OutboxState::from_transmission_base(base), expected);
+        }
+    }
+
+    #[test]
     fn retry_policy_validates_unsafe_parameters() {
         assert!(matches!(
             RetryPolicy::new(0, 30, 60, 25),
@@ -790,6 +849,22 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn retry_policy_default_zero_jitter_and_cap_are_deterministic() {
+        let key = IdempotencyKey::new("idem_retry_cap").unwrap();
+
+        let default = RetryPolicy::default_policy();
+        assert_eq!(default, RetryPolicy::default());
+        assert_eq!(default.max_attempts, 8);
+
+        let no_jitter = RetryPolicy::new(8, 30, 600, 0).unwrap();
+        assert_eq!(no_jitter.delay_for_attempt(1, &key).unwrap(), 30);
+        assert_eq!(no_jitter.delay_for_attempt(2, &key).unwrap(), 60);
+
+        let capped = RetryPolicy::new(8, 30, 90, 50).unwrap();
+        assert_eq!(capped.delay_for_attempt(7, &key).unwrap(), 90);
     }
 
     #[test]
@@ -872,6 +947,26 @@ mod tests {
     }
 
     #[test]
+    fn exhausted_envelope_moves_to_dead_letter_without_retry_delay() {
+        let mut envelope = OutboxEnvelope::new(
+            "outbox_001",
+            context("idem_invoice_123"),
+            blake3::hash(b"invoice"),
+            "{}",
+            RetryPolicy::new(2, 30, 60, 0).unwrap(),
+        )
+        .unwrap();
+        envelope.attempt_count = 2;
+
+        assert_eq!(
+            envelope.record_failed_attempt().unwrap(),
+            RetryDecision::MoveToDeadLetter
+        );
+        assert_eq!(envelope.state, OutboxState::DeadLetter);
+        assert_eq!(envelope.attempt_count, 2);
+    }
+
+    #[test]
     fn dead_letter_record_preserves_outbox_context() {
         let mut envelope = OutboxEnvelope::new(
             "outbox_001",
@@ -899,6 +994,28 @@ mod tests {
         assert_eq!(dead.context.tenant_id.as_str(), "tenant_acme");
         assert_eq!(dead.failure_code, "gateway_maintenance");
         assert_eq!(dead.final_state, OutboxState::DeadLetter);
+    }
+
+    #[test]
+    fn dead_letter_record_rejects_invalid_persistent_text() {
+        let envelope = OutboxEnvelope::new(
+            "outbox_001",
+            context("idem_invoice_123"),
+            blake3::hash(b"invoice"),
+            "{}",
+            RetryPolicy::default(),
+        )
+        .unwrap();
+
+        assert!(DeadLetterRecord::new(
+            " dead_001 ",
+            &envelope,
+            "gateway_maintenance",
+            "maintenance window exceeded retry budget",
+        )
+        .is_err());
+        assert!(DeadLetterRecord::new("dead_001", &envelope, "bad\ncode", "message").is_err());
+        assert!(DeadLetterRecord::new("dead_001", &envelope, "gateway_maintenance", "").is_err());
     }
 
     proptest! {
