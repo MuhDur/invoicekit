@@ -14,5 +14,14 @@ publish = false
 name = "invoicekit_reconcile"
 path = "src/lib.rs"
 
+[dependencies]
+invoicekit-ir = { path = "../ir", version = "0.0.0" }
+serde = { version = "1", features = ["derive"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+futures-task = "0.3"
+serde_json = "1"
+
 [lints]
 workspace = true
