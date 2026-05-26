@@ -1,0 +1,35 @@
+{
+  "rulepack_id": "urn:invoicekit:rulepack:en16931:cen:2024-01",
+  "country": "global",
+  "profile": "urn:cen.eu:en16931:2017",
+  "upstream_version": "2017+A1:2019",
+  "effective_from": "2024-01-01",
+  "effective_to": null,
+  "source_url": "https://standards.cen.eu/dyn/www/f?p=204:110:0::::FSP_PROJECT,FSP_ORG_ID:60602,6309&cs=1B61B766636F9FB34B7DBD72CF9A5B5F4",
+  "retrieved_at": "2026-05-26",
+  "codelist_versions": {
+    "iso-3166-1": "2024-01",
+    "iso-4217": "2024-01",
+    "en16931-vat-categories": "2017+A1:2019",
+    "unece-rec20": "20-21-2024-01"
+  },
+  "upstream_checksum_blake3": "0000000000000000000000000000000000000000000000000000000000000000",
+  "generated_metadata": {
+    "generator": "invoicekit-rulepack",
+    "generated_at": "2026-05-26",
+    "notes": "Initial seed manifest. Body checksum is placeholder pending real upstream artifact ingestion."
+  },
+  "parity_fixtures": {
+    "oracle": "jvm:phive",
+    "fixture_set_id": "phive-en16931-2024-01",
+    "expected_parity_pct": 99.9
+  },
+  "known_gaps": [
+    "BR-CO-25 cross-jurisdiction rounding edge case pending upstream clarification."
+  ],
+  "signature_alg": "blake3:identity",
+  "signature": "0000000000000000000000000000000000000000000000000000000000000000",
+  "body": {
+    "rules": []
+  }
+}
