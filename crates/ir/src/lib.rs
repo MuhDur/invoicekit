@@ -78,6 +78,19 @@ impl DocumentNumber {
         Ok(Self(non_empty(value, "document_number")?))
     }
 
+    /// Returns the document number as serialized text.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let number = invoicekit_ir::DocumentNumber::new("INV-2026-0001").unwrap();
+    /// assert_eq!(number.as_str(), "INV-2026-0001");
+    /// ```
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
     fn validate(&self) -> Result<(), IrError> {
         validate_non_empty(&self.0, "document_number")
     }
@@ -138,6 +151,19 @@ impl Iso4217Code {
         } else {
             Err(IrError::InvalidCurrency(value))
         }
+    }
+
+    /// Returns the currency code as serialized text.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let currency = invoicekit_ir::Iso4217Code::new("EUR").unwrap();
+    /// assert_eq!(currency.as_str(), "EUR");
+    /// ```
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 
     fn validate(&self) -> Result<(), IrError> {
