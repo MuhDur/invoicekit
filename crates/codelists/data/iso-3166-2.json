@@ -1,0 +1,24 @@
+{
+  "list": "iso-3166-2",
+  "version": "seed-2024",
+  "effective_from": "2024-01-01",
+  "effective_to": null,
+  "source_url": "https://www.iso.org/obp/ui/#search/code/",
+  "retrieved_at": "2026-05-26",
+  "signature_alg": "sha256:identity",
+  "signature": "30b7aedca70b38134f611e2d77fbf99bd63039e0a58951f665da5b8398499676",
+  "entries": [
+    { "code": "BE-BRU", "label": "Brussels-Capital Region", "valid_from": null, "valid_to": null, "attrs": { "country": "BE", "kind": "region" } },
+    { "code": "BR-SP", "label": "Sao Paulo", "valid_from": null, "valid_to": null, "attrs": { "country": "BR", "kind": "state" } },
+    { "code": "DE-BE", "label": "Berlin", "valid_from": null, "valid_to": null, "attrs": { "country": "DE", "kind": "state" } },
+    { "code": "ES-M", "label": "Madrid", "valid_from": null, "valid_to": null, "attrs": { "country": "ES", "kind": "community" } },
+    { "code": "FR-IDF", "label": "Ile-de-France", "valid_from": null, "valid_to": null, "attrs": { "country": "FR", "kind": "region" } },
+    { "code": "GB-ENG", "label": "England", "valid_from": null, "valid_to": null, "attrs": { "country": "GB", "kind": "country" } },
+    { "code": "IN-MH", "label": "Maharashtra", "valid_from": null, "valid_to": null, "attrs": { "country": "IN", "kind": "state" } },
+    { "code": "IT-25", "label": "Lombardy", "valid_from": null, "valid_to": null, "attrs": { "country": "IT", "kind": "region" } },
+    { "code": "JP-13", "label": "Tokyo", "valid_from": null, "valid_to": null, "attrs": { "country": "JP", "kind": "prefecture" } },
+    { "code": "PL-14", "label": "Mazowieckie", "valid_from": null, "valid_to": null, "attrs": { "country": "PL", "kind": "voivodeship" } },
+    { "code": "SA-01", "label": "Riyadh", "valid_from": null, "valid_to": null, "attrs": { "country": "SA", "kind": "region" } },
+    { "code": "US-CA", "label": "California", "valid_from": null, "valid_to": null, "attrs": { "country": "US", "kind": "state" } }
+  ]
+}

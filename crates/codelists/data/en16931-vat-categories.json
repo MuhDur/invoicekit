@@ -1,0 +1,21 @@
+{
+  "list": "en16931:vat-category",
+  "version": "seed-2024",
+  "effective_from": "2024-01-01",
+  "effective_to": null,
+  "source_url": "https://docs.peppol.eu/poacc/billing/3.0/codelist/UNCL5305/",
+  "retrieved_at": "2026-05-26",
+  "signature_alg": "sha256:identity",
+  "signature": "a9e7f5b35bd7acd0ba35ce69014deb5ad591de0ff5a2a4ae3f4dd0a177d682b2",
+  "entries": [
+    { "code": "S", "label": "Standard rate", "valid_from": null, "valid_to": null, "attrs": { "source": "UNCL5305" } },
+    { "code": "Z", "label": "Zero rated goods", "valid_from": null, "valid_to": null, "attrs": { "source": "UNCL5305" } },
+    { "code": "E", "label": "Exempt from tax", "valid_from": null, "valid_to": null, "attrs": { "source": "UNCL5305" } },
+    { "code": "AE", "label": "Reverse charge", "valid_from": null, "valid_to": null, "attrs": { "source": "UNCL5305" } },
+    { "code": "K", "label": "VAT exempt for EEA intra-community supply", "valid_from": null, "valid_to": null, "attrs": { "source": "UNCL5305" } },
+    { "code": "G", "label": "Free export item, tax not charged", "valid_from": null, "valid_to": null, "attrs": { "source": "UNCL5305" } },
+    { "code": "O", "label": "Services outside scope of tax", "valid_from": null, "valid_to": null, "attrs": { "source": "UNCL5305" } },
+    { "code": "L", "label": "Canary Islands general indirect tax", "valid_from": null, "valid_to": null, "attrs": { "source": "UNCL5305" } },
+    { "code": "M", "label": "Tax for production, services and importation in Ceuta and Melilla", "valid_from": null, "valid_to": null, "attrs": { "source": "UNCL5305" } }
+  ]
+}
