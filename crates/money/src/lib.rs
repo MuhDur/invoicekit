@@ -276,8 +276,13 @@ impl Money {
 
         // Work in minor units to avoid repeated rounding error: scale the
         // amount up by 10^dp, round to the nearest integer with the chosen
-        // dp, then distribute integer minor units across the ratios.
-        let scale_factor = Decimal::from(10u64.checked_pow(dp).unwrap_or(1));
+        // dp, then distribute integer minor units across the ratios. Any
+        // arithmetic that could silently lose precision must surface as a
+        // typed Overflow error so the caller never sees a corrupted split.
+        let scale_factor_u64 = 10u64.checked_pow(dp).ok_or(MoneyError::Overflow {
+            operation: "allocate",
+        })?;
+        let scale_factor = Decimal::from(scale_factor_u64);
         let total_minor = self
             .amount
             .checked_mul(scale_factor)
@@ -302,26 +307,45 @@ impl Money {
         let mut remainders = Vec::with_capacity(ratios.len());
         let mut distributed: u128 = 0;
         for &r in ratios {
-            let num = total_u128.saturating_mul(u128::from(r));
+            // checked_mul propagates overflow as a typed error; the prior
+            // saturating_mul could cap silently and corrupt the share table.
+            let num = total_u128
+                .checked_mul(u128::from(r))
+                .ok_or(MoneyError::Overflow {
+                    operation: "allocate",
+                })?;
             let base = num / sum;
             let rem = num % sum;
             shares.push(base);
             remainders.push(rem);
-            distributed += base;
+            distributed = distributed.checked_add(base).ok_or(MoneyError::Overflow {
+                operation: "allocate",
+            })?;
         }
-        let leftover = total_u128 - distributed;
+        let leftover = total_u128
+            .checked_sub(distributed)
+            .ok_or(MoneyError::Overflow {
+                operation: "allocate",
+            })?;
 
         // Distribute the leftover minor units to the largest remainders;
         // ties broken by lowest original index (so the result is stable).
         let mut order: Vec<usize> = (0..ratios.len()).collect();
         order.sort_by(|&a, &b| remainders[b].cmp(&remainders[a]).then_with(|| a.cmp(&b)));
-        for &idx in order.iter().take(usize::try_from(leftover).unwrap_or(0)) {
-            shares[idx] += 1;
+        let take_n = usize::try_from(leftover).map_err(|_| MoneyError::Overflow {
+            operation: "allocate",
+        })?;
+        for &idx in order.iter().take(take_n) {
+            shares[idx] = shares[idx].checked_add(1).ok_or(MoneyError::Overflow {
+                operation: "allocate",
+            })?;
         }
 
         // Convert each minor-unit share back into a Money at the requested
-        // scale, restoring the original sign.
-        let divisor = Decimal::from(10u64.checked_pow(dp).unwrap_or(1));
+        // scale, restoring the original sign. The divisor reuses the
+        // already-checked scale_factor_u64 from above so any future change
+        // can't reintroduce the silent-fallback bug.
+        let divisor = Decimal::from(scale_factor_u64);
         let mut out = Vec::with_capacity(shares.len());
         for share in shares {
             let amt_minor = Decimal::from(share);
@@ -464,6 +488,40 @@ mod tests {
         let total = eur(Decimal::new(100, 2));
         let err = total.allocate(&[0, 0, 0], 2).unwrap_err();
         assert!(matches!(err, MoneyError::AllocateZeroSumRatios));
+    }
+
+    /// Regression for invoices-6jsl: an oversized `dp` argument used to fall
+    /// back to scale factor 1 and silently corrupt the result; now it must
+    /// surface as `MoneyError::Overflow`.
+    #[test]
+    fn allocate_oversized_dp_overflows() {
+        let total = eur(Decimal::new(100, 2));
+        // 10u64.pow(20) overflows u64, so dp >= 20 must be rejected.
+        let err = total.allocate(&[1, 1], 20).unwrap_err();
+        assert!(matches!(
+            err,
+            MoneyError::Overflow {
+                operation: "allocate"
+            }
+        ));
+    }
+
+    /// Regression for invoices-6jsl: a huge `(total_minor, ratio)` product
+    /// used to saturate at `u128::MAX` and corrupt the share table; now the
+    /// internal `checked_mul` must surface the overflow.
+    #[test]
+    fn allocate_ratio_product_overflow_is_reported() {
+        // Construct an amount whose minor-unit count is near u128::MAX so the
+        // ratio multiplication overflows. Use dp = 0 so total_minor == amount.
+        let huge_amount = Decimal::MAX;
+        let total = Money::new(huge_amount, Iso4217Code::new("EUR").unwrap());
+        let err = total.allocate(&[u64::MAX, u64::MAX], 0).unwrap_err();
+        assert!(matches!(
+            err,
+            MoneyError::Overflow {
+                operation: "allocate"
+            }
+        ));
     }
 
     #[test]
