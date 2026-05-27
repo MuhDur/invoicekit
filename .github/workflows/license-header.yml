@@ -38,6 +38,8 @@ jobs:
         run: pytest tools/release-checks/test_typescript_types_match.py -q
       - name: Run country feasibility manifest gate (T-770+)
         run: pytest tools/release-checks/test_country_manifests.py -q
+      - name: Run CII D16B coverage gate (invoices-rsho)
+        run: pytest tools/release-checks/test_cii_coverage.py -q
       - name: Run conformance corpus metadata tests
         run: pytest tools/conformance-corpus/tests -q
       - name: Check Apache 2.0 SPDX header on every Rust source

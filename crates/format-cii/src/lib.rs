@@ -5,7 +5,9 @@
 //!
 //! This crate maps the CII D16B `CrossIndustryInvoice` syntax used by
 //! Factur-X/ZUGFeRD into the core [`invoicekit_ir::CommercialDocument`] fields
-//! that exist today. The serializer emits deterministic CII XML and then
+//! that exist today. CII standard fields without core IR homes are preserved as
+//! CII document-field extensions instead of being overloaded as InvoiceKit
+//! operational metadata. The serializer emits deterministic CII XML and then
 //! canonicalizes it with [`invoicekit_canonical::canonicalize_xml`].
 
 use std::str::FromStr as _;
@@ -21,8 +23,11 @@ use invoicekit_ir::{
 use quick_xml::events::{attributes::AttrError, BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
 use rust_decimal::Decimal;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use thiserror::Error;
+
+pub mod mapping;
 
 const BEAD_ID: &str = "invoices-t-041-cii-parser-serializer-gyl";
 const CII_RSM_NAMESPACE_URI: &str = "urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100";
@@ -83,8 +88,8 @@ pub enum CiiError {
     /// IR validation failed after parsing.
     #[error("parsed CII did not satisfy InvoiceKit IR validation: {0}")]
     InvalidIr(#[from] IrError),
-    /// JSON conversion failed while reading opaque IR newtypes.
-    #[error("could not serialize InvoiceKit IR helper value: {0}")]
+    /// JSON conversion failed while reading opaque IR newtypes or metadata.
+    #[error("could not convert InvoiceKit IR helper value: {0}")]
     InvalidIrJson(#[from] serde_json::Error),
     /// Canonical XML output could not be produced.
     #[error("could not canonicalize CII XML output: {0}")]
@@ -302,8 +307,12 @@ struct ParseState {
     tax_point_date: Option<String>,
     due_date: Option<String>,
     currency: Option<String>,
-    tenant_id: Option<String>,
-    trace_id: Option<String>,
+    metadata_tenant_id: Option<String>,
+    metadata_trace_id: Option<String>,
+    metadata_source_system: Option<String>,
+    cii_buyer_reference: Option<String>,
+    cii_business_process_context_ids: Vec<String>,
+    current_context_parameter: Option<DocumentContextParameterBuilder>,
     supplier: PartyBuilder,
     customer: PartyBuilder,
     payee: PartyBuilder,
@@ -330,6 +339,9 @@ impl ParseState {
         if stack.is_empty() && name != "CrossIndustryInvoice" {
             return Err(CiiError::UnsupportedRoot(name.to_owned()));
         }
+        if let Some(kind) = DocumentContextKind::from_element(name) {
+            self.current_context_parameter = Some(DocumentContextParameterBuilder::new(kind));
+        }
         if name == "IncludedSupplyChainTradeLineItem" {
             self.current_line = Some(LineBuilder::default());
         }
@@ -351,6 +363,17 @@ impl ParseState {
     }
 
     fn end_element(&mut self, name: &str) -> Result<(), CiiError> {
+        if self
+            .current_context_parameter
+            .as_ref()
+            .is_some_and(|parameter| parameter.kind.element_name() == name)
+        {
+            let parameter = self
+                .current_context_parameter
+                .take()
+                .ok_or(CiiError::MissingElement("ram:DocumentContextParameter"))?;
+            self.apply_context_parameter(parameter)?;
+        }
         if name == "IncludedSupplyChainTradeLineItem" {
             let line = self
                 .current_line
@@ -377,6 +400,18 @@ impl ParseState {
         let value = raw.trim();
         if value.is_empty() {
             return Ok(());
+        }
+
+        if let Some(parameter) = self.current_context_parameter.as_mut() {
+            let container = parameter.kind.element_name();
+            if path_ends(stack, &[container, "ID"]) {
+                parameter.id = Some(value.to_owned());
+                return Ok(());
+            }
+            if path_ends(stack, &[container, "Value"]) {
+                parameter.value = Some(value.to_owned());
+                return Ok(());
+            }
         }
 
         if let Some(line) = self.current_line.as_mut() {
@@ -597,12 +632,7 @@ impl ParseState {
         ) {
             self.currency = Some(value.to_owned());
         } else if path_ends(stack, &["ApplicableHeaderTradeAgreement", "BuyerReference"]) {
-            self.tenant_id = Some(value.to_owned());
-        } else if path_ends(
-            stack,
-            &["BusinessProcessSpecifiedDocumentContextParameter", "ID"],
-        ) {
-            self.trace_id = Some(value.to_owned());
+            self.cii_buyer_reference = Some(value.to_owned());
         } else if path_ends(stack, &["ExchangedDocument", "IncludedNote", "Content"]) {
             self.notes.push(LocalizedString {
                 language: DEFAULT_LANGUAGE.to_owned(),
@@ -620,6 +650,30 @@ impl ParseState {
         Ok(())
     }
 
+    fn apply_context_parameter(
+        &mut self,
+        parameter: DocumentContextParameterBuilder,
+    ) -> Result<(), CiiError> {
+        match parameter.kind {
+            DocumentContextKind::BusinessProcess => {
+                if let Some(id) = parameter.id {
+                    self.cii_business_process_context_ids.push(id);
+                }
+            }
+            DocumentContextKind::Application => {
+                if parameter.id.as_deref() == Some(mapping::INVOICEKIT_CII_METADATA_EXTENSION_URN) {
+                    if let Some(value) = parameter.value {
+                        let metadata: CiiMetadataPayload = serde_json::from_str(&value)?;
+                        self.metadata_tenant_id = Some(metadata.tenant_id);
+                        self.metadata_trace_id = Some(metadata.trace_id);
+                        self.metadata_source_system = metadata.source_system;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn finish(self) -> Result<CommercialDocument, CiiError> {
         let document_type = self
             .document_type
@@ -633,10 +687,34 @@ impl ParseState {
         let currency = self
             .currency
             .ok_or(CiiError::MissingElement("ram:InvoiceCurrencyCode"))?;
-        let tenant_id = self.tenant_id.unwrap_or_else(|| "cii-import".to_owned());
+        let tenant_id = self
+            .metadata_tenant_id
+            .unwrap_or_else(|| "cii-import".to_owned());
         let trace_id = self
-            .trace_id
+            .metadata_trace_id
             .unwrap_or_else(|| format!("{BEAD_ID}:{document_number}"));
+        let mut extensions = Vec::<JurisdictionExtension>::new();
+        let mut cii_document_fields = Map::new();
+        if let Some(value) = self.cii_buyer_reference {
+            cii_document_fields.insert("buyer_reference".to_owned(), Value::String(value));
+        }
+        if !self.cii_business_process_context_ids.is_empty() {
+            cii_document_fields.insert(
+                "business_process_context_ids".to_owned(),
+                Value::Array(
+                    self.cii_business_process_context_ids
+                        .into_iter()
+                        .map(Value::String)
+                        .collect(),
+                ),
+            );
+        }
+        if !cii_document_fields.is_empty() {
+            extensions.push(JurisdictionExtension::new(
+                mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN,
+                Value::Object(cii_document_fields),
+            )?);
+        }
         let due_date = self.due_date.map(DateOnly::new).transpose()?;
         let payment_terms = self
             .payment_terms_description
@@ -683,11 +761,11 @@ impl ParseState {
             attachments: Vec::<Attachment>::new(),
             references: Vec::<DocumentReference>::new(),
             notes: self.notes,
-            extensions: Vec::<JurisdictionExtension>::new(),
+            extensions,
             meta: DocumentMeta {
                 tenant_id,
                 trace_id,
-                source_system: None,
+                source_system: self.metadata_source_system,
             },
         })?;
         Ok(document)
@@ -703,6 +781,54 @@ impl ParseState {
             }
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DocumentContextKind {
+    BusinessProcess,
+    Application,
+}
+
+impl DocumentContextKind {
+    fn from_element(name: &str) -> Option<Self> {
+        match name {
+            "BusinessProcessSpecifiedDocumentContextParameter" => Some(Self::BusinessProcess),
+            "ApplicationSpecifiedDocumentContextParameter" => Some(Self::Application),
+            _ => None,
+        }
+    }
+
+    const fn element_name(self) -> &'static str {
+        match self {
+            Self::BusinessProcess => "BusinessProcessSpecifiedDocumentContextParameter",
+            Self::Application => "ApplicationSpecifiedDocumentContextParameter",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct DocumentContextParameterBuilder {
+    kind: DocumentContextKind,
+    id: Option<String>,
+    value: Option<String>,
+}
+
+impl DocumentContextParameterBuilder {
+    const fn new(kind: DocumentContextKind) -> Self {
+        Self {
+            kind,
+            id: None,
+            value: None,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct CiiMetadataPayload {
+    tenant_id: String,
+    trace_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_system: Option<String>,
 }
 
 #[derive(Default)]
@@ -891,12 +1017,21 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
     write_xml_attr(CII_RAM_NAMESPACE_URI, &mut xml);
     xml.push_str(r#"">"#);
     xml.push_str("<rsm:ExchangedDocumentContext>");
-    xml.push_str("<ram:BusinessProcessSpecifiedDocumentContextParameter>");
-    write_text_element(&mut xml, "ram:ID", &document.meta.trace_id);
-    xml.push_str("</ram:BusinessProcessSpecifiedDocumentContextParameter>");
-    xml.push_str("<ram:GuidelineSpecifiedDocumentContextParameter>");
-    write_text_element(&mut xml, "ram:ID", CORE_GUIDELINE_ID);
-    xml.push_str("</ram:GuidelineSpecifiedDocumentContextParameter>");
+    for value in cii_document_field_values(document, "business_process_context_ids") {
+        write_context_parameter(
+            &mut xml,
+            "ram:BusinessProcessSpecifiedDocumentContextParameter",
+            value,
+            None,
+        );
+    }
+    write_invoicekit_metadata_context_parameter(&mut xml, &document.meta)?;
+    write_context_parameter(
+        &mut xml,
+        "ram:GuidelineSpecifiedDocumentContextParameter",
+        CORE_GUIDELINE_ID,
+        None,
+    );
     xml.push_str("</rsm:ExchangedDocumentContext>");
 
     xml.push_str("<rsm:ExchangedDocument>");
@@ -919,7 +1054,9 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
         write_line(&mut xml, line, &currency);
     }
     xml.push_str("<ram:ApplicableHeaderTradeAgreement>");
-    write_text_element(&mut xml, "ram:BuyerReference", &document.meta.tenant_id);
+    if let Some(value) = cii_document_field_value(document, "buyer_reference") {
+        write_text_element(&mut xml, "ram:BuyerReference", value);
+    }
     write_party(&mut xml, "ram:SellerTradeParty", &document.supplier)?;
     write_party(&mut xml, "ram:BuyerTradeParty", &document.customer)?;
     xml.push_str("</ram:ApplicableHeaderTradeAgreement>");
@@ -970,6 +1107,58 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
     xml.push_str("</rsm:SupplyChainTradeTransaction>");
     xml.push_str("</rsm:CrossIndustryInvoice>");
     Ok(xml)
+}
+
+fn write_context_parameter(xml: &mut String, container: &str, id: &str, value: Option<&str>) {
+    xml.push('<');
+    xml.push_str(container);
+    xml.push('>');
+    write_text_element(xml, "ram:ID", id);
+    if let Some(value) = value {
+        write_text_element(xml, "ram:Value", value);
+    }
+    xml.push_str("</");
+    xml.push_str(container);
+    xml.push('>');
+}
+
+fn write_invoicekit_metadata_context_parameter(
+    xml: &mut String,
+    meta: &DocumentMeta,
+) -> Result<(), CiiError> {
+    let payload = CiiMetadataPayload {
+        tenant_id: meta.tenant_id.clone(),
+        trace_id: meta.trace_id.clone(),
+        source_system: meta.source_system.clone(),
+    };
+    let value = serde_json::to_string(&payload)?;
+    write_context_parameter(
+        xml,
+        "ram:ApplicationSpecifiedDocumentContextParameter",
+        mapping::INVOICEKIT_CII_METADATA_EXTENSION_URN,
+        Some(&value),
+    );
+    Ok(())
+}
+
+fn cii_document_field_value<'a>(document: &'a CommercialDocument, key: &str) -> Option<&'a str> {
+    document
+        .extensions
+        .iter()
+        .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
+        .and_then(|extension| extension.payload.get(key))
+        .and_then(Value::as_str)
+}
+
+fn cii_document_field_values<'a>(document: &'a CommercialDocument, key: &str) -> Vec<&'a str> {
+    document
+        .extensions
+        .iter()
+        .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
+        .and_then(|extension| extension.payload.get(key))
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default()
 }
 
 fn write_party(xml: &mut String, container: &str, party: &Party) -> Result<(), CiiError> {
@@ -1402,14 +1591,16 @@ fn party_role(stack: &[String]) -> Option<PartyRole> {
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
+    use serde_json::json;
 
-    use super::{crate_name, from_xml, to_xml, CiiError};
+    use super::{crate_name, from_xml, mapping, to_xml, CiiError};
     use invoicekit_canonical::canonicalize_xml;
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly, DecimalValue,
         DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentType, Iso4217Code,
-        LocalizedString, MonetaryTotal, Party, PartyTaxId, PaymentInstruction,
-        PaymentInstructionKind, PaymentTerms, PostalAddress, SchemaVersion, TaxCategorySummary,
+        JurisdictionExtension, LocalizedString, MonetaryTotal, Party, PartyTaxId,
+        PaymentInstruction, PaymentInstructionKind, PaymentTerms, PostalAddress, SchemaVersion,
+        TaxCategorySummary,
     };
     use rust_decimal::Decimal;
 
@@ -1432,6 +1623,102 @@ mod tests {
         let xml = to_xml(&document).unwrap();
         let parsed = from_xml(&xml).unwrap();
         assert_eq!(parsed, document);
+    }
+
+    #[test]
+    fn metadata_uses_application_context_without_overloading_cii_fields() {
+        let document = fixture(DocumentType::Invoice, 21);
+        let xml = to_xml(&document).unwrap();
+
+        assert!(xml.contains("ApplicationSpecifiedDocumentContextParameter"));
+        assert!(xml.contains(mapping::INVOICEKIT_CII_METADATA_EXTENSION_URN));
+        assert!(!xml.contains("BusinessProcessSpecifiedDocumentContextParameter"));
+        assert!(!xml.contains("BuyerReference"));
+        assert_eq!(from_xml(&xml).unwrap(), document);
+    }
+
+    #[test]
+    fn parser_preserves_standard_cii_fields_as_document_extension() {
+        let document = fixture(DocumentType::Invoice, 22);
+        let xml = to_xml(&document).unwrap();
+        let application_context = xml
+            .find("<ram:ApplicationSpecifiedDocumentContextParameter")
+            .unwrap();
+        let with_business_process = format!(
+            "{}{}{}",
+            &xml[..application_context],
+            "<ram:BusinessProcessSpecifiedDocumentContextParameter><ram:ID>PROCESS-42</ram:ID></ram:BusinessProcessSpecifiedDocumentContextParameter><ram:BusinessProcessSpecifiedDocumentContextParameter><ram:ID>PROCESS-43</ram:ID></ram:BusinessProcessSpecifiedDocumentContextParameter>",
+            &xml[application_context..],
+        );
+        assert!(with_business_process.contains("PROCESS-42"));
+        let with_buyer_reference = with_business_process.replace(
+            "<ram:SellerTradeParty>",
+            "<ram:BuyerReference>BUYER-PO-7</ram:BuyerReference><ram:SellerTradeParty>",
+        );
+
+        let parsed = from_xml(&with_buyer_reference).unwrap();
+        assert_eq!(parsed.meta, document.meta);
+        let extension = parsed
+            .extensions
+            .iter()
+            .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
+            .unwrap();
+        assert_eq!(
+            extension
+                .payload
+                .get("buyer_reference")
+                .and_then(|value| value.as_str()),
+            Some("BUYER-PO-7")
+        );
+        assert_eq!(
+            extension
+                .payload
+                .get("business_process_context_ids")
+                .and_then(|value| value.as_array())
+                .map(Vec::as_slice),
+            Some([json!("PROCESS-42"), json!("PROCESS-43")].as_slice())
+        );
+    }
+
+    #[test]
+    fn serializer_emits_preserved_cii_document_fields() {
+        let mut document = fixture(DocumentType::Invoice, 23);
+        document.extensions.push(
+            JurisdictionExtension::new(
+                mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN,
+                json!({
+                    "buyer_reference": "BUYER-PO-8",
+                    "business_process_context_ids": ["PROCESS-43", "PROCESS-44"]
+                }),
+            )
+            .unwrap(),
+        );
+
+        let xml = to_xml(&document).unwrap();
+        assert!(xml.contains("BusinessProcessSpecifiedDocumentContextParameter"));
+        assert!(xml.contains("<ram:ID>PROCESS-43</ram:ID>"));
+        assert!(xml.contains("<ram:ID>PROCESS-44</ram:ID>"));
+        assert!(xml.contains("<ram:BuyerReference>BUYER-PO-8</ram:BuyerReference>"));
+        assert_eq!(from_xml(&xml).unwrap(), document);
+    }
+
+    #[test]
+    fn mapping_decisions_name_standard_field_boundaries() {
+        assert_eq!(mapping::NAMED_MAPPING_DECISIONS.len(), 3);
+        assert!(mapping::NAMED_MAPPING_DECISIONS.iter().any(|decision| {
+            decision.element == "HeaderTradeAgreementType/BuyerReference"
+                && decision.class == "cii_document_field_extension"
+                && decision.rationale.contains("never tenant_id")
+        }));
+        assert!(mapping::NAMED_MAPPING_DECISIONS.iter().any(|decision| {
+            decision.element
+                == "ExchangedDocumentContextType/BusinessProcessSpecifiedDocumentContextParameter"
+                && decision.class == "cii_document_field_extension"
+                && decision.rationale.contains("never trace_id")
+                && decision
+                    .representation
+                    .contains("business_process_context_ids[]")
+        }));
     }
 
     #[test]
