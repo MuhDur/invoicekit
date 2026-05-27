@@ -1,0 +1,101 @@
+{
+  "schema_version": "1.0",
+  "fixture_id": "ik-synthetic-ubl-2-1-0033",
+  "corpus_partition": "synthetic",
+  "publication": "public",
+  "status": "active",
+  "title": "Synthetic UBL 2.1 invoice 0033",
+  "description": "Public synthetic UBL 2.1 fixture for Peppol PINT (international) round-trip conformance, profile coverage, and byte-stable serializer regression.",
+  "artifact": {
+    "path": "fixture.xml",
+    "media_type": "application/xml",
+    "sha256": "204729c5d32e81544b7728cedb45b9f8aea05d383d1150466d4c82ae3f3960fb",
+    "size_bytes": 10501,
+    "format_family": "ubl",
+    "document_type": "invoice"
+  },
+  "jurisdiction": {
+    "countries": [
+      "IT",
+      "NL"
+    ],
+    "profile": "Peppol PINT (international)",
+    "syntax": "OASIS UBL 2.1 Invoice / CreditNote",
+    "version": "UBL-2.1"
+  },
+  "license": {
+    "license_id": "CC0-1.0",
+    "copyright_holder": "InvoiceKit Authors",
+    "redistribution": "public-ok"
+  },
+  "provenance": {
+    "source_kind": "generated",
+    "source_name": "InvoiceKit invoices-bbqm synthetic UBL corpus",
+    "source_url": "urn:invoicekit:conformance:ubl-2-1:synthetic",
+    "generated_by": "crates/format-ubl/examples/generate_ubl_corpus.rs",
+    "generator_version": "invoices-bbqm-v1",
+    "created_at": "2026-05-27T11:00:00Z"
+  },
+  "pii": {
+    "classification": "synthetic",
+    "redaction_status": "not-required",
+    "contains_personal_data": false,
+    "notes": "All parties, identifiers, references, and addresses are fictional."
+  },
+  "coverage": {
+    "capabilities": [
+      "parse",
+      "serialize",
+      "validate"
+    ],
+    "scenarios": [
+      "accounting-cost",
+      "buyer-reference",
+      "byte-stable-serializer-output",
+      "customization-and-profile-ids",
+      "format-ubl-round-trip",
+      "header-allowance-total",
+      "included-notes",
+      "invoice-type-code-380",
+      "party-contact",
+      "party-tax-registration",
+      "payment-means-iban",
+      "payment-reference",
+      "payment-terms",
+      "profile-peppol-pint",
+      "ubl-2-1-document",
+      "vat-category-zero"
+    ],
+    "negative_case": false
+  },
+  "validation": {
+    "expected_outcome": "valid",
+    "validators": [
+      {
+        "name": "invoicekit-format-ubl parse-serialize-parse",
+        "version": "0.0.0",
+        "result": "pass"
+      },
+      {
+        "name": "invoicekit-format-ubl byte-stability",
+        "version": "0.0.0",
+        "result": "pass"
+      }
+    ],
+    "known_gaps": [
+      "Synthetic corpus targets current InvoiceKit UBL IR coverage; full UBL 2.1 schema element coverage is tracked by the UBL coverage matrix."
+    ]
+  },
+  "maintenance": {
+    "owner": "InvoiceKit maintainers",
+    "created_at": "2026-05-27",
+    "reviewed_at": "2026-05-27",
+    "review_due": "2027-05-27",
+    "labels": [
+      "synthetic",
+      "ubl",
+      "2-1",
+      "roundtrip"
+    ]
+  }
+}
