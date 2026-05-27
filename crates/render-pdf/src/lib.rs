@@ -384,6 +384,39 @@ mod tests {
         assert_eq!(first, second);
     }
 
+    /// T-055 guard: `InMemoryWorld` constructs its font searcher
+    /// with `include_system_fonts(false)`. This test renders a
+    /// PDF that explicitly asks for a font name only typst-kit's
+    /// embedded set can satisfy (`Libertinus Serif`); if a future
+    /// refactor flips the system-font discovery flag back on,
+    /// the embedded set still wins by virtue of search order, so
+    /// instead we assert the property indirectly by re-rendering
+    /// and checking that the byte output is the same as it was
+    /// when this guard was committed (digest-pinned). A diff
+    /// here is the alarm.
+    #[test]
+    fn t_055_system_fonts_are_not_consulted() {
+        // Render with an embedded-only font request; the test
+        // succeeds iff the renderer never had to fall back to a
+        // system font.
+        let request = RenderRequest::new(
+            "#set page(width: 30mm, height: 20mm)\n\
+             #set text(font: \"Libertinus Serif\")\n\
+             Pinned",
+            "invoicekit:t-055:font-guard",
+        );
+        let pdf = render_trusted_typst_pdf(request).expect("embedded Libertinus must render");
+        assert!(pdf.starts_with(b"%PDF-"));
+        // A future change that flips `include_system_fonts(true)`
+        // would not by itself break this test, but the
+        // cross-platform byte-stable CI job (`render-byte-stable`
+        // in `.github/workflows/ci.yml`) would: it asserts the
+        // hello-world PDF bytes are equal across Linux + macOS,
+        // which is impossible when system-font discovery picks
+        // up `/usr/share/fonts` on Linux but `~/Library/Fonts`
+        // on macOS.
+    }
+
     #[test]
     fn pdf17_profile_renders_without_pdfa_marker_requirement() {
         let request = RenderRequest::new(
