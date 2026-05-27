@@ -441,6 +441,7 @@ struct ParseState {
     monetary_total: MonetaryTotalBuilder,
     notes: Vec<LocalizedString>,
     preserved_xml: Vec<CiiPreservedXml>,
+    current_line_preserved_start: Option<usize>,
 }
 
 impl ParseState {
@@ -458,6 +459,7 @@ impl ParseState {
         }
         if name == "IncludedSupplyChainTradeLineItem" {
             self.current_line = Some(LineBuilder::default());
+            self.current_line_preserved_start = Some(self.preserved_xml.len());
         }
         if name == "ApplicableTradeTax"
             && self.current_line.is_none()
@@ -494,6 +496,7 @@ impl ParseState {
                 .take()
                 .ok_or(CiiError::MissingElement("IncludedSupplyChainTradeLineItem"))?
                 .build()?;
+            self.assign_current_line_preserved_xml(&line.id);
             self.lines.push(line);
         }
         if name == "ApplicableTradeTax" {
@@ -975,6 +978,15 @@ impl ParseState {
         validate_preserved_xml_fragment(&preserved)?;
         self.preserved_xml.push(preserved);
         Ok(())
+    }
+
+    fn assign_current_line_preserved_xml(&mut self, line_id: &str) {
+        let start = self.current_line_preserved_start.take().unwrap_or(0);
+        for preserved in self.preserved_xml.iter_mut().skip(start) {
+            if preserved.line_id.is_none() && is_line_scoped_container_path(&preserved.container) {
+                preserved.line_id = Some(line_id.to_owned());
+            }
+        }
     }
 }
 
@@ -1915,6 +1927,50 @@ fn cii_preserved_xml_values(
     Ok(matching)
 }
 
+fn has_preserved_xml(
+    document: &CommercialDocument,
+    container: &str,
+    line_id: Option<&str>,
+) -> Result<bool, CiiError> {
+    Ok(!cii_preserved_xml_values(document, container, line_id)?.is_empty())
+}
+
+fn has_preserved_xml_at_or_below(
+    document: &CommercialDocument,
+    container: &str,
+    line_id: Option<&str>,
+) -> Result<bool, CiiError> {
+    let Some(values) = document
+        .extensions
+        .iter()
+        .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
+        .and_then(|extension| extension.payload.get(CII_PRESERVED_XML_KEY))
+    else {
+        return Ok(false);
+    };
+    let Some(items) = values.as_array() else {
+        return Err(CiiError::InvalidPreservedXml {
+            container: container.to_owned(),
+            element: CII_PRESERVED_XML_KEY.to_owned(),
+            message: "preserved_xml must be an array".to_owned(),
+        });
+    };
+
+    for item in items {
+        let preserved = CiiPreservedXml::from_value(item)?;
+        validate_preserved_xml_entry(document, &preserved)?;
+        let in_subtree = preserved.container == container
+            || preserved
+                .container
+                .strip_prefix(container)
+                .is_some_and(|suffix| suffix.starts_with('/'));
+        if in_subtree && preserved.line_id.as_deref() == line_id {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 #[allow(clippy::too_many_lines)]
 fn write_party(
     xml: &mut String,
@@ -1935,65 +1991,75 @@ fn write_party(
         None,
         "SpecifiedLegalOrganization",
     )?;
-    if let Some(id) = &party.id {
+    let legal_organization_path = format!("{container_path}/SpecifiedLegalOrganization");
+    if party.id.is_some() || has_preserved_xml(document, &legal_organization_path, None)? {
         xml.push_str("<ram:SpecifiedLegalOrganization>");
-        write_text_element(xml, "ram:ID", id);
-        write_preserved_xml_after_all(
-            xml,
-            document,
-            &format!("{container_path}/SpecifiedLegalOrganization"),
-            None,
-        )?;
+        write_preserved_xml_before(xml, document, &legal_organization_path, None, "ID")?;
+        if let Some(id) = &party.id {
+            write_text_element(xml, "ram:ID", id);
+        }
+        write_preserved_xml_after_all(xml, document, &legal_organization_path, None)?;
         xml.push_str("</ram:SpecifiedLegalOrganization>");
     }
     write_preserved_xml_before(xml, document, container_path, None, "DefinedTradeContact")?;
-    if let Some(contact) = &party.contact {
-        if contact.name.is_some() || contact.email.is_some() || contact.phone.is_some() {
-            let contact_path = format!("{container_path}/DefinedTradeContact");
-            xml.push_str("<ram:DefinedTradeContact>");
-            write_preserved_xml_before(xml, document, &contact_path, None, "PersonName")?;
-            if let Some(name) = &contact.name {
-                write_text_element(xml, "ram:PersonName", name);
-            }
-            write_preserved_xml_before(
-                xml,
-                document,
-                &contact_path,
-                None,
-                "TelephoneUniversalCommunication",
-            )?;
-            if let Some(phone) = &contact.phone {
-                xml.push_str("<ram:TelephoneUniversalCommunication>");
-                write_text_element(xml, "ram:CompleteNumber", phone);
-                write_preserved_xml_after_all(
-                    xml,
-                    document,
-                    &format!("{contact_path}/TelephoneUniversalCommunication"),
-                    None,
-                )?;
-                xml.push_str("</ram:TelephoneUniversalCommunication>");
-            }
-            write_preserved_xml_before(
-                xml,
-                document,
-                &contact_path,
-                None,
-                "EmailURIUniversalCommunication",
-            )?;
-            if let Some(email) = &contact.email {
-                xml.push_str("<ram:EmailURIUniversalCommunication>");
-                write_text_element(xml, "ram:URIID", email);
-                write_preserved_xml_after_all(
-                    xml,
-                    document,
-                    &format!("{contact_path}/EmailURIUniversalCommunication"),
-                    None,
-                )?;
-                xml.push_str("</ram:EmailURIUniversalCommunication>");
-            }
-            write_preserved_xml_after_all(xml, document, &contact_path, None)?;
-            xml.push_str("</ram:DefinedTradeContact>");
+    let contact_path = format!("{container_path}/DefinedTradeContact");
+    let contact = party.contact.as_ref();
+    let contact_has_known_fields = contact.is_some_and(|contact| {
+        contact.name.is_some() || contact.email.is_some() || contact.phone.is_some()
+    });
+    let contact_has_preserved_xml = has_preserved_xml_at_or_below(document, &contact_path, None)?;
+    if contact_has_known_fields || contact_has_preserved_xml {
+        xml.push_str("<ram:DefinedTradeContact>");
+        write_preserved_xml_before(xml, document, &contact_path, None, "PersonName")?;
+        if let Some(name) = contact.and_then(|contact| contact.name.as_ref()) {
+            write_text_element(xml, "ram:PersonName", name);
         }
+        write_preserved_xml_before(
+            xml,
+            document,
+            &contact_path,
+            None,
+            "TelephoneUniversalCommunication",
+        )?;
+        let telephone_path = format!("{contact_path}/TelephoneUniversalCommunication");
+        if contact.and_then(|contact| contact.phone.as_ref()).is_some()
+            || has_preserved_xml(document, &telephone_path, None)?
+        {
+            xml.push_str("<ram:TelephoneUniversalCommunication>");
+            let phone = contact.and_then(|contact| contact.phone.as_ref());
+            if let Some(phone) = phone {
+                write_preserved_xml_before(xml, document, &telephone_path, None, "CompleteNumber")?;
+                write_text_element(xml, "ram:CompleteNumber", phone);
+                write_preserved_xml_after_all(xml, document, &telephone_path, None)?;
+            } else {
+                write_preserved_xml(xml, document, &telephone_path, None, None, None)?;
+            }
+            xml.push_str("</ram:TelephoneUniversalCommunication>");
+        }
+        write_preserved_xml_before(
+            xml,
+            document,
+            &contact_path,
+            None,
+            "EmailURIUniversalCommunication",
+        )?;
+        let email_path = format!("{contact_path}/EmailURIUniversalCommunication");
+        if contact.and_then(|contact| contact.email.as_ref()).is_some()
+            || has_preserved_xml(document, &email_path, None)?
+        {
+            xml.push_str("<ram:EmailURIUniversalCommunication>");
+            let email = contact.and_then(|contact| contact.email.as_ref());
+            if let Some(email) = email {
+                write_preserved_xml_before(xml, document, &email_path, None, "URIID")?;
+                write_text_element(xml, "ram:URIID", email);
+                write_preserved_xml_after_all(xml, document, &email_path, None)?;
+            } else {
+                write_preserved_xml(xml, document, &email_path, None, None, None)?;
+            }
+            xml.push_str("</ram:EmailURIUniversalCommunication>");
+        }
+        write_preserved_xml_after_all(xml, document, &contact_path, None)?;
+        xml.push_str("</ram:DefinedTradeContact>");
     }
     write_preserved_xml_before(xml, document, container_path, None, "PostalTradeAddress")?;
     write_address(
@@ -2779,9 +2845,8 @@ fn known_cii_children(parent: &str) -> Option<&'static [&'static str]> {
             "TelephoneUniversalCommunication",
             "EmailURIUniversalCommunication",
         ]),
-        "TelephoneUniversalCommunication" | "EmailURIUniversalCommunication" => {
-            Some(&["CompleteNumber", "URIID"])
-        }
+        "TelephoneUniversalCommunication" => Some(&["CompleteNumber"]),
+        "EmailURIUniversalCommunication" => Some(&["URIID"]),
         "PostalTradeAddress" => Some(&[
             "PostcodeCode",
             "LineOne",
@@ -3385,9 +3450,7 @@ fn validate_preserved_xml_entry(
             "container path is not replayable by the CII serializer",
         ));
     }
-    let line_scoped = preserved.container.starts_with(
-        "CrossIndustryInvoice/SupplyChainTradeTransaction/IncludedSupplyChainTradeLineItem",
-    );
+    let line_scoped = is_line_scoped_container_path(&preserved.container);
     match (line_scoped, preserved.line_id.as_deref()) {
         (true, None) => {
             return Err(preserved_xml_error(
@@ -3410,6 +3473,12 @@ fn validate_preserved_xml_entry(
         _ => {}
     }
     Ok(())
+}
+
+fn is_line_scoped_container_path(container: &str) -> bool {
+    container.starts_with(
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/IncludedSupplyChainTradeLineItem",
+    )
 }
 
 fn is_replayable_container_path(container: &str) -> bool {
@@ -3758,7 +3827,7 @@ fn party_role(stack: &[String]) -> Option<PartyRole> {
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     use super::{
         crate_name, from_xml, mapping, to_xml, CiiError, CII_RAM_NAMESPACE_URI,
@@ -4027,6 +4096,117 @@ mod tests {
             .find("<ram:Name>Supplier GmbH</ram:Name>")
             .unwrap();
         assert!(id_pos < name_pos);
+        assert_eq!(from_xml(&serialized).unwrap(), parsed);
+    }
+
+    #[test]
+    fn parser_assigns_line_id_to_pre_lineid_preserved_cii_fragments() {
+        let document = fixture(DocumentType::Invoice, 38);
+        let xml = to_xml(&document).unwrap();
+        let description_code = format!(
+            r#"<ram:DescriptionCode xmlns:ram="{CII_RAM_NAMESPACE_URI}">AAA</ram:DescriptionCode>"#
+        );
+        let with_description_code = xml.replacen(
+            "<ram:AssociatedDocumentLineDocument>",
+            &format!("{description_code}<ram:AssociatedDocumentLineDocument>"),
+            1,
+        );
+
+        let parsed = from_xml(&with_description_code).unwrap();
+        let preserved = preserved_xml_items(&parsed);
+        assert!(preserved.iter().any(|item| {
+            item.get("container").and_then(|value| value.as_str())
+                == Some("CrossIndustryInvoice/SupplyChainTradeTransaction/IncludedSupplyChainTradeLineItem")
+                && item.get("element").and_then(|value| value.as_str())
+                    == Some("DescriptionCode")
+                && item.get("line_id").and_then(|value| value.as_str()) == Some("1")
+        }));
+
+        let serialized = to_xml(&parsed).unwrap();
+        let description_pos = serialized.find("<ram:DescriptionCode").unwrap();
+        let line_id_container_pos = serialized
+            .find("<ram:AssociatedDocumentLineDocument>")
+            .unwrap();
+        assert!(description_pos < line_id_container_pos);
+        assert_eq!(from_xml(&serialized).unwrap(), parsed);
+    }
+
+    #[test]
+    fn parser_replays_preserved_only_defined_trade_contact() {
+        let mut document = fixture(DocumentType::Invoice, 39);
+        document.supplier.contact = None;
+        let xml = to_xml(&document).unwrap();
+        let contact = format!(
+            r#"<ram:DefinedTradeContact xmlns:ram="{CII_RAM_NAMESPACE_URI}"><ram:ID>CONTACT-ONLY</ram:ID></ram:DefinedTradeContact>"#
+        );
+        let with_contact = xml.replacen(
+            "<ram:PostalTradeAddress>",
+            &format!("{contact}<ram:PostalTradeAddress>"),
+            1,
+        );
+
+        let parsed = from_xml(&with_contact).unwrap();
+        assert_eq!(parsed.supplier.contact, None);
+        let preserved = preserved_xml_items(&parsed);
+        assert!(preserved.iter().any(|item| {
+            item.get("container").and_then(|value| value.as_str())
+                == Some("CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/SellerTradeParty/DefinedTradeContact")
+                && item.get("element").and_then(|value| value.as_str()) == Some("ID")
+                && item
+                    .get("xml")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|xml| xml.contains("CONTACT-ONLY"))
+        }));
+
+        let serialized = to_xml(&parsed).unwrap();
+        assert!(serialized.contains("<ram:DefinedTradeContact><ram:ID"));
+        assert!(serialized.contains("CONTACT-ONLY"));
+        assert_eq!(from_xml(&serialized).unwrap(), parsed);
+    }
+
+    #[test]
+    fn parser_replays_preserved_only_nested_contact_communication() {
+        let mut document = fixture(DocumentType::Invoice, 40);
+        document.supplier.contact = None;
+        let xml = to_xml(&document).unwrap();
+        let contact = format!(
+            r#"<ram:DefinedTradeContact xmlns:ram="{CII_RAM_NAMESPACE_URI}"><ram:TelephoneUniversalCommunication><ram:URIID>tel:+4930000000</ram:URIID><ram:ChannelCode>TELEPHONE</ram:ChannelCode></ram:TelephoneUniversalCommunication></ram:DefinedTradeContact>"#
+        );
+        let with_contact = xml.replacen(
+            "<ram:PostalTradeAddress>",
+            &format!("{contact}<ram:PostalTradeAddress>"),
+            1,
+        );
+
+        let parsed = from_xml(&with_contact).unwrap();
+        assert_eq!(parsed.supplier.contact, None);
+        let preserved = preserved_xml_items(&parsed);
+        assert!(preserved.iter().any(|item| {
+            item.get("container").and_then(|value| value.as_str())
+                == Some("CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/SellerTradeParty/DefinedTradeContact/TelephoneUniversalCommunication")
+                && item.get("element").and_then(|value| value.as_str()) == Some("ChannelCode")
+                && item
+                    .get("xml")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|xml| xml.contains("TELEPHONE"))
+        }));
+        assert!(preserved.iter().any(|item| {
+            item.get("container").and_then(|value| value.as_str())
+                == Some("CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/SellerTradeParty/DefinedTradeContact/TelephoneUniversalCommunication")
+                && item.get("element").and_then(|value| value.as_str()) == Some("URIID")
+                && item
+                    .get("xml")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|xml| xml.contains("tel:+4930000000"))
+        }));
+
+        let serialized = to_xml(&parsed).unwrap();
+        assert!(
+            serialized.contains("<ram:DefinedTradeContact><ram:TelephoneUniversalCommunication>")
+        );
+        assert!(serialized.contains("<ram:URIID"));
+        assert!(serialized.contains("<ram:ChannelCode"));
+        assert!(serialized.contains("TELEPHONE"));
         assert_eq!(from_xml(&serialized).unwrap(), parsed);
     }
 
@@ -4540,6 +4720,17 @@ mod tests {
                 phone: Some("+49-30-000000".to_owned()),
             }),
         }
+    }
+
+    fn preserved_xml_items(document: &CommercialDocument) -> &[Value] {
+        document
+            .extensions
+            .iter()
+            .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
+            .and_then(|extension| extension.payload.get("preserved_xml"))
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .expect("preserved_xml extension")
     }
 
     fn insert_before_tag_after(
