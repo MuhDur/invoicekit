@@ -23,7 +23,17 @@ use quick_xml::events::{attributes::AttrError, BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
 use rust_decimal::Decimal;
 use serde::Serialize;
+use serde_json::{Map, Value};
 use thiserror::Error;
+
+mod mapping;
+
+pub use mapping::{
+    coverage_for, top_level_coverage, UblCoverageClass, UblDocumentKind, UblElementCoverage,
+    CREDIT_NOTE_ELEMENT_COVERAGE, INVOICEKIT_METADATA_EXTENSION_URN, INVOICE_ELEMENT_COVERAGE,
+    UBL_2_1_CREDIT_NOTE_SCHEMA_URI, UBL_2_1_INVOICE_SCHEMA_URI, UBL_2_1_OS_SPEC_URI,
+    UBL_DOCUMENT_FIELDS_EXTENSION_URN,
+};
 
 const BEAD_ID: &str = "invoices-t-040-ubl-2-1-parser-serializer-1v2";
 const UBL_INVOICE_NAMESPACE_URI: &str = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2";
@@ -33,6 +43,9 @@ const UBL_CAC_NAMESPACE_URI: &str =
     "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2";
 const UBL_CBC_NAMESPACE_URI: &str =
     "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2";
+const UBL_EXT_NAMESPACE_URI: &str =
+    "urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2";
+const INVOICEKIT_EXTENSION_NAMESPACE_URI: &str = "urn:invoicekit:ubl:extension";
 const CORE_CUSTOMIZATION_ID: &str = "urn:invoicekit:ubl:2.1:core";
 const CORE_PROFILE_ID: &str = "urn:invoicekit:profile:core";
 const DEFAULT_LANGUAGE: &str = "und";
@@ -292,8 +305,11 @@ struct ParseState {
     tax_point_date: Option<String>,
     due_date: Option<String>,
     currency: Option<String>,
-    tenant_id: Option<String>,
-    trace_id: Option<String>,
+    metadata_tenant_id: Option<String>,
+    metadata_trace_id: Option<String>,
+    metadata_source_system: Option<String>,
+    ubl_buyer_reference: Option<String>,
+    ubl_accounting_cost: Option<String>,
     supplier: PartyBuilder,
     customer: PartyBuilder,
     payee: PartyBuilder,
@@ -550,9 +566,9 @@ impl ParseState {
         } else if is_root_child(stack, "DocumentCurrencyCode") {
             self.currency = Some(value.to_owned());
         } else if is_root_child(stack, "BuyerReference") {
-            self.tenant_id = Some(value.to_owned());
+            self.ubl_buyer_reference = Some(value.to_owned());
         } else if is_root_child(stack, "AccountingCost") {
-            self.trace_id = Some(value.to_owned());
+            self.ubl_accounting_cost = Some(value.to_owned());
         } else if is_root_child(stack, "Note") {
             self.notes.push(LocalizedString {
                 language: self
@@ -563,6 +579,12 @@ impl ParseState {
             });
         } else if path_ends(stack, &["PaymentTerms", "Note"]) {
             self.payment_terms_description = Some(value.to_owned());
+        } else if path_ends(stack, &["DocumentMeta", "TenantID"]) {
+            self.metadata_tenant_id = Some(value.to_owned());
+        } else if path_ends(stack, &["DocumentMeta", "TraceID"]) {
+            self.metadata_trace_id = Some(value.to_owned());
+        } else if path_ends(stack, &["DocumentMeta", "SourceSystem"]) {
+            self.metadata_source_system = Some(value.to_owned());
         }
 
         Ok(())
@@ -582,10 +604,26 @@ impl ParseState {
         let currency = self
             .currency
             .ok_or(UblError::MissingElement("cbc:DocumentCurrencyCode"))?;
-        let tenant_id = self.tenant_id.unwrap_or_else(|| "ubl-import".to_owned());
+        let tenant_id = self
+            .metadata_tenant_id
+            .unwrap_or_else(|| "ubl-import".to_owned());
         let trace_id = self
-            .trace_id
+            .metadata_trace_id
             .unwrap_or_else(|| format!("{BEAD_ID}:{document_id}"));
+        let mut extensions = Vec::<JurisdictionExtension>::new();
+        let mut document_fields = Map::new();
+        if let Some(value) = self.ubl_buyer_reference {
+            document_fields.insert("buyer_reference".to_owned(), Value::String(value));
+        }
+        if let Some(value) = self.ubl_accounting_cost {
+            document_fields.insert("accounting_cost".to_owned(), Value::String(value));
+        }
+        if !document_fields.is_empty() {
+            extensions.push(JurisdictionExtension::new(
+                UBL_DOCUMENT_FIELDS_EXTENSION_URN,
+                Value::Object(document_fields),
+            )?);
+        }
         let payment_terms = match self.payment_terms_description {
             Some(description) => Some(PaymentTerms {
                 description,
@@ -622,11 +660,11 @@ impl ParseState {
             attachments: Vec::<Attachment>::new(),
             references: Vec::<DocumentReference>::new(),
             notes: self.notes,
-            extensions: Vec::<JurisdictionExtension>::new(),
+            extensions,
             meta: DocumentMeta {
                 tenant_id,
                 trace_id,
-                source_system: None,
+                source_system: self.metadata_source_system,
             },
         })?;
         Ok(document)
@@ -832,9 +870,10 @@ fn serialize_document(
     let mut xml = String::new();
     write!(
         xml,
-        r#"<{root_name} xmlns="{root_namespace}" xmlns:cac="{UBL_CAC_NAMESPACE_URI}" xmlns:cbc="{UBL_CBC_NAMESPACE_URI}">"#
+        r#"<{root_name} xmlns="{root_namespace}" xmlns:cac="{UBL_CAC_NAMESPACE_URI}" xmlns:cbc="{UBL_CBC_NAMESPACE_URI}" xmlns:ext="{UBL_EXT_NAMESPACE_URI}" xmlns:ik="{INVOICEKIT_EXTENSION_NAMESPACE_URI}">"#
     )
     .expect("writing to a String cannot fail");
+    write_invoicekit_metadata_extension(&mut xml, &document.meta);
     write_text_element(&mut xml, "cbc:CustomizationID", CORE_CUSTOMIZATION_ID);
     write_text_element(&mut xml, "cbc:ProfileID", CORE_PROFILE_ID);
     write_text_element(
@@ -856,8 +895,7 @@ fn serialize_document(
     if let Some(date) = &document.due_date {
         write_text_element(&mut xml, "cbc:DueDate", date.as_str());
     }
-    write_text_element(&mut xml, "cbc:BuyerReference", &document.meta.tenant_id);
-    write_text_element(&mut xml, "cbc:AccountingCost", &document.meta.trace_id);
+    write_ubl_document_fields(&mut xml, document);
     for note in &document.notes {
         write_note(&mut xml, note);
     }
@@ -893,6 +931,38 @@ fn serialize_document(
     }
     write!(xml, "</{root_name}>").expect("writing to a String cannot fail");
     Ok(xml)
+}
+
+fn write_invoicekit_metadata_extension(xml: &mut String, meta: &DocumentMeta) {
+    xml.push_str("<ext:UBLExtensions><ext:UBLExtension>");
+    write_text_element(xml, "ext:ExtensionURI", INVOICEKIT_METADATA_EXTENSION_URN);
+    xml.push_str("<ext:ExtensionContent><ik:DocumentMeta>");
+    write_text_element(xml, "ik:TenantID", &meta.tenant_id);
+    write_text_element(xml, "ik:TraceID", &meta.trace_id);
+    if let Some(source_system) = &meta.source_system {
+        write_text_element(xml, "ik:SourceSystem", source_system);
+    }
+    xml.push_str(
+        "</ik:DocumentMeta></ext:ExtensionContent></ext:UBLExtension></ext:UBLExtensions>",
+    );
+}
+
+fn write_ubl_document_fields(xml: &mut String, document: &CommercialDocument) {
+    if let Some(value) = ubl_document_field(document, "accounting_cost") {
+        write_text_element(xml, "cbc:AccountingCost", value);
+    }
+    if let Some(value) = ubl_document_field(document, "buyer_reference") {
+        write_text_element(xml, "cbc:BuyerReference", value);
+    }
+}
+
+fn ubl_document_field<'a>(document: &'a CommercialDocument, key: &str) -> Option<&'a str> {
+    document
+        .extensions
+        .iter()
+        .find(|extension| extension.urn == UBL_DOCUMENT_FIELDS_EXTENSION_URN)
+        .and_then(|extension| extension.payload.get(key))
+        .and_then(Value::as_str)
 }
 
 fn write_party(
@@ -1242,15 +1312,20 @@ fn party_role(stack: &[String]) -> Option<PartyRole> {
 mod tests {
     use proptest::prelude::*;
 
-    use super::{crate_name, from_xml, to_xml, UblError};
+    use super::{
+        coverage_for, crate_name, from_xml, to_xml, top_level_coverage, UblCoverageClass,
+        UblDocumentKind, UblError, UBL_DOCUMENT_FIELDS_EXTENSION_URN,
+    };
     use invoicekit_canonical::canonicalize_xml;
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly, DecimalValue,
         DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentType, Iso4217Code,
-        LocalizedString, MonetaryTotal, Party, PartyTaxId, PaymentInstruction,
-        PaymentInstructionKind, PaymentTerms, PostalAddress, SchemaVersion, TaxCategorySummary,
+        JurisdictionExtension, LocalizedString, MonetaryTotal, Party, PartyTaxId,
+        PaymentInstruction, PaymentInstructionKind, PaymentTerms, PostalAddress, SchemaVersion,
+        TaxCategorySummary,
     };
     use rust_decimal::Decimal;
+    use serde_json::json;
 
     #[test]
     fn crate_name_is_cargo_package_name() {
@@ -1280,6 +1355,91 @@ mod tests {
         let second = to_xml(&document).unwrap();
         assert_eq!(first, second);
         assert_eq!(canonicalize_xml(&first).unwrap(), first);
+    }
+
+    #[test]
+    fn coverage_matrix_pins_official_top_level_counts() {
+        assert_eq!(top_level_coverage(UblDocumentKind::Invoice).len(), 54);
+        assert_eq!(top_level_coverage(UblDocumentKind::CreditNote).len(), 51);
+
+        assert_eq!(
+            coverage_for(UblDocumentKind::Invoice, "cbc:BuyerReference")
+                .unwrap()
+                .class,
+            UblCoverageClass::UblDocumentFieldExtension
+        );
+        assert_eq!(
+            coverage_for(UblDocumentKind::Invoice, "cbc:AccountingCost")
+                .unwrap()
+                .class,
+            UblCoverageClass::UblDocumentFieldExtension
+        );
+        assert_eq!(
+            coverage_for(UblDocumentKind::CreditNote, "cac:DiscrepancyResponse")
+                .unwrap()
+                .class,
+            UblCoverageClass::LossinessLedgerPreserved
+        );
+    }
+
+    #[test]
+    fn metadata_round_trip_uses_ubl_extension_not_business_fields() {
+        let document = fixture(DocumentType::Invoice, 6);
+        let xml = to_xml(&document).unwrap();
+
+        assert!(xml.contains("<ext:UBLExtensions"));
+        assert!(xml.contains("<ik:DocumentMeta"));
+        assert!(xml.contains("TenantID"));
+        assert!(xml.contains("tenant-6"));
+        assert!(xml.contains("TraceID"));
+        assert!(xml.contains("trace-6"));
+        assert!(!xml.contains("BuyerReference"));
+        assert!(!xml.contains("AccountingCost"));
+
+        let parsed = from_xml(&xml).unwrap();
+        assert_eq!(parsed.meta, document.meta);
+    }
+
+    #[test]
+    fn incoming_business_fields_are_preserved_as_ubl_extension() {
+        let document = fixture(DocumentType::Invoice, 7);
+        let xml = to_xml(&document).unwrap().replace(
+            "<cac:AccountingSupplierParty",
+            "<cbc:AccountingCost>COST-42</cbc:AccountingCost><cbc:BuyerReference>BUYER-PO-7</cbc:BuyerReference><cac:AccountingSupplierParty",
+        );
+
+        let parsed = from_xml(&xml).unwrap();
+        assert_eq!(parsed.meta.tenant_id, "tenant-7");
+        assert_eq!(parsed.meta.trace_id, "trace-7");
+
+        let payload = parsed
+            .extensions
+            .iter()
+            .find(|extension| extension.urn == UBL_DOCUMENT_FIELDS_EXTENSION_URN)
+            .map(|extension| &extension.payload)
+            .unwrap();
+        assert_eq!(payload["accounting_cost"], "COST-42");
+        assert_eq!(payload["buyer_reference"], "BUYER-PO-7");
+    }
+
+    #[test]
+    fn ubl_document_field_extension_round_trips_through_business_fields() {
+        let mut document = fixture(DocumentType::Invoice, 8);
+        document.extensions.push(
+            JurisdictionExtension::new(
+                UBL_DOCUMENT_FIELDS_EXTENSION_URN,
+                json!({
+                    "accounting_cost": "COST-8",
+                    "buyer_reference": "BUYER-8"
+                }),
+            )
+            .unwrap(),
+        );
+
+        let xml = to_xml(&document).unwrap();
+        assert!(xml.contains("AccountingCost"));
+        assert!(xml.contains("BuyerReference"));
+        assert_eq!(from_xml(&xml).unwrap(), document);
     }
 
     #[test]
