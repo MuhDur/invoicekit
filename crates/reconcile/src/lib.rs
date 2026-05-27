@@ -20,10 +20,16 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod outbox;
+mod worker;
 
 pub use outbox::{
     all_outbox_migrations, outbox_migration, DatabaseDialect, DeadLetterRecord, OutboxEnvelope,
     OutboxMigration, OutboxState, RetryDecision, RetryPolicy, OUTBOX_BEAD_ID,
+};
+pub use worker::{
+    CircuitBreakerPolicy, GatewayRateLimit, TransmissionJob, TransmissionWorker,
+    TransmissionWorkerConfig, TransmissionWorkerLogEvent, TransmissionWorkerOutcomeKind,
+    TransmissionWorkerResult, TRANSMISSION_WORKER_BEAD_ID,
 };
 
 /// Boxed future returned by gateway adapter operations.
@@ -1666,6 +1672,28 @@ pub enum ReconcileError {
         attempt: u16,
         /// Human-readable diagnostic.
         message: &'static str,
+        /// Human-readable remediation hint.
+        remediation: &'static str,
+    },
+    /// Transmission worker configuration is unsafe or ambiguous.
+    #[error(
+        "invalid transmission worker config field `{field}`: {message}; remediation: {remediation}"
+    )]
+    InvalidTransmissionWorkerConfig {
+        /// Configuration field that failed validation.
+        field: &'static str,
+        /// Human-readable diagnostic.
+        message: &'static str,
+        /// Human-readable remediation hint.
+        remediation: &'static str,
+    },
+    /// An outbox row was not ready for the transmission worker.
+    #[error("invalid outbox state for `{outbox_id}`: `{state}`; remediation: {remediation}")]
+    InvalidOutboxState {
+        /// Outbox row identifier.
+        outbox_id: String,
+        /// State that was rejected.
+        state: OutboxState,
         /// Human-readable remediation hint.
         remediation: &'static str,
     },
