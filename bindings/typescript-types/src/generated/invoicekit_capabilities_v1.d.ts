@@ -3,8 +3,8 @@
 //
 // !!! GENERATED FILE — DO NOT EDIT BY HAND !!!
 //
-// Re-generate with `pnpm --filter @invoicekit/types run generate`
-// from the InvoiceKit workspace root. Source of truth: schemas/.
+// Re-generate with `bun run generate` from
+// bindings/typescript-types/. Source of truth: schemas/.
 //
 /**
  * Per-route, per-scenario, per-date capability advertisements for sending compliant electronic invoices. Each entry describes which profiles/transports are accepted, sourced from named jurisdictional manifests, with an explicit confidence rating and a validity window. Consumers must honor `stale_after_days` and downgrade results when a query date falls inside a stale window.

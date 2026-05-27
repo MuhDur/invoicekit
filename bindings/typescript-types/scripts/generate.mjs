@@ -11,12 +11,14 @@
 //
 // Usage:
 //
-//     node scripts/generate.mjs              # write
-//     node scripts/generate.mjs --check      # write to temp + diff committed
+//     bun run scripts/generate.mjs              # write
+//     bun run scripts/generate.mjs --check      # write to temp + diff committed
 //
 // `--check` is what CI runs; the local default is to write so a
-// developer can `pnpm run generate && git add -p` after changing a
-// Rust IR type.
+// developer can `bun run generate && git add -p` after changing a
+// Rust IR type. Uses `bun` per AGENTS.md ("Use bun for everything
+// JavaScript/TypeScript. Never use npm, yarn, or pnpm in our own
+// development scripts.").
 
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -36,8 +38,8 @@ const HEADER = `// SPDX-License-Identifier: Apache-2.0
 //
 // !!! GENERATED FILE — DO NOT EDIT BY HAND !!!
 //
-// Re-generate with \`pnpm --filter @invoicekit/types run generate\`
-// from the InvoiceKit workspace root. Source of truth: schemas/.
+// Re-generate with \`bun run generate\` from
+// bindings/typescript-types/. Source of truth: schemas/.
 //
 `;
 
@@ -113,7 +115,7 @@ async function generate({ check }) {
         console.error(`  - ${i}`);
       }
       console.error(
-        "\nrun `pnpm --filter @invoicekit/types run generate` and commit the diff",
+        "\nrun `bun --cwd bindings/typescript-types run generate` and commit the diff",
       );
       process.exit(1);
     }

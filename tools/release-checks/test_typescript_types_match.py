@@ -51,7 +51,7 @@ def test_every_schema_has_a_generated_dts() -> None:
         dts = TS_GEN / f"{mod}.d.ts"
         if not dts.exists():
             missing.append(
-                f"{schema.name} → expected {dts.relative_to(REPO)} (run `npm --prefix bindings/typescript-types run generate`)"
+                f"{schema.name} → expected {dts.relative_to(REPO)} (run `bun --cwd bindings/typescript-types run generate`)"
             )
     assert not missing, "\n".join(missing)
 

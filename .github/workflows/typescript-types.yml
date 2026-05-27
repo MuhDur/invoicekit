@@ -22,17 +22,17 @@ jobs:
         working-directory: bindings/typescript-types
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: "22"
-      - name: Install dependencies
-        run: npm install --no-fund --no-audit
+          bun-version: latest
+      - name: Install dependencies (frozen lockfile)
+        run: bun install --frozen-lockfile
       - name: Re-generate from schemas/*.json and assert no drift
-        run: node scripts/generate.mjs --check
+        run: bun run scripts/generate.mjs --check
       - name: TypeScript strict-mode compile
-        run: npx tsc --noEmit -p tsconfig.json
-      - name: Round-trip + drift checks
-        run: node --test tests/round-trip.test.mjs
+        run: bunx tsc --noEmit -p tsconfig.json
+      - name: Round-trip + drift checks (bun's built-in test runner)
+        run: bun test tests/round-trip.test.mjs
       - name: Verify package declares Apache 2.0 license
         run: |
           set -euo pipefail

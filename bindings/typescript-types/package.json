@@ -25,10 +25,10 @@
     "LICENSE"
   ],
   "scripts": {
-    "generate": "node scripts/generate.mjs",
-    "check": "tsc --noEmit -p tsconfig.json",
-    "build": "tsc -p tsconfig.json",
-    "test": "node --test tests/round-trip.test.mjs"
+    "generate": "bun run scripts/generate.mjs",
+    "check": "bunx tsc --noEmit -p tsconfig.json",
+    "build": "bunx tsc -p tsconfig.json",
+    "test": "bun test tests/round-trip.test.mjs"
   },
   "devDependencies": {
     "json-schema-to-typescript": "^15.0.4",

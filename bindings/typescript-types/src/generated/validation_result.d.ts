@@ -3,8 +3,8 @@
 //
 // !!! GENERATED FILE — DO NOT EDIT BY HAND !!!
 //
-// Re-generate with `pnpm --filter @invoicekit/types run generate`
-// from the InvoiceKit workspace root. Source of truth: schemas/.
+// Re-generate with `bun run generate` from
+// bindings/typescript-types/. Source of truth: schemas/.
 //
 /**
  * Severity assigned by the rule pack.
