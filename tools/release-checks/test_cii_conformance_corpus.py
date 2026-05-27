@@ -6,11 +6,12 @@
 from __future__ import annotations
 
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parents[2]
-CORPUS = REPO / "conformance-corpus" / "synthetic" / "cii-d16b"
+CORPUS = REPO / "conformance-corpus" / "synthetic" / "cii-d16b-profiled"
 CONFORMANCE_TOOL = REPO / "tools" / "conformance-corpus"
 sys.path.insert(0, str(CONFORMANCE_TOOL))
 import validate_fixture_metadata as metadata_validator  # noqa: E402
@@ -45,6 +46,16 @@ REQUIRED_SCENARIOS = {
     "profile-factur-x-en16931",
     "profile-factur-x-extended",
     "profile-xrechnung",
+}
+PROFILE_GUIDELINES = {
+    "Factur-X MINIMUM": "urn:factur-x.eu:1p0:minimum",
+    "Factur-X BASIC WL": "urn:factur-x.eu:1p0:basicwl",
+    "Factur-X BASIC": "urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic",
+    "Factur-X EN 16931": "urn:cen.eu:en16931:2017",
+    "Factur-X EXTENDED": "urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended",
+    "XRechnung CII": (
+        "urn:cen.eu:en16931:2017#compliant#urn:xoev-de:kosit:standard:xrechnung_3.0"
+    ),
 }
 
 
@@ -94,3 +105,31 @@ def test_cii_corpus_declares_required_coverage_scenarios() -> None:
         "XRechnung CII",
     }
     assert REQUIRED_SCENARIOS <= scenarios
+
+
+def test_cii_profile_claims_are_encoded_as_guideline_context() -> None:
+    observed: set[str] = set()
+    for item in load_metadata():
+        fixture_dir = CORPUS / f"cii-d16b-{item['fixture_id'].rsplit('-', maxsplit=1)[-1]}"
+        guideline_ids = guideline_context_ids(fixture_dir / "fixture.xml")
+        expected = PROFILE_GUIDELINES[item["jurisdiction"]["profile"]]
+        assert expected in guideline_ids
+        observed.update(guideline_ids)
+
+    assert set(PROFILE_GUIDELINES.values()) <= observed
+
+
+def guideline_context_ids(path: Path) -> set[str]:
+    root = ET.parse(path).getroot()
+    ids: set[str] = set()
+    for parameter in root.iter():
+        if local_name(parameter.tag) != "GuidelineSpecifiedDocumentContextParameter":
+            continue
+        for child in parameter:
+            if local_name(child.tag) == "ID" and child.text:
+                ids.add(child.text)
+    return ids
+
+
+def local_name(tag: str) -> str:
+    return tag.rsplit("}", maxsplit=1)[-1]
