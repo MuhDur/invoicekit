@@ -69,8 +69,12 @@ jobs:
           # Per-platform cache to avoid cross-OS poisoning.
           shared-key: python-sdk-${{ matrix.target }}
       - name: Install maturin
+        shell: bash
         run: pipx install 'maturin>=1.13,<2'
       - name: Build abi3 wheel (release)
+        # Force bash so the line-continuation backslashes parse on
+        # the Windows runner too (default shell there is pwsh).
+        shell: bash
         working-directory: bindings/python
         run: |
           maturin build --release --target ${{ matrix.target }} \
