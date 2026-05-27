@@ -144,9 +144,16 @@ function buildIndex(modules) {
     "// schemas/. Re-exports stay deliberately namespace-flat: callers",
     "// import { CommercialDocument } from \"@invoicekit/types\".",
     "",
+    "// apc8: `export type *` (TypeScript 5.0+) marks each re-export",
+    "// as types-only so tsc erases the statement at emit time.",
+    "// Without this, dist/index.js would contain `export * from",
+    "// \"./generated/*.js\"` — but the target src/generated/*.d.ts",
+    "// files are declaration-only, so npm/pnpm/yarn/deno consumers",
+    "// would hit \"Cannot find module\" at runtime.",
+    "",
   ];
   for (const mod of modules) {
-    lines.push(`export * from "./generated/${mod}.js";`);
+    lines.push(`export type * from "./generated/${mod}.js";`);
   }
   lines.push("");
   return lines.join("\n");

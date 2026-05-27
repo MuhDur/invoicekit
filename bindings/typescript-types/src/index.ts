@@ -12,6 +12,13 @@
 // schemas/. Re-exports stay deliberately namespace-flat: callers
 // import { CommercialDocument } from "@invoicekit/types".
 
-export * from "./generated/invoicekit_capabilities_v1.js";
-export * from "./generated/invoicekit_ir_v1.js";
-export * from "./generated/validation_result.js";
+// apc8: `export type *` (TypeScript 5.0+) marks each re-export
+// as types-only so tsc erases the statement at emit time.
+// Without this, dist/index.js would contain `export * from
+// "./generated/*.js"` — but the target src/generated/*.d.ts
+// files are declaration-only, so npm/pnpm/yarn/deno consumers
+// would hit "Cannot find module" at runtime.
+
+export type * from "./generated/invoicekit_capabilities_v1.js";
+export type * from "./generated/invoicekit_ir_v1.js";
+export type * from "./generated/validation_result.js";
