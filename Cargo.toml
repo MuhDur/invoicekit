@@ -16,6 +16,7 @@ members = [
   "crates/format-ubl",
   "crates/format-cii",
   "crates/format-gobl",
+  "crates/lossiness-ledger-generator",
   "crates/peppol-smp-sml",
   "crates/profile-factur-x",
   "crates/profile-peppol-bis",

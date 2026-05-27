@@ -2114,6 +2114,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoicekit-lossiness-ledger-generator"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-format-cii",
+ "invoicekit-format-ubl",
+ "invoicekit-ir",
+ "invoicekit-profile-factur-x",
+ "rust_decimal",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "invoicekit-lsp"
 version = "0.0.0"
 
