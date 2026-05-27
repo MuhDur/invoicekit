@@ -1,0 +1,77 @@
+# SPDX-License-Identifier: Apache-2.0
+# T-1400 reference Next.js demo: CI gate.
+#
+# Runs on every push/PR that touches examples/nextjs/** or the
+# upstream SDK packages it depends on. The gate proves:
+#
+# 1. `bun install` resolves the workspace-link to
+#    @invoicekit/core and @invoicekit/types without error.
+# 2. `bunx tsc --noEmit` typechecks the demo against the SDK's
+#    types-only contracts.
+# 3. `bun test` builds every fixture through the same builder
+#    the API route uses (4 assertions).
+# 4. `bun run build` (next build) compiles the route + page so
+#    the user's "5-minute clone-and-run" promise is provable.
+
+name: demo-nextjs
+
+on:
+  push:
+    paths:
+      - "examples/nextjs/**"
+      - "bindings/typescript-sdk-core/**"
+      - "bindings/typescript-types/**"
+      - ".github/workflows/demo-nextjs.yml"
+  pull_request:
+    paths:
+      - "examples/nextjs/**"
+      - "bindings/typescript-sdk-core/**"
+      - "bindings/typescript-types/**"
+      - ".github/workflows/demo-nextjs.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: demo build + smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Build @invoicekit/types (workspace link target)
+        working-directory: bindings/typescript-types
+        run: |
+          bun install
+          bunx tsc -p tsconfig.json
+
+      - name: Build @invoicekit/core (workspace link target)
+        working-directory: bindings/typescript-sdk-core
+        run: |
+          bun install
+          bunx tsc -p tsconfig.json
+
+      - name: Install demo dependencies
+        working-directory: examples/nextjs
+        run: bun install
+
+      - name: Type-check demo
+        working-directory: examples/nextjs
+        run: bun run typecheck
+
+      - name: Smoke (4 fixture assertions)
+        working-directory: examples/nextjs
+        run: bun run smoke
+
+      - name: Production build (next build)
+        working-directory: examples/nextjs
+        run: bun run build
