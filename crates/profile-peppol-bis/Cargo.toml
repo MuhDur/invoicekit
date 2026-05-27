@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+[package]
+name = "invoicekit-profile-peppol-bis"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "InvoiceKit projection from the core CommercialDocument IR to Peppol BIS Billing 3.0 (UBL profile)."
+publish = false
+
+[lib]
+name = "invoicekit_profile_peppol_bis"
+path = "src/lib.rs"
+
+[dependencies]
+invoicekit-format-ubl = { path = "../format-ubl", version = "0.0.0" }
+invoicekit-ir = { path = "../ir", version = "0.0.0" }
+serde = "1"
+serde_json = "1"
+thiserror.workspace = true
+
+[lints]
+workspace = true
