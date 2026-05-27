@@ -20,7 +20,13 @@ CORPUS_ROOT = REPO / "conformance-corpus"
 SCHEMA_PATH = CORPUS_ROOT / "fixture-metadata.schema.json"
 ARTIFACT_SUFFIXES = frozenset({".json", ".xml", ".pdf"})
 IGNORED_ARTIFACT_PATHS = frozenset({Path("fixture-metadata.schema.json")})
-IGNORED_ARTIFACT_DIRS = frozenset({"generators", "fuzz"})
+# wcep: `gobl-upstream` carries fixtures sourced from invopop/gobl's
+# Apache-2.0 example corpus. They are not InvoiceKit conformance
+# artefacts and intentionally do not follow the per-fixture
+# `metadata.json` schema — provenance is recorded once in the
+# directory's `README.md` and the upstream commit SHA is pinned in
+# the round-trip test that consumes them.
+IGNORED_ARTIFACT_DIRS = frozenset({"generators", "fuzz", "gobl-upstream"})
 REFERENCE_PATH_FIELDS = (
     ("license", "evidence_path"),
     ("pii", "redaction_report_path"),
