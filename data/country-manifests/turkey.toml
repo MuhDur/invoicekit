@@ -1,0 +1,130 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-782 country feasibility manifest: Turkey.
+#
+# Phase 2.5 prerequisite for `crates/report-tr-gib`. The Turkish
+# Revenue Administration (GIB / Gelir Idaresi Baskanligi) operates
+# the e-Fatura platform (mandatory for B2B between e-Fatura
+# taxpayers) plus e-Arsiv (mandatory for B2C and for B2B with
+# non-e-Fatura buyers above a threshold).
+
+schema_version = "1.0"
+country = "TR"
+country_name = "Turkey"
+program = "e-Fatura + e-Arsiv (GIB)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-782-manifest-turkey-4rv"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "GIB — e-Fatura portal"
+url = "https://efatura.gov.tr/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "e-Fatura UBL-TR 1.2 technical guideline"
+url = "https://www.efatura.gov.tr/dosyalar/kilavuzlar/e-Fatura_Uygulamasi_Gib_Portal_Kullanim_Kilavuzu.pdf"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Tax Procedure Law General Communique on e-Documents (No 509 series)"
+url = "https://www.resmigazete.gov.tr/eskiler/2019/10/20191019-7.htm"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "GIB list of authorised e-Fatura special integrators"
+url = "https://efatura.gov.tr/efaturaozel-entegrator.html"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "partner_gated"
+notes = """
+GIB operates a portal sandbox for e-Fatura but it is gated by a
+Turkish VKN (Vergi Kimlik Numarasi) plus an e-Fatura account
+issued by GIB after the taxpayer has been enrolled. Most
+integration happens through a Special Integrator (Ozel
+Entegrator) — these private providers operate their own
+sandboxes that mirror GIB and bypass the GIB enrollment friction.
+The major Ozel Entegratorler are Logo, Mikro, Sovos, Edicom,
+e-Logo, and Foriba. Foreign-only providers must work through one
+of them; direct GIB integration without a VKN is not possible.
+"""
+endpoint = "https://efaturatest.izibiz.com.tr/EFaturaEntegre/"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_TR_GIB_TOKEN"
+
+[production]
+endpoint = "https://efatura.izibiz.com.tr/EFaturaEntegre/"
+production_credentials_env_var = "INVOICEKIT_PROD_TR_GIB_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every e-Fatura and e-Arsiv document must carry a Mali Muhur
+(Financial Seal) — a qualified electronic seal issued by an
+ESHS (Elektronik Sertifika Hizmet Saglayicisi) authorised under
+Turkish Law No 5070. TUBITAK Kamu Sertifikasyon Merkezi is the
+canonical issuer; alternative authorised ESHSs include E-Tugra
+and Turktrust. The seal is bound to the issuing taxpayer's VKN.
+Ozel Entegratorler hold their own corporate Mali Muhur and sign
+on behalf of their integrated taxpayers under a notarised
+authorisation.
+"""
+smart_card_requirement = "common"
+hsm_requirement = "common"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses without a Turkish establishment that need to
+issue invoices to Turkish customers must register for VAT
+(Katma Deger Vergisi) in Turkey — possible since 2017 under the
+electronic-services-VAT regime — or appoint a Turkish-resident
+fiscal representative (mali musavir or yeminli mali musavir).
+The Ozel Entegrator typically plays the operational role of a
+fiscal representative for the e-invoicing flow specifically;
+broader VAT obligations remain with the foreign seller or its
+fiscal representative.
+"""
+
+[validator]
+backend = "jvm:saxon"
+backend_notes = """
+e-Fatura and e-Arsiv use UBL-TR 1.2, a UBL 2.1 derivative with
+Turkey-specific extensions. The XSD validation runs in
+validator-saxon. The business-rule layer (BR-TR-*) covers
+VKN/TCKN checksum, KDV (VAT) rate enumeration, accommodation tax,
+SCT (Special Consumption Tax) categories, and per-document-type
+serial-number formats. The signature verification path delegates
+to validator-kosit for XAdES.
+"""
+
+[interop]
+formats = ["UBL-TR 1.2 (e-Fatura)", "UBL-TR 1.2 (e-Arsiv)", "UBL-TR 1.2 (e-Irsaliye delivery note)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+e-Fatura and e-Arsiv accept only UBL-TR 1.2 envelopes. Cross-
+border invoices destined for Turkey that arrive in Peppol BIS
+Billing 3.0 must be translated to UBL-TR before clearance.
+There is no PEPPOL PINT-TR profile as of the manifest date.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/turkey"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/turkey"
+
+[follow_ups]
+items = [
+    "Select two Turkish Ozel Entegrator partners (primary + fallback) and document per-document pricing",
+    "Track the GIB e-Irsaliye (electronic delivery note) and e-Mustahsil Makbuzu mandate expansions",
+    "Evaluate the GIB's planned move from UBL-TR 1.2 to UBL-TR 2.x once the technical guideline is published",
+]

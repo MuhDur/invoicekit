@@ -1,0 +1,129 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-781 country feasibility manifest: Malaysia.
+#
+# Phase 2.5 prerequisite for `crates/report-my-myinvois`. The
+# Inland Revenue Board of Malaysia (LHDNM / Lembaga Hasil Dalam
+# Negeri Malaysia) operates MyInvois, a CTC clearance platform
+# that began phased rollout in 2024 and reaches full mandate
+# coverage in 2026.
+
+schema_version = "1.0"
+country = "MY"
+country_name = "Malaysia"
+program = "MyInvois (LHDNM)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-781-manifest-malaysia-vbd"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "LHDNM — MyInvois portal"
+url = "https://myinvois.hasil.gov.my/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "MyInvois SDK and API documentation"
+url = "https://sdk.myinvois.hasil.gov.my/"
+kind = "api_documentation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "MyInvois UBL 2.1 implementation guideline (PINT-MY)"
+url = "https://sdk.myinvois.hasil.gov.my/documents/03-invoice-structure/"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Income Tax Act 1967 (e-invoicing amendments)"
+url = "https://lampiran1.hasil.gov.my/pdf/pdfam/ActA1689_2024.pdf"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "public"
+notes = """
+MyInvois operates a fully public sandbox at preprod.myinvois.hasil.gov.my
+accessible to any registered taxpayer with an LHDNM-issued
+sandbox credential. Foreign developers can request sandbox
+credentials through the LHDNM developer registration form
+without holding a Malaysian Tax Identification Number (TIN);
+production access however requires a Malaysian TIN. The sandbox
+mirrors the production schema and business rules.
+"""
+endpoint = "https://preprod-api.myinvois.hasil.gov.my/api/v1.0/"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_MY_MYINVOIS_TOKEN"
+
+[production]
+endpoint = "https://api.myinvois.hasil.gov.my/api/v1.0/"
+production_credentials_env_var = "INVOICEKIT_PROD_MY_MYINVOIS_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every MyInvois submission must be signed using a Malaysian
+Certification Authority (CA) certificate licensed under the
+Digital Signature Act 1997. Authorised CAs include Pos Digicert,
+MSC Trustgate, Telekom Applied Business, and Tricuspis. The
+signature is a XAdES detached signature over the UBL 2.1
+invoice document. Taxpayers can also delegate signing to their
+Tax Agent or to a MyInvois-approved Solution Provider; in that
+delegated mode the Solution Provider's certificate covers the
+submission.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "required_for_solution_providers"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses cannot obtain a Malaysian TIN directly; they
+must appoint a Malaysian Tax Agent registered with LHDNM or
+establish a Malaysian-incorporated entity. The MyInvois portal
+recognises both direct-taxpayer access and delegated access
+through Solution Providers; the latter is the typical foreign-
+seller path. For B2C cross-border digital services, the foreign
+seller registers under the Service Tax on Digital Services
+regime which has separate (non-MyInvois) reporting today.
+"""
+
+[validator]
+backend = "rust_native"
+backend_notes = """
+MyInvois invoices use a UBL 2.1 profile (PINT-MY) close to
+Peppol BIS Billing 3.0 with Malaysia-specific extensions for
+TIN format, SST codes, and per-classification tax categories.
+The structural XSD validation runs in the shared rust-native
+UBL validator; the PINT-MY business rules (BR-MY-*) live in
+the rulepack runtime. The signature verification path delegates
+to validator-kosit.
+"""
+
+[interop]
+formats = ["PINT-MY (UBL 2.1)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = true
+notes = """
+MyInvois accepts PINT-MY UBL envelopes; generic Peppol BIS
+Billing 3.0 envelopes need to be re-profiled to PINT-MY before
+submission. There is no direct Peppol four-corner exchange in
+MyInvois today; the LHDNM has signalled future Peppol AS4
+integration through the OpenPeppol Malaysian authority but the
+timeline has not been published.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/malaysia"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/malaysia"
+
+[follow_ups]
+items = [
+    "Track LHDNM's mandate-rollout schedule (currently 2026-01-01 for taxpayers with annual turnover above MYR 25 million; full coverage 2027-01-01)",
+    "Confirm Peppol PINT-MY AS4 four-corner timeline with OpenPeppol Malaysian authority",
+    "Evaluate the MyInvois consolidated B2C summary submission cadence (currently month-end)",
+]

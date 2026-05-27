@@ -1,0 +1,126 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-777 country feasibility manifest: United Arab Emirates.
+#
+# Phase 2.5 prerequisite for `crates/report-ae-fta`. The UAE
+# Federal Tax Authority (FTA) is rolling out a five-corner Peppol
+# CTC e-invoicing model phased through 2026; this manifest tracks
+# the public technical specification of that model.
+
+schema_version = "1.0"
+country = "AE"
+country_name = "United Arab Emirates"
+program = "UAE e-Invoicing programme (Federal Tax Authority + MoF Peppol CTC)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-777-manifest-uae-j2b"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "Ministry of Finance — eInvoicing programme overview"
+url = "https://mof.gov.ae/e-invoicing/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Federal Tax Authority — VAT and e-invoicing legislation"
+url = "https://tax.gov.ae/en/taxes/vat/Legislation.aspx"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "UAE PINT specification (Peppol PINT-AE technical document)"
+url = "https://docs.peppol.eu/poac/aue/pint-aue/"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "UAE Service Provider accreditation programme"
+url = "https://mof.gov.ae/e-invoicing/service-providers/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "partner_gated"
+notes = """
+The MoF/FTA model is operated through accredited Service Providers
+(ASPs) only — there is no public taxpayer sandbox. ASPs receive
+access to a Peppol-style test corner from OpenPeppol's UAE PINT
+authority once they have completed the accreditation interview
+and demonstrated the four-corner exchange. InvoiceKit's hosted
+layer will rely on an accredited ASP partner for the first
+production wave (2026); the self-hosted reference adapter will
+ship in `phase4` mode with a recorded-cassette fixture set rather
+than live sandbox access.
+"""
+endpoint = "https://test.peppol-ae.invoicekit.example/v1/"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_AE_ASP_TOKEN"
+
+[production]
+endpoint = "https://peppol-ae.invoicekit.example/v1/"
+production_credentials_env_var = "INVOICEKIT_PROD_AE_ASP_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+The UAE PINT specification requires every invoice envelope to
+carry a digital signature produced with a certificate issued by
+an accredited trust service provider operating under the UAE
+Electronic Identity and Trust Services Federal Decree-Law No 46
+of 2021. Sigma Telecom and the Telecommunications and Digital
+Government Regulatory Authority (TDRA) are the canonical issuers.
+ASPs sign on behalf of senders that have authorised them; senders
+that signal directly need their own qualified certificate.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "required_for_asp_signing_keys"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses providing taxable services to UAE customers
+must register for VAT with the FTA. Non-resident businesses that
+cannot use the direct registration path must appoint a UAE tax
+agent (Hakeem) registered with the FTA. For e-invoicing
+specifically, the foreign seller must be enrolled with an ASP
+that operates the four-corner connection; the ASP plays the role
+of a fiscal representative in the e-invoicing flow.
+"""
+
+[validator]
+backend = "rust_native"
+backend_notes = """
+PINT-AE is a Peppol BIS Billing 3.0 derivative with UAE-specific
+business rules; the structural XSD validation lives in the shared
+rust-native UBL validator. The PINT-AE business rules (the
+country-specific BR-AE-* rule pack) will run in the same rulepack
+runtime once T-024's Schematron-to-rulepack converter handles the
+PINT extensions. The signature verification path delegates to
+validator-kosit.
+"""
+
+[interop]
+formats = ["Peppol PINT-AE (UBL 2.1 profile)"]
+peppol_bis_accepted = true
+peppol_pint_accepted = true
+notes = """
+The UAE model is a Peppol CTC implementation; PINT-AE envelopes
+are the canonical wire format. Plain Peppol BIS Billing 3.0
+envelopes are accepted as input and translated to PINT-AE by the
+ASP. There is no separate national XML schema outside Peppol.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/uae"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/uae"
+
+[follow_ups]
+items = [
+    "Track the MoF rollout calendar (currently mandatory for large B2B taxpayers from 2026-07-01, B2C TBA) so the hosted layer can prompt onboarding",
+    "Select two UAE ASP partners (primary + fallback) and document partner pricing once published",
+    "Replace the ASP-mediated cassette fixtures with live four-corner test traffic once ASP accreditation lands for one of the partners",
+]

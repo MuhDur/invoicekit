@@ -1,0 +1,128 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-783 country feasibility manifest: Romania.
+#
+# Phase 2.5 prerequisite for `crates/report-ro-efactura`. The
+# Romanian e-Factura system, operated by ANAF (Agentia Nationala
+# de Administrare Fiscala), reached full B2B mandatory coverage
+# on 2024-07-01 after a phased B2G + sector-specific rollout.
+
+schema_version = "1.0"
+country = "RO"
+country_name = "Romania"
+program = "RO e-Factura (ANAF / SPV)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-783-manifest-romania-979"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "ANAF — e-Factura portal"
+url = "https://www.anaf.ro/anaf/internet/ANAF/servicii_online/servicii_online_persoane_juridice/sistemul_national_efactura_RO_eFactura"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "MFinante — Standard CIUS-RO-1 (Romanian Peppol BIS Billing 3.0 derivative)"
+url = "https://mfinante.gov.ro/static/10/Mfp/efactura/RO_CIUS-1.0.1.zip"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "OUG 120/2021 (Government Emergency Ordinance — e-Factura legal basis)"
+url = "https://legislatie.just.ro/Public/DetaliiDocument/247636"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "ANAF SPV (Spatiul Privat Virtual) API documentation"
+url = "https://mfinante.gov.ro/static/10/Mfp/efactura/api_efactura.html"
+kind = "api_documentation"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "requires_local_tax_id"
+notes = """
+ANAF operates a public test environment at api.anaf.ro/test/FCTEL/rest/
+that any Romanian-registered taxpayer can access using a qualified
+electronic certificate enrolled in ANAF's Spatiul Privat Virtual
+(SPV). The taxpayer must hold a CUI (Cod Unic de Inregistrare) for
+the sandbox to accept submissions. Foreign-only providers cannot
+enroll in SPV without either obtaining a Romanian CUI or
+appointing a Romanian fiscal representative; for tenants without
+their own CUI the InvoiceKit hosted layer routes through a Romanian
+fiscal-rep partner.
+"""
+endpoint = "https://api.anaf.ro/test/FCTEL/rest/"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_RO_ANAF_CERT"
+
+[production]
+endpoint = "https://api.anaf.ro/prod/FCTEL/rest/"
+production_credentials_env_var = "INVOICEKIT_PROD_RO_ANAF_CERT"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Authentication into ANAF SPV requires a qualified electronic
+certificate issued by a Romanian Trust Service Provider
+authorised under eIDAS (certSIGN, DigiSign, AlfaTrust, Trans
+Sped). The certificate is enrolled in SPV through a one-time
+in-person or notarised remote process. Submissions are made
+through OAuth2 tokens derived from the certificate; the XML
+payload itself does NOT need to carry a XAdES signature once the
+SPV transport-layer authentication is established.
+"""
+smart_card_requirement = "common"
+hsm_requirement = "recommended_for_high_volume"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign sellers without a Romanian establishment must register
+for Romanian VAT (obtain a CUI) or appoint a Romanian fiscal
+representative (reprezentant fiscal). EU-resident sellers can
+register directly under the One-Stop Shop framework for
+distance sales below threshold; B2B mandatory e-Factura coverage
+applies to every taxpayer with a CUI regardless of residence.
+"""
+
+[validator]
+backend = "rust_native"
+backend_notes = """
+The RO e-Factura format is CIUS-RO-1, a Romanian Core Invoice
+Usage Specification derived from Peppol BIS Billing 3.0
+(EN 16931-compliant). The XSD validation runs in the shared
+rust-native UBL validator; the CIUS-RO-1 business rules (BR-RO-*)
+live in the rulepack runtime. ANAF additionally runs a server-
+side validation pass that returns rule-level diagnostics; those
+diagnostic codes are mirrored into the rust validator's output
+for parity.
+"""
+
+[interop]
+formats = ["CIUS-RO-1 (UBL 2.1 / Peppol BIS Billing 3.0 derivative)"]
+peppol_bis_accepted = true
+peppol_pint_accepted = false
+notes = """
+Plain Peppol BIS Billing 3.0 envelopes are accepted by ANAF
+because CIUS-RO-1 is a strict-superset profile. Cross-border
+Peppol four-corner exchange targeting Romanian buyers does not
+yet bypass the ANAF clearance — every B2B invoice must still
+land in ANAF's RO e-Factura platform regardless of how it
+reaches the Romanian buyer.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/romania"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/romania"
+
+[follow_ups]
+items = [
+    "Add the e-Transport (RO e-Transport) reporting flow once it becomes a target — separate from e-Factura but tightly coupled",
+    "Track the ANAF CIUS-RO-2 specification when published; currently CIUS-RO-1.0.1 is the in-force version",
+    "Evaluate the Peppol four-corner integration path with the Romanian OpenPeppol authority for cross-border senders",
+]

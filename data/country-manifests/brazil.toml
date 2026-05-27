@@ -1,0 +1,161 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-780 country feasibility manifest: Brazil.
+#
+# Phase 2.5 prerequisite for `crates/report-br-nfe` and the family
+# of `crates/report-br-nfse-*` (one per municipality cluster).
+# Brazil is uniquely complex: NF-e (goods, state-level), NFS-e
+# (services, ~5500 municipal authorities), CT-e (transport),
+# MDF-e (manifest), plus the upcoming unified DF-e harmonisation.
+# This manifest captures the NF-e baseline and points to the
+# per-municipal NFS-e supplements that follow as separate beads.
+
+schema_version = "1.0"
+country = "BR"
+country_name = "Brazil"
+program = "NF-e (state SEFAZ) + NFS-e (municipal, harmonising to national standard)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-780-manifest-brazil-02e"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "Portal Nacional da Nota Fiscal Eletronica (NF-e)"
+url = "https://www.nfe.fazenda.gov.br/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "NF-e technical note schedule (Notas Tecnicas)"
+url = "https://www.nfe.fazenda.gov.br/portal/listaConteudo.aspx?tipoConteudo=tW%2bhAcwgIfA="
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "ENAT — National Standard NFS-e harmonisation programme"
+url = "https://www.nfse.gov.br/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "CONFAZ — National Council of Tax Policy (ICMS rules)"
+url = "https://www.confaz.fazenda.gov.br/"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Lei Complementar 214/2025 (tax reform — IBS/CBS rollout)"
+url = "https://www.planalto.gov.br/ccivil_03/leis/lcp/Lcp214.htm"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "partner_gated"
+notes = """
+SEFAZ sandboxes exist per-state (SP, RJ, MG, RS, ...) and require
+a state-issued Inscricao Estadual plus a CNPJ. The 26 state
+sandboxes share the NF-e namespace but are operated separately;
+the SP sandbox at homologacao.nfe.fazenda.sp.gov.br is the most
+commonly used integration target. NFS-e municipal sandboxes are
+even more fragmented — each of the ~5500 municipalities runs its
+own (or piggybacks on a private platform like Ginfes, Issnet,
+Equiplano, Webiss). The ENAT National Standard NFS-e endpoint at
+sefin.nfse.gov.br is the convergent target as municipalities
+migrate. Foreign-only providers cannot get a CNPJ without a
+Brazilian representative.
+"""
+endpoint = "https://homologacao.nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_BR_SEFAZ_CERT"
+
+[production]
+endpoint = "https://nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx"
+production_credentials_env_var = "INVOICEKIT_PROD_BR_SEFAZ_CERT"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every NF-e and NFS-e submission must be signed with an ICP-Brasil
+A1 (software) or A3 (hardware) digital certificate issued by an
+ICP-Brasil-licensed Certifying Authority (Serasa, Certisign,
+Soluti, AC Caixa, etc). The certificate carries the CNPJ of the
+issuing taxpayer or its legal representative. Subjects must
+include the CNPJ in the otherName extension per ICP-Brasil's
+specification. The signature is XML-DSig over a canonical XML
+representation defined per schema version.
+"""
+smart_card_requirement = "required_for_a3_certificates"
+hsm_requirement = "common_for_high_volume"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign sellers cannot obtain a CNPJ directly; they must appoint
+a Brazilian legal representative or establish a Brazilian
+subsidiary. For digital services, the recent Lei Complementar
+214/2025 introduces a CBS (Contribuicao sobre Bens e Servicos)
+framework that may simplify foreign-seller enrollment by 2027
+— this is tracked under follow-ups. Until then, foreign sellers
+typically work through a Brazilian Service Provider that holds
+the CNPJ.
+"""
+
+[validator]
+backend = "jvm:saxon"
+backend_notes = """
+NF-e schemas (PL_009 series and NT2024.001 etc) validate via
+Saxon-HE in the validator-saxon sidecar. The business-rule layer
+(BR-BR-NFE-*) covers 800+ Notas Tecnicas rules across CST codes,
+CFOP codes, NCM classifications, and per-state ICMS/IPI/PIS/COFINS
+calculations. NFS-e validation is per-municipality until the
+ENAT National Standard rolls out broadly; the rust side gets a
+shim per major municipal platform (Ginfes, Issnet, Equiplano,
+Webiss) that mirrors their varying SOAP envelopes.
+"""
+
+[interop]
+formats = [
+    "NF-e (Nota Fiscal Eletronica) v4.00",
+    "NFS-e ENAT National Standard v1.00",
+    "NFS-e municipal variants (Ginfes, Issnet, Equiplano, Webiss, ...)",
+    "CT-e (Conhecimento de Transporte Eletronico) v4.00 — out of scope for Wave 2",
+]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+Brazil's CTC system is entirely national; Peppol envelopes are
+NOT accepted by SEFAZ or by any municipal NFS-e gateway. The
+upcoming tax reform (Lei Complementar 214/2025) introduces a
+unified DF-e document family that will eventually replace NF-e
+and NFS-e with a single national document, but the schemas are
+still under construction.
+"""
+
+[sub_manifests]
+# Per-municipal NFS-e supplements follow as separate beads (one per
+# municipal platform cluster). Listed here for navigability; each
+# is a Track 8 prerequisite for its own city's coverage.
+items = [
+    "T-780a: ENAT National Standard NFS-e",
+    "T-780b: Sao Paulo (proprietary)",
+    "T-780c: Rio de Janeiro (proprietary)",
+    "T-780d: Ginfes (multi-city platform)",
+    "T-780e: Issnet (multi-city platform)",
+    "T-780f: Equiplano (multi-city platform)",
+    "T-780g: Webiss (multi-city platform)",
+]
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/brazil"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/brazil"
+
+[follow_ups]
+items = [
+    "Open the T-780a through T-780g sub-manifest beads with per-platform details",
+    "Track the IBS/CBS tax-reform schema publication (expected 2026-Q4) as a new top-level format family",
+    "Select a Brazilian fiscal-representative partner for the hosted layer's CNPJ-holding entity",
+    "Evaluate the SEFAZ contingency mode (EPEC) integration for the hosted layer's reliability tier",
+]
