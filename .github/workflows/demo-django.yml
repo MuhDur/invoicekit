@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: Apache-2.0
+# T-1401 reference Django demo: CI gate.
+#
+# Same shape as demo-fastapi.yml: build the cdylib, install
+# requirements, run the pytest smoke suite via django.test.Client.
+
+name: demo-django
+
+on:
+  push:
+    paths:
+      - "examples/django/**"
+      - "crates/invoicekit-ffi/**"
+      - "crates/invoicekit-engine/**"
+      - ".github/workflows/demo-django.yml"
+  pull_request:
+    paths:
+      - "examples/django/**"
+      - "crates/invoicekit-ffi/**"
+      - "crates/invoicekit-engine/**"
+      - ".github/workflows/demo-django.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: demo smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build invoicekit-ffi cdylib
+        run: cargo build -p invoicekit-ffi --locked
+
+      - name: Install demo dependencies
+        working-directory: examples/django
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r requirements.txt
+
+      - name: Smoke (6 pytest rows)
+        working-directory: examples/django
+        env:
+          INVOICEKIT_FFI_LIB: ${{ github.workspace }}/target/debug/libinvoicekit_ffi.so
+        run: .venv/bin/pytest tests/test_smoke.py -v
