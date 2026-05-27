@@ -18,6 +18,8 @@ export type TransmissionState = "accepted" | "archived" | "failed" | "queued" | 
 
 export type WebhookStatus = "active" | "disabled" | "failing";
 
+export type UpcomingInvoiceStatus = "draft" | "open" | "paid" | "void";
+
 export interface RecentActivityItem {
   readonly id: string;
   readonly kind: ActivityKind;
@@ -49,6 +51,28 @@ export interface TenantOverview {
   readonly recentActivity: readonly RecentActivityItem[];
   readonly validationFailures: number;
   readonly generatedAt: string;
+}
+
+export interface UpcomingInvoice {
+  readonly id: string;
+  readonly amountDue: string;
+  readonly currency: string;
+  readonly dueDate: string;
+  readonly status: UpcomingInvoiceStatus;
+}
+
+export interface TenantBilling {
+  readonly planName: string;
+  readonly planSlug: string;
+  readonly state: BillingState;
+  readonly billingEmail: string;
+  readonly currentPeriodEnd: string;
+  readonly documentsIncluded: number;
+  readonly documentsUsed: number;
+  readonly currency: string;
+  readonly monthlyBasePrice: string;
+  readonly portalSessionUrl?: string;
+  readonly upcomingInvoice?: UpcomingInvoice;
 }
 
 export interface ApiKey {
@@ -216,6 +240,7 @@ export interface DashboardEngineClient {
   listTeamMembers(params?: TeamMemberListParams): Promise<TeamMemberPage>;
   listTransmissions(params?: TransmissionListParams): Promise<TransmissionPage>;
   listWebhooks(params?: WebhookEndpointListParams): Promise<WebhookEndpointPage>;
+  tenantBilling(): Promise<TenantBilling>;
   tenantUsage(): Promise<TenantUsage>;
   tenantOverview(): Promise<TenantOverview>;
 }
@@ -312,6 +337,16 @@ export function createHttpDashboardClient(options: EngineRpcClientOptions = {}):
         requestId: requestIdFactory()
       });
     },
+    async tenantBilling() {
+      return callEngineMethod({
+        endpoint,
+        fetcher,
+        method: "engine.tenant_billing",
+        params: {},
+        parse: parseTenantBilling,
+        requestId: requestIdFactory()
+      });
+    },
     async tenantUsage() {
       return callEngineMethod({
         endpoint,
@@ -366,6 +401,7 @@ interface EngineMethodCall<Result> {
     | "engine.list_team_members"
     | "engine.list_transmissions"
     | "engine.list_webhooks"
+    | "engine.tenant_billing"
     | "engine.tenant_overview"
     | "engine.tenant_usage";
   readonly params: unknown;
@@ -379,6 +415,7 @@ async function callEngineMethod<
     | AuditEventPage
     | RecentErrorPage
     | TeamMemberPage
+    | TenantBilling
     | TenantOverview
     | TenantUsage
     | TransmissionPage
@@ -452,6 +489,42 @@ function parseTenantOverview(value: unknown): TenantOverview {
     recentActivity: readArray(record, "recentActivity", "tenant overview").map(parseRecentActivity),
     validationFailures: readNumber(record, "validationFailures", "tenant overview"),
     generatedAt: readString(record, "generatedAt", "tenant overview")
+  };
+}
+
+function parseTenantBilling(value: unknown): TenantBilling {
+  const record = asRecord(value, "tenant billing");
+  const billing: TenantBilling = {
+    planName: readString(record, "planName", "tenant billing"),
+    planSlug: readString(record, "planSlug", "tenant billing"),
+    state: readBillingState(record, "state", "tenant billing"),
+    billingEmail: readString(record, "billingEmail", "tenant billing"),
+    currentPeriodEnd: readString(record, "currentPeriodEnd", "tenant billing"),
+    documentsIncluded: readNumber(record, "documentsIncluded", "tenant billing"),
+    documentsUsed: readNumber(record, "documentsUsed", "tenant billing"),
+    currency: readString(record, "currency", "tenant billing"),
+    monthlyBasePrice: readString(record, "monthlyBasePrice", "tenant billing")
+  };
+  const upcomingInvoice = readOptionalRecord(record, "upcomingInvoice", "tenant billing");
+
+  appendOptionalStringField(billing, "portalSessionUrl", readOptionalString(record, "portalSessionUrl", "tenant billing"));
+
+  if (upcomingInvoice !== undefined) {
+    Object.assign(billing, { upcomingInvoice: parseUpcomingInvoice(upcomingInvoice) });
+  }
+
+  return billing;
+}
+
+function parseUpcomingInvoice(value: unknown): UpcomingInvoice {
+  const record = asRecord(value, "upcoming invoice");
+
+  return {
+    id: readString(record, "id", "upcoming invoice"),
+    amountDue: readString(record, "amountDue", "upcoming invoice"),
+    currency: readString(record, "currency", "upcoming invoice"),
+    dueDate: readString(record, "dueDate", "upcoming invoice"),
+    status: readUpcomingInvoiceStatus(record, "status", "upcoming invoice")
   };
 }
 
@@ -724,6 +797,16 @@ function readOptionalString(record: Record<string, unknown>, key: string, label:
   return value;
 }
 
+function readOptionalRecord(record: Record<string, unknown>, key: string, label: string): Record<string, unknown> | undefined {
+  const value = record[key];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return asRecord(value, `${label} ${key}`);
+}
+
 function appendOptionalStringField(target: object, key: string, value: string | undefined): void {
   if (value === undefined) {
     return;
@@ -878,6 +961,20 @@ function readWebhookStatus(record: Record<string, unknown>, key: string, label: 
   }
 
   throw new EngineRpcError(`Invalid ${label}: unsupported webhook status`, { data: record });
+}
+
+function readUpcomingInvoiceStatus(
+  record: Record<string, unknown>,
+  key: string,
+  label: string
+): UpcomingInvoiceStatus {
+  const value = readString(record, key, label);
+
+  if (value === "draft" || value === "open" || value === "paid" || value === "void") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported upcoming invoice status`, { data: record });
 }
 
 function readTransmissionState(record: Record<string, unknown>, key: string, label: string): TransmissionState {

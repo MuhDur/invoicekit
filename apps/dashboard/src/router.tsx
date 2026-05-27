@@ -1,8 +1,20 @@
 import { Link, Outlet, createRootRoute, createRoute, createRouter, useRouterState } from "@tanstack/react-router";
 import { Suspense } from "react";
-import { Activity, AlertTriangle, BarChart3, Gauge, Inbox, KeyRound, Settings, Users, Webhook } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  BarChart3,
+  CreditCard,
+  Gauge,
+  Inbox,
+  KeyRound,
+  Settings,
+  Users,
+  Webhook
+} from "lucide-react";
 import { ApiKeysRoute } from "../routes/api-keys";
 import { AuditRoute } from "../routes/audit";
+import { BillingRoute } from "../routes/billing";
 import { DocumentsRoute } from "../routes/documents";
 import { ErrorsRoute } from "../routes/errors";
 import { OverviewRoute } from "../routes/overview";
@@ -20,6 +32,7 @@ function AppShell() {
   const teamActive = pathname.startsWith("/settings/team");
   const apiKeysActive = pathname.startsWith("/settings/api-keys");
   const webhooksActive = pathname.startsWith("/settings/webhooks");
+  const billingActive = pathname.startsWith("/settings/billing");
 
   return (
     <div className="app-shell">
@@ -63,6 +76,10 @@ function AppShell() {
           <Link className="nav-item" data-active={webhooksActive ? true : undefined} to="/settings/webhooks">
             <Webhook size={18} aria-hidden="true" />
             Webhooks
+          </Link>
+          <Link className="nav-item" data-active={billingActive ? true : undefined} to="/settings/billing">
+            <CreditCard size={18} aria-hidden="true" />
+            Billing
           </Link>
           <span className="nav-item nav-item-disabled">
             <Settings size={18} aria-hidden="true" />
@@ -138,6 +155,12 @@ const webhooksRoute = createRoute({
   component: WebhooksRoute
 });
 
+const billingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings/billing",
+  component: BillingRoute
+});
+
 const routeTree = rootRoute.addChildren([
   overviewIndexRoute,
   overviewRoute,
@@ -147,7 +170,8 @@ const routeTree = rootRoute.addChildren([
   errorsRoute,
   teamRoute,
   apiKeysRoute,
-  webhooksRoute
+  webhooksRoute,
+  billingRoute
 ]);
 
 export const router = createRouter({
