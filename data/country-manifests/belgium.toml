@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-772 country feasibility manifest: Belgium.
+
+schema_version = "1.0"
+country = "BE"
+country_name = "Belgium"
+program = "Peppol-based mandatory B2B e-invoicing (FOD Financien / SPF Finances)"
+retrieved_at = "2026-05-27"
+maintainer = "RainyBeaver"
+bead = "invoices-t-772-manifest-belgium-yat"
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "FOD Financien e-invoicing program (NL)"
+url = "https://financien.belgium.be/nl/E-invoicing"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "SPF Finances facturation electronique (FR)"
+url = "https://finances.belgium.be/fr/E-invoicing"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Hermes (Belgian Peppol access point operator)"
+url = "https://digital.belgium.be/peppol"
+kind = "operator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Belgian B2B e-invoicing mandate law (consolidated)"
+url = "https://www.ejustice.just.fgov.be/"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "partner_gated"
+notes = """
+Belgium's B2B mandate uses the Peppol network as the transport
+layer. There is no Belgian-specific sandbox endpoint; testing
+against the Peppol test network requires a Peppol access point
+contract (Hermes is the federal-operated AP, but private APs are
+also accepted). Practically, a sandbox account at any Peppol AP
+that participates in the Peppol test network is enough.
+"""
+endpoint = "https://peppol-test.example/"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_BE_PEPPOL_TOKEN"
+
+[production]
+endpoint = "https://peppol.example/"
+production_credentials_env_var = "INVOICEKIT_PROD_BE_PEPPOL_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_optional"
+qualified_seal_notes = """
+Belgium does not mandate a per-invoice qualified electronic seal.
+The Peppol-network transport's AS4 signing happens at the access
+point level, so the seller doesn't need its own QES key for
+clearance. A QES is recommended for invoices to Belgian public
+administrations (the B2G channel) under the EN 16931 + Peppol BIS
+profile.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "recommended_for_ap_keys"
+
+[fiscal_rep]
+required_for = ["none"]
+notes = """
+No Belgian fiscal representative is required to issue an invoice
+into the Peppol network. Any seller (Belgian or foreign) with a
+Peppol access point can send to a Belgian recipient's Peppol
+participant identifier. Foreign sellers without a BE VAT
+registration may still need a Belgian fiscal representative for
+the VAT compliance side, but the e-invoicing flow itself is
+representative-agnostic.
+"""
+
+[validator]
+backend = "rust_native"
+backend_notes = """
+Belgium accepts the Peppol BIS Billing 3.0 profile (CIUS over EN
+16931). InvoiceKit's hand-written EN 16931 validator
+(invoicekit-validate-ubl-cii, T-031) covers the schema and the
+business rules; no Belgian-specific extension is needed. The
+managed-API layer routes Belgian invoices through the Peppol
+transmission adapter (T-072) for delivery.
+"""
+
+[interop]
+formats = ["Peppol BIS 3.0", "EN 16931"]
+peppol_bis_accepted = true
+peppol_pint_accepted = false
+notes = """
+Belgium is a pure Peppol-network country for B2B. Peppol PINT is
+not yet recognized at the clearance / delivery level but is
+expected to follow OpenPeppol's broader European rollout.
+Domestically-rendered PDF invoices remain legal for B2C and for
+seller-side archival but are not accepted as a B2B clearance
+equivalent.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/belgium"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/belgium"
+
+[follow_ups]
+items = [
+    "When Peppol PINT lands in Belgium, flip interop.peppol_pint_accepted and add a peppol-pint test fixture",
+    "Wire Hermes-specific access-point credentials into the deploy guide once the principal completes Hermes onboarding",
+]
