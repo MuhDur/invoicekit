@@ -1,0 +1,64 @@
+{
+  "schema_version": "1.0",
+  "fixture_id": "ik-synthetic-mock-gateway-rejected-0006",
+  "corpus_partition": "synthetic",
+  "publication": "public",
+  "status": "active",
+  "title": "Synthetic mock gateway rejected cassette",
+  "description": "Public synthetic cassette fixture for the InvoiceKit mock gateway rejected submit path.",
+  "artifact": {
+    "path": "interaction.vcr.json",
+    "media_type": "application/json",
+    "sha256": "1670c45e5f674fdc20cf26ef9582f376c3e05576e431746bc36f61495c44e306",
+    "size_bytes": 1245,
+    "format_family": "other",
+    "document_type": "gateway_cassette"
+  },
+  "jurisdiction": {
+    "countries": ["DE"],
+    "profile": "InvoiceKit mock gateway",
+    "syntax": "InvoiceKit mock gateway cassette",
+    "version": "1.0"
+  },
+  "license": {
+    "license_id": "CC0-1.0",
+    "copyright_holder": "InvoiceKit Authors",
+    "redistribution": "public-ok"
+  },
+  "provenance": {
+    "source_kind": "generated",
+    "source_name": "InvoiceKit T-074 mock gateway tests",
+    "generated_by": "RedFrog",
+    "generator_version": "manual-t-074-cassette-1",
+    "created_at": "2026-05-27T05:00:00Z"
+  },
+  "pii": {
+    "classification": "synthetic",
+    "redaction_status": "not-required",
+    "contains_personal_data": false,
+    "notes": "All identifiers are fictional and request bodies contain document fingerprints, not full invoice payloads."
+  },
+  "coverage": {
+    "capabilities": ["transmit"],
+    "scenarios": ["mock gateway rejected submit", "deterministic gateway failure replay"],
+    "negative_case": true
+  },
+  "validation": {
+    "expected_outcome": "valid",
+    "validators": [
+      {
+        "name": "invoicekit-transmit-mock tests",
+        "version": "1",
+        "result": "pass"
+      }
+    ],
+    "known_gaps": []
+  },
+  "maintenance": {
+    "owner": "InvoiceKit maintainers",
+    "created_at": "2026-05-27",
+    "reviewed_at": "2026-05-27",
+    "review_due": "2027-05-27",
+    "labels": ["synthetic", "mock-gateway", "cassette"]
+  }
+}
