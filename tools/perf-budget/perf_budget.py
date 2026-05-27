@@ -61,6 +61,10 @@ EXIT_REGRESSION = 1
 EXIT_INVALID_INPUT = 2
 
 
+class InvalidInputError(Exception):
+    """Input could not be parsed according to the perf-budget contract."""
+
+
 @dataclasses.dataclass(frozen=True)
 class OperationResult:
     """Outcome for a single tracked operation."""
@@ -96,22 +100,34 @@ def load_budget(path: Path) -> tuple[float, Mapping[str, float]]:
         with path.open("rb") as handle:
             data = tomllib.load(handle)
     except FileNotFoundError as exc:
-        raise SystemExit(f"budget file not found: {exc.filename}") from exc
+        raise InvalidInputError(f"budget file not found: {exc.filename}") from exc
     except tomllib.TOMLDecodeError as exc:
-        raise SystemExit(f"budget file is not valid TOML: {exc}") from exc
+        raise InvalidInputError(f"budget file is not valid TOML: {exc}") from exc
 
-    default_pct = float(data.get("default_max_regression_pct", 10.0))
-    operations_section = data.get("operations") or {}
+    try:
+        default_pct = float(data.get("default_max_regression_pct", 10.0))
+    except (TypeError, ValueError) as exc:
+        raise InvalidInputError(
+            "budget file: `default_max_regression_pct` must be numeric"
+        ) from exc
+    operations_section = data.get("operations", {})
     if not isinstance(operations_section, dict):
-        raise SystemExit("budget file: `operations` must be a table")
+        raise InvalidInputError("budget file: `operations` must be a table")
 
     operations: dict[str, float] = {}
     for name, section in operations_section.items():
         if not isinstance(section, dict):
-            raise SystemExit(f"budget file: `operations.{name}` must be a table")
-        threshold = float(section.get("max_regression_pct", default_pct))
+            raise InvalidInputError(
+                f"budget file: `operations.{name}` must be a table"
+            )
+        try:
+            threshold = float(section.get("max_regression_pct", default_pct))
+        except (TypeError, ValueError) as exc:
+            raise InvalidInputError(
+                f"budget file: `operations.{name}.max_regression_pct` must be numeric"
+            ) from exc
         if threshold <= 0.0:
-            raise SystemExit(
+            raise InvalidInputError(
                 f"budget file: `operations.{name}.max_regression_pct` must be > 0"
             )
         operations[name] = threshold
@@ -129,17 +145,22 @@ def load_estimate(criterion_dir: Path, op_name: str) -> float | None:
     if not estimates_path.is_file():
         return None
     try:
-        with estimates_path.open() as handle:
-            payload = json.load(handle)
-    except json.JSONDecodeError as exc:
-        raise SystemExit(f"malformed criterion JSON at {estimates_path}: {exc}") from exc
+        payload = json.JSONDecoder().decode(
+            estimates_path.read_text(encoding="utf-8")
+        )
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise InvalidInputError(
+            f"malformed criterion JSON at {estimates_path}: {exc}"
+        ) from exc
 
+    if not isinstance(payload, dict):
+        raise InvalidInputError(f"criterion JSON at {estimates_path} must be an object")
     mean = payload.get("mean")
     if not isinstance(mean, dict):
-        raise SystemExit(f"criterion JSON at {estimates_path} missing `mean`")
+        raise InvalidInputError(f"criterion JSON at {estimates_path} missing `mean`")
     point_estimate = mean.get("point_estimate")
     if not isinstance(point_estimate, (int, float)):
-        raise SystemExit(
+        raise InvalidInputError(
             f"criterion JSON at {estimates_path} missing `mean.point_estimate`"
         )
     return float(point_estimate)
@@ -215,16 +236,23 @@ def main(argv: list[str] | None = None) -> int:
 
     baseline_dir = args.baseline if args.baseline and args.baseline.is_dir() else None
 
-    _default_pct, operations = load_budget(args.budget)
-    if not operations:
-        print("budget defines no tracked operations; nothing to check", file=sys.stderr)
-        return EXIT_OK
+    try:
+        _default_pct, operations = load_budget(args.budget)
+        if not operations:
+            print(
+                "budget defines no tracked operations; nothing to check",
+                file=sys.stderr,
+            )
+            return EXIT_OK
 
-    results = evaluate(args.current, baseline_dir, operations)
-    summary = render_summary(results)
-    print(summary)
-    if args.summary_out is not None:
-        args.summary_out.write_text(summary)
+        results = evaluate(args.current, baseline_dir, operations)
+        summary = render_summary(results)
+        print(summary)
+        if args.summary_out is not None:
+            args.summary_out.write_text(summary)
+    except InvalidInputError as exc:
+        print(str(exc), file=sys.stderr)
+        return EXIT_INVALID_INPUT
 
     if any(r.status == "regression" for r in results):
         return EXIT_REGRESSION
