@@ -24,8 +24,8 @@ pub const CII_D16B_SCHEMA_COMMIT: &str = "b6c9e06a59812fb1a83585da40923b3678a649
 /// InvoiceKit operational metadata.
 pub const CII_DOCUMENT_FIELDS_EXTENSION_URN: &str = "urn:invoicekit:cii:d16b:document-fields";
 
-/// CII profile-context extension URN for guideline identifiers carried by
-/// `GuidelineSpecifiedDocumentContextParameter`.
+/// CII profile-context extension URN for profile/application context values
+/// carried by CII document-context parameters.
 pub const CII_PROFILE_CONTEXT_EXTENSION_URN: &str = "urn:invoicekit:cii:d16b:profile-context";
 
 /// Application context parameter ID used to carry InvoiceKit operational
@@ -61,10 +61,28 @@ pub const NAMED_MAPPING_DECISIONS: &[CiiMappingDecision] = &[
         rationale: "Business-process context is repeatable and identifies business processes; it is never trace_id.",
     },
     CiiMappingDecision {
+        element: "ExchangedDocumentContextType/SpecifiedTransactionID",
+        class: "profile_extension_payload",
+        representation: "CommercialDocument.extensions[urn:invoicekit:cii:d16b:profile-context].transaction_ids[]",
+        rationale: "Transaction context is repeatable CII profile data and is not an invoice document number.",
+    },
+    CiiMappingDecision {
+        element: "ExchangedDocumentContextType/TestIndicator",
+        class: "profile_extension_payload",
+        representation: "CommercialDocument.extensions[urn:invoicekit:cii:d16b:profile-context].test_indicators[]",
+        rationale: "CII test indicators describe profile/test context and are not InvoiceKit runtime flags.",
+    },
+    CiiMappingDecision {
         element: "ExchangedDocumentContextType/GuidelineSpecifiedDocumentContextParameter",
         class: "profile_extension_payload",
         representation: "CommercialDocument.extensions[urn:invoicekit:cii:d16b:profile-context].guideline_context_ids[]",
         rationale: "Guideline context declares the CII profile or CIUS; it is never a business-process context.",
+    },
+    CiiMappingDecision {
+        element: "ExchangedDocumentContextType/ApplicationSpecifiedDocumentContextParameter",
+        class: "profile_extension_payload",
+        representation: "CommercialDocument.extensions[urn:invoicekit:cii:d16b:profile-context].application_contexts[]",
+        rationale: "Third-party application context parameters are preserved separately from InvoiceKit-owned metadata.",
     },
     CiiMappingDecision {
         element: "ExchangedDocumentContextType/ApplicationSpecifiedDocumentContextParameter[ID=urn:invoicekit:cii:extension:metadata:v1]",
