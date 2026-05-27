@@ -95,6 +95,7 @@ members = [
   "bridges/maxio",
   "bridges/chargebee",
   "bridges/recurly",
+  "tools/pdf-visual-regression",
 ]
 
 [workspace.package]

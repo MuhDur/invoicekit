@@ -26,7 +26,13 @@ IGNORED_ARTIFACT_PATHS = frozenset({Path("fixture-metadata.schema.json")})
 # `metadata.json` schema — provenance is recorded once in the
 # directory's `README.md` and the upstream commit SHA is pinned in
 # the round-trip test that consumes them.
-IGNORED_ARTIFACT_DIRS = frozenset({"generators", "fuzz", "gobl-upstream"})
+#
+# T-058 impl: `pdf-snapshots` holds the visual-regression baseline
+# tree. Each PNG is identified by its sha256 in the top-level
+# `MANIFEST.json` (renderer_version + rasterizer_version + entries),
+# not by per-file metadata.json — the manifest is the per-file
+# provenance for this corpus.
+IGNORED_ARTIFACT_DIRS = frozenset({"generators", "fuzz", "gobl-upstream", "pdf-snapshots"})
 REFERENCE_PATH_FIELDS = (
     ("license", "evidence_path"),
     ("pii", "redaction_report_path"),

@@ -1,0 +1,99 @@
+name: PDF visual regression
+
+# T-058 impl: rasterise every PDF in the snapshot manifest via the
+# committed pdfium binaries, diff against the baseline PNGs, and
+# attach a markdown report to the workflow run. Drift fails the
+# build; baselines are re-blessed by adding the
+# `accept-visual-drift` label to the PR.
+#
+# Triggers:
+#   * push to main (catches drift that landed via admin-merge)
+#   * pull_request (the per-PR gate)
+#   * workflow_dispatch (manual re-run)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "conformance-corpus/pdf-snapshots/**"
+      - "tools/pdf-visual-regression/**"
+      - "crates/render-pdf/**"
+      - "crates/render-pdf-postproc/**"
+      - "crates/profile-factur-x/**"
+      - ".github/workflows/pdf-visual-regression.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "conformance-corpus/pdf-snapshots/**"
+      - "tools/pdf-visual-regression/**"
+      - "crates/render-pdf/**"
+      - "crates/render-pdf-postproc/**"
+      - "crates/profile-factur-x/**"
+      - ".github/workflows/pdf-visual-regression.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: pdf-visual-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  rasterise-and-diff:
+    name: rasterise + diff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pdf-visual-regression
+      # T-058 impl: pdfium-render is gated behind the `pdfium`
+      # cargo feature; we install the prebuilt pdfium-binaries
+      # release alongside the cargo build so the binary can
+      # dlopen libpdfium.so. The version is pinned for byte
+      # stability — bumping pdfium re-renders every baseline.
+      - name: Install libpdfium (pinned)
+        run: |
+          set -euo pipefail
+          PDFIUM_VERSION=chromium%2F7350
+          PDFIUM_URL="https://github.com/bblanchon/pdfium-binaries/releases/download/${PDFIUM_VERSION}/pdfium-linux-x64.tgz"
+          mkdir -p /opt/pdfium
+          curl -fsSL "$PDFIUM_URL" | tar -xz -C /opt/pdfium
+          echo "PDFIUM_DYNAMIC_LIB_PATH=/opt/pdfium/lib" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=/opt/pdfium/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+      - name: Build pdf-visual-regression with pdfium feature
+        run: |
+          cargo build --release --bin pdf-visual-regression \
+            -p invoicekit-pdf-visual-regression \
+            --features pdfium
+      # The candidate-rasterisation step is owned by a follow-up
+      # bead that adds the render-every-fixture binary. For now,
+      # this job is wired up to verify the diff binary builds with
+      # the pdfium feature on a real runner and to run the unit
+      # tests in the default-feature mode against the per-test
+      # synthesised PNGs. The first real-rasterisation run lands
+      # alongside the bless step that seeds the baselines.
+      - name: Run unit tests (default features)
+        run: cargo test -p invoicekit-pdf-visual-regression
+      - name: Confirm manifest is well-formed (when present)
+        if: hashFiles('conformance-corpus/pdf-snapshots/MANIFEST.json') != ''
+        run: |
+          if [ -f conformance-corpus/pdf-snapshots/MANIFEST.json ]; then
+            python3 -c "import json,sys; m=json.load(open('conformance-corpus/pdf-snapshots/MANIFEST.json')); assert m.get('renderer_version'), 'renderer_version missing'; assert m.get('rasterizer_version'), 'rasterizer_version missing'; assert isinstance(m.get('entries'), list), 'entries must be a list'; print(f'manifest declares {len(m[\"entries\"])} baseline(s)')"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pdf-visual-regression-bundle
+          path: |
+            target/pdf-visual-regression/
+          if-no-files-found: ignore
+          retention-days: 30
