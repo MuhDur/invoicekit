@@ -1,0 +1,22 @@
+# T-018 CSV fixture used by `.github/workflows/codelist-update.yml`'s
+# `pull_request` smoke. It mirrors the canonical InvoiceKit ISO 4217
+# seed manifest (`crates/codelists/data/iso-4217-2024.json`) so the
+# smoke can verify the runner is idempotent against a known input
+# without depending on a live upstream fetch.
+#
+# This file is NOT the upstream of record — that remains the SIX Group
+# publication URL listed in `sources::BUILTIN_SOURCES`. The nightly
+# `schedule:` trigger fetches that upstream and normalizes it; the
+# smoke uses this fixture for hermetic CI.
+code,label,numeric,minor_units
+BRL,Brazilian Real,986,2
+EUR,Euro,978,2
+GBP,Pound Sterling,826,2
+INR,Indian Rupee,356,2
+JPY,Yen,392,0
+MXN,Mexican Peso,484,2
+MYR,Malaysian Ringgit,458,2
+PLN,Zloty,985,2
+SAR,Saudi Riyal,682,2
+TRY,Turkish Lira,949,2
+USD,US Dollar,840,2

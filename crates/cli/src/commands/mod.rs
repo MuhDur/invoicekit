@@ -8,4 +8,5 @@
 //! binary (e.g. `invoicekit-cli --bin migrate-archive`).
 
 pub mod capabilities;
+pub mod codelist_update;
 pub mod migrate_archive;

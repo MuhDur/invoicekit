@@ -23,6 +23,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+pub mod sources;
+
 const SEED_MANIFESTS: &[&str] = &[
     include_str!("../data/iso-3166-1-alpha2.json"),
     include_str!("../data/iso-3166-2.json"),
