@@ -14,6 +14,7 @@ members = [
   "crates/format-ubl",
   "crates/format-cii",
   "crates/format-gobl",
+  "crates/profile-xrechnung",
   "crates/validate",
   "crates/validate-ubl-cii",
   "crates/render-html",

@@ -2141,6 +2141,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoicekit-profile-xrechnung"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-format-ubl",
+ "invoicekit-ir",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "invoicekit-reconcile"
 version = "0.0.0"
 dependencies = [
