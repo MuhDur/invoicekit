@@ -1781,6 +1781,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoicekit-format-gobl"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-ir",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "invoicekit-format-ubl"
 version = "0.0.0"
 dependencies = [

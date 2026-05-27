@@ -13,6 +13,7 @@ members = [
   "crates/canonical",
   "crates/format-ubl",
   "crates/format-cii",
+  "crates/format-gobl",
   "crates/validate",
   "crates/validate-ubl-cii",
   "crates/render-pdf",
