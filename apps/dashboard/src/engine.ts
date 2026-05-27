@@ -2,6 +2,8 @@ export type BillingState = "trial" | "active" | "past_due" | "suspended";
 
 export type ActivityKind = "sent" | "validated" | "failed" | "archived";
 
+export type AuditOutcome = "denied" | "failed" | "succeeded";
+
 export type TransmissionState = "accepted" | "archived" | "failed" | "queued" | "rejected" | "sent" | "validating";
 
 export interface RecentActivityItem {
@@ -37,6 +39,29 @@ export interface TenantOverview {
   readonly generatedAt: string;
 }
 
+export interface AuditEvent {
+  readonly id: string;
+  readonly occurredAt: string;
+  readonly actor: string;
+  readonly action: string;
+  readonly resourceType: string;
+  readonly resourceId: string;
+  readonly outcome: AuditOutcome;
+  readonly traceId: string;
+}
+
+export interface AuditEventPage {
+  readonly items: readonly AuditEvent[];
+  readonly pageInfo: TransmissionPageInfo;
+}
+
+export interface AuditEventListParams {
+  readonly actor?: string;
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly outcome?: AuditOutcome;
+}
+
 export interface TransmissionSummary {
   readonly id: string;
   readonly documentId: string;
@@ -69,6 +94,7 @@ export interface TransmissionListParams {
 }
 
 export interface DashboardEngineClient {
+  listAuditEvents(params?: AuditEventListParams): Promise<AuditEventPage>;
   listTransmissions(params?: TransmissionListParams): Promise<TransmissionPage>;
   tenantOverview(): Promise<TenantOverview>;
 }
@@ -105,6 +131,16 @@ export function createHttpDashboardClient(options: EngineRpcClientOptions = {}):
   }
 
   return {
+    async listAuditEvents(params = {}) {
+      return callEngineMethod({
+        endpoint,
+        fetcher,
+        method: "engine.list_audit_events",
+        params,
+        parse: parseAuditEventPage,
+        requestId: requestIdFactory()
+      });
+    },
     async listTransmissions(params = {}) {
       return callEngineMethod({
         endpoint,
@@ -152,13 +188,13 @@ export function billingTone(state: BillingState): "neutral" | "good" | "warning"
 interface EngineMethodCall<Result> {
   readonly endpoint: string;
   readonly fetcher: FetchLike;
-  readonly method: "engine.list_transmissions" | "engine.tenant_overview";
+  readonly method: "engine.list_audit_events" | "engine.list_transmissions" | "engine.tenant_overview";
   readonly params: unknown;
   readonly parse: (value: unknown) => Result;
   readonly requestId: string;
 }
 
-async function callEngineMethod<Result extends TenantOverview | TransmissionPage>({
+async function callEngineMethod<Result extends AuditEventPage | TenantOverview | TransmissionPage>({
   endpoint,
   fetcher,
   method,
@@ -263,6 +299,30 @@ function parseRecentActivity(value: unknown): RecentActivityItem {
     occurredAt: readString(record, "occurredAt", "recent activity item"),
     summary: readString(record, "summary", "recent activity item"),
     traceId: readString(record, "traceId", "recent activity item")
+  };
+}
+
+function parseAuditEventPage(value: unknown): AuditEventPage {
+  const record = asRecord(value, "audit event page");
+
+  return {
+    items: readArray(record, "items", "audit event page").map(parseAuditEvent),
+    pageInfo: parseTransmissionPageInfo(readRequired(record, "pageInfo", "audit event page"))
+  };
+}
+
+function parseAuditEvent(value: unknown): AuditEvent {
+  const record = asRecord(value, "audit event");
+
+  return {
+    id: readString(record, "id", "audit event"),
+    occurredAt: readString(record, "occurredAt", "audit event"),
+    actor: readString(record, "actor", "audit event"),
+    action: readString(record, "action", "audit event"),
+    resourceType: readString(record, "resourceType", "audit event"),
+    resourceId: readString(record, "resourceId", "audit event"),
+    outcome: readAuditOutcome(record, "outcome", "audit event"),
+    traceId: readString(record, "traceId", "audit event")
   };
 }
 
@@ -397,6 +457,16 @@ function readActivityKind(record: Record<string, unknown>, key: string, label: s
   }
 
   throw new EngineRpcError(`Invalid ${label}: unsupported activity kind`, { data: record });
+}
+
+function readAuditOutcome(record: Record<string, unknown>, key: string, label: string): AuditOutcome {
+  const value = readString(record, key, label);
+
+  if (value === "denied" || value === "failed" || value === "succeeded") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported audit outcome`, { data: record });
 }
 
 function readTransmissionState(record: Record<string, unknown>, key: string, label: string): TransmissionState {
