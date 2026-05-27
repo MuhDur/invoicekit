@@ -253,7 +253,7 @@ pub fn from_xml(input: &str) -> Result<CommercialDocument, CiiError> {
             }
             Event::GeneralRef(reference) => {
                 let reference = reference.xml_content(xml_version)?;
-                let text = resolve_xml_reference(&reference)?;
+                let text = resolve_xml_reference(&reference, xml_version)?;
                 append_text(&mut text_stack, &text)?;
             }
             Event::Decl(decl) => {
@@ -1324,15 +1324,15 @@ fn append_text(text_stack: &mut [String], text: &str) -> Result<(), CiiError> {
     Ok(())
 }
 
-fn resolve_xml_reference(reference: &str) -> Result<String, CiiError> {
+fn resolve_xml_reference(reference: &str, xml_version: XmlVersion) -> Result<String, CiiError> {
     if let Some(hex) = reference
         .strip_prefix("#x")
         .or_else(|| reference.strip_prefix("#X"))
     {
-        return char_from_reference(reference, u32::from_str_radix(hex, 16));
+        return char_from_reference(reference, u32::from_str_radix(hex, 16), xml_version);
     }
     if let Some(decimal) = reference.strip_prefix('#') {
-        return char_from_reference(reference, decimal.parse::<u32>());
+        return char_from_reference(reference, decimal.parse::<u32>(), xml_version);
     }
 
     match reference {
@@ -1348,12 +1348,27 @@ fn resolve_xml_reference(reference: &str) -> Result<String, CiiError> {
 fn char_from_reference(
     reference: &str,
     parsed: Result<u32, impl std::error::Error>,
+    xml_version: XmlVersion,
 ) -> Result<String, CiiError> {
     parsed
         .ok()
+        .filter(|codepoint| is_valid_xml_char(*codepoint, xml_version))
         .and_then(char::from_u32)
         .map(|character| character.to_string())
         .ok_or_else(|| CiiError::UnsupportedRoot(format!("entity:{reference}")))
+}
+
+fn is_valid_xml_char(codepoint: u32, xml_version: XmlVersion) -> bool {
+    match xml_version {
+        XmlVersion::Explicit1_1 => matches!(
+            codepoint,
+            0x1..=0xD7FF | 0xE000..=0xFFFD | 0x1_0000..=0x10_FFFF
+        ),
+        XmlVersion::Implicit1_0 | XmlVersion::Explicit1_0 => matches!(
+            codepoint,
+            0x9 | 0xA | 0xD | 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x1_0000..=0x10_FFFF
+        ),
+    }
 }
 
 fn path_ends(stack: &[String], suffix: &[&str]) -> bool {
@@ -1460,6 +1475,16 @@ mod tests {
 
         let numeric_reference_xml = xml.replace("Supplier &amp; Sons", "Supplier &#x26; Sons");
         assert_eq!(from_xml(&numeric_reference_xml).unwrap(), document);
+    }
+
+    #[test]
+    fn rejects_invalid_numeric_character_reference() {
+        let document = fixture(DocumentType::Invoice, 9);
+        let xml = to_xml(&document).unwrap();
+        let invalid_reference_xml = xml.replace(&document.supplier.name, "Supplier &#0; Sons");
+
+        let err = from_xml(&invalid_reference_xml).unwrap_err();
+        assert!(matches!(err, CiiError::UnsupportedRoot(_)));
     }
 
     #[test]
