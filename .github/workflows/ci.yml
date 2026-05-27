@@ -127,6 +127,16 @@ jobs:
           bun-version: "1.3.13"
       - uses: Swatinem/rust-cache@v2
       - run: cargo build -p invoicekit-ffi --locked
+      - name: C ABI smoke compile
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror \
+            -I crates/invoicekit-ffi/include \
+            crates/invoicekit-ffi/tests/c_smoke.c \
+            -L target/debug -linvoicekit_ffi \
+            -Wl,-rpath,${{ github.workspace }}/target/debug \
+            -o target/debug/invoicekit-ffi-c-smoke
+      - name: C ABI smoke run
+        run: target/debug/invoicekit-ffi-c-smoke
       - run: >
           cargo test --locked
           -p invoicekit-engine
@@ -151,6 +161,17 @@ jobs:
           -cp "$RUNNER_TEMP/invoicekit-java-abi-test"
           AbiGoldenTest
       - run: dotnet run --project bindings/dotnet/InvoiceKit.AbiGolden/InvoiceKit.AbiGolden.csproj
+
+  ffi-miri:
+    name: ffi miri
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri, rust-src
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo +nightly miri test -p invoicekit-ffi --locked
 
   docs:
     name: rustdoc
