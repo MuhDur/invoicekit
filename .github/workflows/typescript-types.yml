@@ -113,13 +113,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          corepack enable
+          # GitHub-hosted ubuntu-24.04 ships yarn 1.22.22 with the
+          # node 20 setup; we use that pre-installed binary rather
+          # than reinstalling globally (which trips EEXIST).
+          yarn --version | grep -q "^1\." || npm install -g yarn@1.22.22 --force
           mkdir -p smoke-yarn && cd smoke-yarn
-          # yarn 4 (Berry) refuses tarball protocol without a
-          # plugin install; pin yarn 1.x for the install-from-
-          # tgz smoke — that's the older but still widely used
-          # consumer setup we want to cover.
-          npm install -g yarn@1.22.22
           yarn init -y >/dev/null
           yarn add file:"${{ steps.tarball.outputs.path }}"
           cp ../bindings/typescript-types/tests/install-smoke/smoke.mjs ./smoke.mjs
@@ -148,11 +146,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Deno's npm: specifier needs a node_modules tree;
-          # `npm install` of the tarball creates one, then we
-          # point Deno at it via --node-modules-dir=auto.
+          # Deno's `npm:` specifier resolves through the npm
+          # registry, which fails for the not-yet-published
+          # @invoicekit/types tarball. Use BYONM (Bring Your Own
+          # Node Modules) so Deno reads the local node_modules
+          # tree that `npm install` produced from the tarball.
           mkdir -p smoke-deno && cd smoke-deno
           npm init -y >/dev/null
           npm install "${{ steps.tarball.outputs.path }}"
-          cp ../bindings/typescript-types/tests/install-smoke/smoke.deno.mjs ./smoke.mjs
-          deno run --allow-read --allow-env --node-modules-dir=auto smoke.mjs
+          # deno.json with BYONM enabled lets bare specifiers
+          # like "@invoicekit/types" resolve from local
+          # node_modules.
+          cat > deno.json <<'JSON'
+          { "nodeModulesDir": "manual", "unstable": ["byonm"] }
+          JSON
+          cp ../bindings/typescript-types/tests/install-smoke/smoke.mjs ./smoke.mjs
+          deno run --allow-read --allow-env smoke.mjs
