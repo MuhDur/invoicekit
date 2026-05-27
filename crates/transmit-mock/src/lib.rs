@@ -12,10 +12,24 @@
 //! method, path, and a BLAKE3 body fingerprint so a fixture never silently
 //! reuses the wrong gateway response.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use invoicekit_reconcile::{
+    CancelRequest, CorrectRequest, GatewayAdapter, GatewayContext, GatewayError, GatewayErrorKind,
+    GatewayFuture, GatewayOperation, GatewayReceipt, GatewayRoute, GatewayStatus,
+    GatewaySubmissionId, PollRequest, SubmitRequest,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+/// Request path used for mock submit cassette matching.
+pub const MOCK_SUBMIT_PATH: &str = "/mock/submit";
+/// Request path used for mock poll cassette matching.
+pub const MOCK_POLL_PATH: &str = "/mock/poll";
+/// Request path used for mock cancel cassette matching.
+pub const MOCK_CANCEL_PATH: &str = "/mock/cancel";
+/// Request path used for mock correction cassette matching.
+pub const MOCK_CORRECT_PATH: &str = "/mock/correct";
 
 /// JSON Schema document for `scenario.json` files stored beside cassettes.
 ///
@@ -111,6 +125,393 @@ pub enum CassetteError {
     /// JSON serialization or parsing failed.
     #[error("cassette JSON error: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+/// Cassette-backed implementation of [`GatewayAdapter`].
+///
+/// The adapter turns gateway operations into deterministic internal requests,
+/// matches those requests against committed cassettes, and normalizes replayed
+/// cassette bodies into [`GatewayReceipt`] or [`GatewayError`] values.
+#[derive(Debug)]
+pub struct MockGatewayAdapter {
+    cassettes: Vec<Cassette>,
+}
+
+impl MockGatewayAdapter {
+    /// Builds a mock gateway from deterministic cassettes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CassetteError::MatcherCollision`] when two interactions across
+    /// the provided cassettes share method, path, and body fingerprint.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_transmit_mock::{
+    ///     CassetteRecorder, MockGatewayAdapter, ScenarioMetadata, ScenarioSource,
+    /// };
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let scenario = ScenarioMetadata::new(
+    ///     "synthetic/empty",
+    ///     "Synthetic empty cassette",
+    ///     "DE",
+    ///     "mock",
+    ///     ScenarioSource::Synthetic,
+    ///     "none",
+    /// )?;
+    /// let cassette = CassetteRecorder::new(scenario).finish();
+    /// let adapter = MockGatewayAdapter::new([cassette])?;
+    ///
+    /// assert_eq!(adapter.cassette_count(), 1);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn new(cassettes: impl IntoIterator<Item = Cassette>) -> Result<Self, CassetteError> {
+        let cassettes: Vec<Cassette> = cassettes.into_iter().collect();
+        let mut keys = BTreeSet::new();
+        for cassette in &cassettes {
+            CassetteMatcher::new(cassette)?;
+            for interaction in &cassette.interactions {
+                let key = interaction.request.match_key();
+                if keys.contains(&key) {
+                    return Err(CassetteError::MatcherCollision {
+                        method: key.method,
+                        path: key.path,
+                        body_fingerprint: key.body_fingerprint,
+                    });
+                }
+                keys.insert(key);
+            }
+        }
+        Ok(Self { cassettes })
+    }
+
+    /// Returns the number of cassettes loaded by this adapter.
+    #[must_use]
+    pub fn cassette_count(&self) -> usize {
+        self.cassettes.len()
+    }
+
+    fn recorded_submit_request(request: &SubmitRequest) -> Result<RecordedRequest, GatewayError> {
+        let envelope = MockRequestEnvelope {
+            operation: GatewayOperation::Submit,
+            context: &request.context,
+            route: Some(&request.route),
+            submission_id: None,
+            document_id: Some(request.document.id.as_str()),
+            document_number: Some(request.document.document_number.as_str()),
+            document_fingerprint: Some(document_fingerprint(
+                &request.document,
+                GatewayOperation::Submit,
+            )?),
+            reason: None,
+        };
+        let body = serialize_request_envelope(&envelope)?;
+        recorded_gateway_request(GatewayOperation::Submit, "POST", MOCK_SUBMIT_PATH, body)
+    }
+
+    fn recorded_poll_request(request: &PollRequest) -> Result<RecordedRequest, GatewayError> {
+        let envelope = MockRequestEnvelope {
+            operation: GatewayOperation::Poll,
+            context: &request.context,
+            route: None,
+            submission_id: Some(&request.submission_id),
+            document_id: None,
+            document_number: None,
+            document_fingerprint: None,
+            reason: None,
+        };
+        let body = serialize_request_envelope(&envelope)?;
+        recorded_gateway_request(GatewayOperation::Poll, "GET", MOCK_POLL_PATH, body)
+    }
+
+    fn recorded_cancel_request(request: &CancelRequest) -> Result<RecordedRequest, GatewayError> {
+        let envelope = MockRequestEnvelope {
+            operation: GatewayOperation::Cancel,
+            context: &request.context,
+            route: None,
+            submission_id: Some(&request.submission_id),
+            document_id: None,
+            document_number: None,
+            document_fingerprint: None,
+            reason: Some(&request.reason),
+        };
+        let body = serialize_request_envelope(&envelope)?;
+        recorded_gateway_request(GatewayOperation::Cancel, "POST", MOCK_CANCEL_PATH, body)
+    }
+
+    fn recorded_correct_request(request: &CorrectRequest) -> Result<RecordedRequest, GatewayError> {
+        let envelope = MockRequestEnvelope {
+            operation: GatewayOperation::Correct,
+            context: &request.context,
+            route: None,
+            submission_id: Some(&request.submission_id),
+            document_id: Some(request.corrected_document.id.as_str()),
+            document_number: Some(request.corrected_document.document_number.as_str()),
+            document_fingerprint: Some(document_fingerprint(
+                &request.corrected_document,
+                GatewayOperation::Correct,
+            )?),
+            reason: Some(&request.reason),
+        };
+        let body = serialize_request_envelope(&envelope)?;
+        recorded_gateway_request(GatewayOperation::Correct, "POST", MOCK_CORRECT_PATH, body)
+    }
+
+    fn replay(
+        &self,
+        operation: GatewayOperation,
+        request: &RecordedRequest,
+        context: GatewayContext,
+    ) -> Result<GatewayReceipt, GatewayError> {
+        tracing::debug!(
+            operation = operation.as_str(),
+            tenant_id = context.tenant_id.as_str(),
+            trace_id = context.trace_id.as_str(),
+            gateway_attempt_id = context.gateway_attempt_id.as_str(),
+            "replaying mock gateway cassette"
+        );
+        let response = self.match_response(request).map_err(|error| {
+            cassette_error_to_gateway_error(
+                operation,
+                &error,
+                "record or select a matching cassette",
+            )
+        })?;
+        if (200..=299).contains(&response.status) {
+            receipt_from_response(operation, context, response)
+        } else {
+            Err(error_from_response(operation, response))
+        }
+    }
+
+    fn match_response<'a>(
+        &'a self,
+        request: &RecordedRequest,
+    ) -> Result<&'a RecordedResponse, CassetteError> {
+        let mut miss = None;
+        for cassette in &self.cassettes {
+            let matcher = CassetteMatcher::new(cassette)?;
+            match matcher.match_request(request) {
+                Ok(response) => return Ok(response),
+                Err(error @ CassetteError::NoMatch { .. }) => {
+                    miss = Some(error);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(miss.unwrap_or_else(|| CassetteError::NoMatch {
+            method: request.method.clone(),
+            path: request.path.clone(),
+            body_fingerprint: body_fingerprint(request.body.as_bytes()),
+        }))
+    }
+}
+
+impl GatewayAdapter for MockGatewayAdapter {
+    fn submit(&self, request: SubmitRequest) -> GatewayFuture<'_, GatewayReceipt> {
+        let recorded = Self::recorded_submit_request(&request);
+        let context = request.context;
+        let result =
+            recorded.and_then(|recorded| self.replay(GatewayOperation::Submit, &recorded, context));
+        Box::pin(std::future::ready(result))
+    }
+
+    fn poll(&self, request: PollRequest) -> GatewayFuture<'_, GatewayReceipt> {
+        let recorded = Self::recorded_poll_request(&request);
+        let context = request.context;
+        let result =
+            recorded.and_then(|recorded| self.replay(GatewayOperation::Poll, &recorded, context));
+        Box::pin(std::future::ready(result))
+    }
+
+    fn cancel(&self, request: CancelRequest) -> GatewayFuture<'_, GatewayReceipt> {
+        let recorded = Self::recorded_cancel_request(&request);
+        let context = request.context;
+        let result =
+            recorded.and_then(|recorded| self.replay(GatewayOperation::Cancel, &recorded, context));
+        Box::pin(std::future::ready(result))
+    }
+
+    fn correct(&self, request: CorrectRequest) -> GatewayFuture<'_, GatewayReceipt> {
+        let recorded = Self::recorded_correct_request(&request);
+        let context = request.context;
+        let result = recorded
+            .and_then(|recorded| self.replay(GatewayOperation::Correct, &recorded, context));
+        Box::pin(std::future::ready(result))
+    }
+}
+
+#[derive(Serialize)]
+struct MockRequestEnvelope<'a> {
+    operation: GatewayOperation,
+    context: &'a GatewayContext,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    route: Option<&'a GatewayRoute>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    submission_id: Option<&'a GatewaySubmissionId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    document_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    document_number: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    document_fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<&'a str>,
+}
+
+#[derive(Deserialize)]
+struct MockGatewayReceiptBody {
+    submission_id: String,
+    status: GatewayStatus,
+    received_at: String,
+    #[serde(default)]
+    gateway_reference: Option<String>,
+    #[serde(default)]
+    detail: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct MockGatewayErrorBody {
+    kind: GatewayErrorKind,
+    message: String,
+    remediation: String,
+    #[serde(default)]
+    gateway_code: Option<String>,
+    #[serde(default)]
+    submission_id: Option<String>,
+    #[serde(default)]
+    retry_after_seconds: Option<u64>,
+}
+
+fn serialize_request_envelope(envelope: &MockRequestEnvelope<'_>) -> Result<String, GatewayError> {
+    serde_json::to_string(&envelope).map_err(|error| {
+        GatewayError::new(
+            GatewayErrorKind::InvalidRequest,
+            envelope.operation,
+            format!("mock gateway request serialization failed: {error}"),
+            "ensure gateway request fields are serializable before replay",
+        )
+    })
+}
+
+fn document_fingerprint(
+    document: &impl Serialize,
+    operation: GatewayOperation,
+) -> Result<String, GatewayError> {
+    let value = serde_json::to_value(document).map_err(|error| {
+        GatewayError::new(
+            GatewayErrorKind::InvalidRequest,
+            operation,
+            format!("mock gateway document serialization failed: {error}"),
+            "ensure the document is serializable before cassette replay",
+        )
+    })?;
+    let canonical = invoicekit_canonical::canonicalize_value(&value).map_err(|error| {
+        GatewayError::new(
+            GatewayErrorKind::InvalidRequest,
+            operation,
+            format!("mock gateway document canonicalization failed: {error}"),
+            "ensure the document is I-JSON compatible before cassette replay",
+        )
+    })?;
+    Ok(body_fingerprint(canonical.as_bytes()))
+}
+
+fn recorded_gateway_request(
+    operation: GatewayOperation,
+    method: &str,
+    path: &str,
+    body: String,
+) -> Result<RecordedRequest, GatewayError> {
+    RecordedRequest::new(method, path, BTreeMap::new(), body).map_err(|error| {
+        cassette_error_to_gateway_error(
+            operation,
+            &error,
+            "fix the mock gateway operation-to-cassette request mapping",
+        )
+    })
+}
+
+fn receipt_from_response(
+    operation: GatewayOperation,
+    context: GatewayContext,
+    response: &RecordedResponse,
+) -> Result<GatewayReceipt, GatewayError> {
+    let body: MockGatewayReceiptBody = serde_json::from_str(&response.body).map_err(|error| {
+        malformed_receipt_error(operation, format!("invalid receipt JSON: {error}"))
+    })?;
+    let submission_id = GatewaySubmissionId::new(body.submission_id).map_err(|error| {
+        malformed_receipt_error(operation, format!("invalid receipt submission_id: {error}"))
+    })?;
+    let mut receipt = GatewayReceipt::new(
+        operation,
+        context,
+        submission_id,
+        body.status,
+        body.received_at,
+    )
+    .map_err(|error| malformed_receipt_error(operation, error.to_string()))?;
+    receipt.gateway_reference = body.gateway_reference;
+    receipt.raw_receipt_hash = Some(body_fingerprint(response.body.as_bytes()));
+    receipt.detail = body.detail;
+    Ok(receipt)
+}
+
+fn error_from_response(operation: GatewayOperation, response: &RecordedResponse) -> GatewayError {
+    let body: MockGatewayErrorBody = match serde_json::from_str(&response.body) {
+        Ok(body) => body,
+        Err(error) => {
+            return malformed_receipt_error(operation, format!("invalid error JSON: {error}"));
+        }
+    };
+    let mut error = GatewayError::new(body.kind, operation, body.message, body.remediation);
+    if let Some(code) = body.gateway_code {
+        error = error.with_gateway_code(code);
+    }
+    if let Some(submission_id) = body.submission_id {
+        let submission_id = match GatewaySubmissionId::new(submission_id) {
+            Ok(submission_id) => submission_id,
+            Err(error) => {
+                return malformed_receipt_error(
+                    operation,
+                    format!("invalid error submission_id: {error}"),
+                );
+            }
+        };
+        error = error.with_submission_id(submission_id);
+    }
+    if let Some(seconds) = body.retry_after_seconds {
+        error = error.with_retry_after_seconds(seconds);
+    }
+    error
+}
+
+fn malformed_receipt_error(operation: GatewayOperation, message: String) -> GatewayError {
+    GatewayError::new(
+        GatewayErrorKind::MalformedReceipt,
+        operation,
+        message,
+        "fix or re-record the malformed mock gateway cassette response",
+    )
+}
+
+fn cassette_error_to_gateway_error(
+    operation: GatewayOperation,
+    error: &CassetteError,
+    remediation: &'static str,
+) -> GatewayError {
+    let kind = match error {
+        CassetteError::NoMatch { .. } => GatewayErrorKind::NotFound,
+        CassetteError::MatcherCollision { .. } => GatewayErrorKind::UnexpectedResponse,
+        CassetteError::MissingRequiredField { .. }
+        | CassetteError::InvalidField { .. }
+        | CassetteError::UnscrubbedPii { .. }
+        | CassetteError::Json(_) => GatewayErrorKind::InvalidRequest,
+    };
+    GatewayError::new(kind, operation, error.to_string(), remediation)
 }
 
 /// Metadata stored in each cassette directory as `scenario.json`.
@@ -1081,13 +1482,24 @@ pub const fn crate_name() -> &'static str {
 mod tests {
     use std::collections::BTreeMap;
     use std::fs;
+    use std::future::Future;
     use std::path::Path;
+    use std::pin::pin;
+    use std::task::{Context, Poll, Waker};
+
+    use invoicekit_ir::CommercialDocument;
+    use invoicekit_reconcile::{
+        GatewayAdapter, GatewayAttemptId, GatewayContext, GatewayErrorKind, GatewayOperation,
+        GatewayRoute, GatewayStatus, GatewaySubmissionId, IdempotencyKey, PollRequest,
+        SubmitRequest, TenantId, TraceId,
+    };
+    use serde_json::json;
 
     use super::{
         assert_no_unscrubbed_pii_patterns, body_fingerprint, count_unscrubbed_pii_patterns,
         crate_name, scenario_metadata_schema, Cassette, CassetteMatcher, CassetteRecorder,
-        RecordedRequest, RecordedResponse, ScenarioMetadata, ScenarioSource, ScrubRule, ScrubScope,
-        Scrubber,
+        MockGatewayAdapter, RecordedRequest, RecordedResponse, ScenarioMetadata, ScenarioSource,
+        ScrubRule, ScrubScope, Scrubber,
     };
 
     #[test]
@@ -1273,6 +1685,144 @@ mod tests {
     }
 
     #[test]
+    fn baseline_cassettes_match_recorder_output_and_are_scrubbed() {
+        let accepted = accepted_cassette();
+        let rejected = rejected_cassette();
+
+        assert_eq!(
+            String::from_utf8(accepted.to_vcr_bytes().unwrap()).unwrap(),
+            include_str!(
+                "../../../conformance-corpus/cassettes/mock/accepted/interaction.vcr.json"
+            )
+        );
+        assert_eq!(
+            String::from_utf8(rejected.to_vcr_bytes().unwrap()).unwrap(),
+            include_str!(
+                "../../../conformance-corpus/cassettes/mock/rejected/interaction.vcr.json"
+            )
+        );
+        assert_eq!(
+            accepted.to_vcr_bytes().unwrap(),
+            accepted_cassette().to_vcr_bytes().unwrap()
+        );
+        assert_eq!(
+            rejected.to_vcr_bytes().unwrap(),
+            rejected_cassette().to_vcr_bytes().unwrap()
+        );
+        assert_no_unscrubbed_pii_patterns(&accepted).unwrap();
+        assert_no_unscrubbed_pii_patterns(&rejected).unwrap();
+    }
+
+    #[test]
+    fn baseline_scenario_metadata_files_match_cassettes() {
+        let accepted: ScenarioMetadata = serde_json::from_str(include_str!(
+            "../../../conformance-corpus/cassettes/mock/accepted/scenario.json"
+        ))
+        .unwrap();
+        let rejected: ScenarioMetadata = serde_json::from_str(include_str!(
+            "../../../conformance-corpus/cassettes/mock/rejected/scenario.json"
+        ))
+        .unwrap();
+
+        assert_eq!(accepted, accepted_cassette().scenario);
+        assert_eq!(rejected, rejected_cassette().scenario);
+    }
+
+    #[test]
+    fn mock_gateway_replays_successful_submit_cassette() {
+        let adapter = MockGatewayAdapter::new([accepted_cassette()]).unwrap();
+        let receipt = block_on_ready(adapter.submit(submit_request("success"))).unwrap();
+
+        assert_eq!(receipt.operation, GatewayOperation::Submit);
+        assert_eq!(receipt.status, GatewayStatus::Accepted);
+        assert_eq!(receipt.submission_id.as_str(), "mock_sub_success");
+        assert_eq!(
+            receipt.gateway_reference.as_deref(),
+            Some("MOCK-ACCEPTED-1")
+        );
+        assert!(receipt.raw_receipt_hash.is_some());
+    }
+
+    #[test]
+    fn mock_gateway_replays_gateway_failure_cassette() {
+        let adapter = MockGatewayAdapter::new([rejected_cassette()]).unwrap();
+        let err = block_on_ready(adapter.submit(submit_request("rejected"))).unwrap_err();
+
+        assert_eq!(err.kind, GatewayErrorKind::Rejected);
+        assert_eq!(err.gateway_code.as_deref(), Some("MOCK_REJECTED"));
+        assert_eq!(err.submission_id.unwrap().as_str(), "mock_sub_rejected");
+        assert!(err.remediation.contains("fix"));
+    }
+
+    #[test]
+    fn mock_gateway_reports_no_matching_cassette() {
+        let adapter = MockGatewayAdapter::new([accepted_cassette()]).unwrap();
+        let err = block_on_ready(adapter.submit(submit_request("unknown"))).unwrap_err();
+
+        assert_eq!(err.kind, GatewayErrorKind::NotFound);
+        assert!(err.message.contains("no cassette interaction matched"));
+    }
+
+    #[test]
+    fn mock_gateway_document_content_changes_cassette_key() {
+        let adapter = MockGatewayAdapter::new([accepted_cassette()]).unwrap();
+        let changed_document = synthetic_document_with_payable_amount("success", "118.00");
+        let changed_request = SubmitRequest::new(
+            gateway_context("success"),
+            gateway_route(),
+            changed_document,
+        )
+        .unwrap();
+
+        let err = block_on_ready(adapter.submit(changed_request)).unwrap_err();
+
+        assert_eq!(err.kind, GatewayErrorKind::NotFound);
+        assert!(err.message.contains("no cassette interaction matched"));
+    }
+
+    #[test]
+    fn mock_gateway_rejects_duplicate_cassette_keys() {
+        let first = accepted_cassette();
+        let second = accepted_cassette();
+
+        let err = MockGatewayAdapter::new([first, second]).unwrap_err();
+
+        assert!(matches!(err, super::CassetteError::MatcherCollision { .. }));
+    }
+
+    #[test]
+    fn mock_gateway_replays_poll_operation() {
+        let request = poll_request("poll-success");
+        let mut recorder = CassetteRecorder::new(
+            ScenarioMetadata::new(
+                "mock/poll/accepted",
+                "Mock poll accepted",
+                "DE",
+                "mock",
+                ScenarioSource::Synthetic,
+                "none",
+            )
+            .unwrap(),
+        );
+        recorder.record(
+            MockGatewayAdapter::recorded_poll_request(&request).unwrap(),
+            RecordedResponse::new(
+                200,
+                BTreeMap::new(),
+                r#"{"submission_id":"mock_sub_success","status":"accepted","gateway_reference":"MOCK-POLL-1","received_at":"2026-05-27T00:05:00Z","detail":"Synthetic mock gateway poll accepted."}"#,
+            )
+            .unwrap(),
+        );
+        let adapter = MockGatewayAdapter::new([recorder.finish()]).unwrap();
+
+        let receipt = block_on_ready(adapter.poll(request)).unwrap();
+
+        assert_eq!(receipt.operation, GatewayOperation::Poll);
+        assert_eq!(receipt.status, GatewayStatus::Accepted);
+        assert_eq!(receipt.gateway_reference.as_deref(), Some("MOCK-POLL-1"));
+    }
+
+    #[test]
     fn cassette_corpus_has_no_unscrubbed_pii() {
         let repo = repo_root();
         let cassette_root = repo.join("conformance-corpus").join("cassettes");
@@ -1370,6 +1920,156 @@ mod tests {
             path.display(),
             scan_result.unwrap_err()
         );
+    }
+
+    fn accepted_cassette() -> super::Cassette {
+        let mut recorder = CassetteRecorder::new(
+            ScenarioMetadata::new(
+                "mock/submit/accepted",
+                "Mock submit accepted",
+                "DE",
+                "mock",
+                ScenarioSource::Synthetic,
+                "none",
+            )
+            .unwrap(),
+        );
+        recorder.record(
+            MockGatewayAdapter::recorded_submit_request(&submit_request("success")).unwrap(),
+            RecordedResponse::new(
+                202,
+                BTreeMap::new(),
+                r#"{"submission_id":"mock_sub_success","status":"accepted","gateway_reference":"MOCK-ACCEPTED-1","received_at":"2026-05-27T00:00:00Z","detail":"Synthetic mock gateway accepted the invoice."}"#,
+            )
+            .unwrap(),
+        );
+        recorder.finish()
+    }
+
+    fn rejected_cassette() -> super::Cassette {
+        let mut recorder = CassetteRecorder::new(
+            ScenarioMetadata::new(
+                "mock/submit/rejected",
+                "Mock submit rejected",
+                "DE",
+                "mock",
+                ScenarioSource::Synthetic,
+                "none",
+            )
+            .unwrap(),
+        );
+        recorder.record(
+            MockGatewayAdapter::recorded_submit_request(&submit_request("rejected")).unwrap(),
+            RecordedResponse::new(
+                422,
+                BTreeMap::new(),
+                r#"{"kind":"rejected","message":"mock gateway rejected the invoice","remediation":"fix the invoice payload and replay the matching cassette","gateway_code":"MOCK_REJECTED","submission_id":"mock_sub_rejected"}"#,
+            )
+            .unwrap(),
+        );
+        recorder.finish()
+    }
+
+    fn submit_request(case: &str) -> SubmitRequest {
+        SubmitRequest::new(
+            gateway_context(case),
+            gateway_route(),
+            synthetic_document(case),
+        )
+        .unwrap()
+    }
+
+    fn poll_request(case: &str) -> PollRequest {
+        PollRequest::new(
+            gateway_context(case),
+            GatewaySubmissionId::new("mock_sub_success").unwrap(),
+        )
+    }
+
+    fn gateway_context(case: &str) -> GatewayContext {
+        GatewayContext::new(
+            TenantId::new("tenant_mock").unwrap(),
+            TraceId::new(format!("trace_mock_{case}")).unwrap(),
+            IdempotencyKey::new(format!("idem_mock_{case}")).unwrap(),
+            GatewayAttemptId::new(format!("attempt_mock_{case}")).unwrap(),
+        )
+    }
+
+    fn gateway_route() -> GatewayRoute {
+        GatewayRoute::new("mock", "mock-profile", Some("DE")).unwrap()
+    }
+
+    fn synthetic_document(case: &str) -> CommercialDocument {
+        synthetic_document_with_payable_amount(case, "119.00")
+    }
+
+    fn synthetic_document_with_payable_amount(
+        case: &str,
+        payable_amount: &str,
+    ) -> CommercialDocument {
+        CommercialDocument::try_from_value(json!({
+            "schema_version": "1.0",
+            "id": format!("doc_mock_{case}"),
+            "document_type": "invoice",
+            "issue_date": "2026-05-27",
+            "document_number": format!("INV-MOCK-{}", case.to_ascii_uppercase()),
+            "currency": "EUR",
+            "supplier": party_json("supplier_mock", "Mock Supplier GmbH", "DE"),
+            "customer": party_json("customer_mock", "Mock Buyer SAS", "FR"),
+            "lines": [{
+                "id": "1",
+                "description": "Mock gateway fixture",
+                "quantity": "1",
+                "unit_price": "100.00",
+                "line_extension_amount": "100.00"
+            }],
+            "tax_summary": [{
+                "category_code": "S",
+                "taxable_amount": "100.00",
+                "tax_amount": "19.00",
+                "tax_rate": "19.00"
+            }],
+            "monetary_total": {
+                "line_extension_amount": "100.00",
+                "tax_exclusive_amount": "100.00",
+                "tax_inclusive_amount": "119.00",
+                "payable_amount": payable_amount
+            },
+            "meta": {
+                "tenant_id": "tenant_mock",
+                "trace_id": format!("trace_mock_{case}"),
+                "source_system": "transmit-mock-test"
+            }
+        }))
+        .unwrap()
+    }
+
+    fn party_json(id: &str, name: &str, country: &str) -> serde_json::Value {
+        json!({
+            "id": id,
+            "name": name,
+            "tax_ids": [{
+                "scheme": "test",
+                "value": format!("{country}-MOCK-TAX")
+            }],
+            "address": {
+                "lines": ["Mock Street 1"],
+                "city": "Mock City",
+                "postal_code": "10000",
+                "country": country
+            }
+        })
+    }
+
+    fn block_on_ready<T>(future: impl Future<Output = T>) -> T {
+        let mut future = pin!(future);
+        let mut context = Context::from_waker(Waker::noop());
+        loop {
+            if let Poll::Ready(value) = future.as_mut().poll(&mut context) {
+                break value;
+            }
+            std::thread::yield_now();
+        }
     }
 
     fn sample_cassette() -> super::Cassette {

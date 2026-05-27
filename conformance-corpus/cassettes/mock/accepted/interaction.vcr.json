@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "scenario": {
+    "schema_version": "1.0",
+    "scenario_id": "mock/submit/accepted",
+    "title": "Mock submit accepted",
+    "country": "DE",
+    "route": "mock",
+    "source": "synthetic",
+    "scrubber_profile": "none"
+  },
+  "interactions": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/mock/submit",
+        "body": "{\"operation\":\"submit\",\"context\":{\"tenant_id\":\"tenant_mock\",\"trace_id\":\"trace_mock_success\",\"idempotency_key\":\"idem_mock_success\",\"gateway_attempt_id\":\"attempt_mock_success\"},\"route\":{\"route\":\"mock\",\"profile\":\"mock-profile\",\"country\":\"DE\"},\"document_id\":\"doc_mock_success\",\"document_number\":\"INV-MOCK-SUCCESS\",\"document_fingerprint\":\"f65397b3087ed885e19a185e1c6ccdc4a725c684d1eff48ab3abae3765551b7d\"}",
+        "body_fingerprint": "6552dd363f5f20d9248f295c82e841c07c31e86e7ead7e5d7e1be770402d0430"
+      },
+      "response": {
+        "status": 202,
+        "body": "{\"submission_id\":\"mock_sub_success\",\"status\":\"accepted\",\"gateway_reference\":\"MOCK-ACCEPTED-1\",\"received_at\":\"2026-05-27T00:00:00Z\",\"detail\":\"Synthetic mock gateway accepted the invoice.\"}"
+      }
+    }
+  ]
+}
