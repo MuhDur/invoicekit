@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+[package]
+name = "invoicekit-adversarial-generator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Pathological invoice generator for differential / fuzz testing across every InvoiceKit serializer."
+publish = false
+
+[lib]
+name = "invoicekit_adversarial_generator"
+path = "src/lib.rs"
+
+[dependencies]
+invoicekit-ir = { path = "../ir", version = "0.0.0" }
+invoicekit-format-ubl = { path = "../format-ubl", version = "0.0.0" }
+invoicekit-format-cii = { path = "../format-cii", version = "0.0.0" }
+invoicekit-format-gobl = { path = "../format-gobl", version = "0.0.0" }
+invoicekit-profile-xrechnung = { path = "../profile-xrechnung", version = "0.0.0" }
+invoicekit-profile-peppol-bis = { path = "../profile-peppol-bis", version = "0.0.0" }
+invoicekit-profile-peppol-pint = { path = "../profile-peppol-pint", version = "0.0.0" }
+rust_decimal = "1"
+serde_json = "1"
+thiserror.workspace = true
+
+[lints]
+workspace = true
