@@ -14,10 +14,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use invoicekit_ir::CommercialDocument;
 use invoicekit_reconcile::{
-    CancelRequest, CorrectRequest, GatewayAdapter, GatewayContext, GatewayError, GatewayErrorKind,
-    GatewayFuture, GatewayOperation, GatewayReceipt, GatewayRoute, GatewayStatus,
-    GatewaySubmissionId, PollRequest, SubmitRequest,
+    CancelRequest, CorrectRequest, GatewayAdapter, GatewayAttemptId, GatewayContext, GatewayError,
+    GatewayErrorKind, GatewayFuture, GatewayOperation, GatewayReceipt, GatewayRoute, GatewayStatus,
+    GatewaySubmissionId, IdempotencyKey, PollRequest, ReconcileError, SubmitRequest, TenantId,
+    TraceId,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -464,6 +466,18 @@ fn error_from_response(operation: GatewayOperation, response: &RecordedResponse)
     let body: MockGatewayErrorBody = match serde_json::from_str(&response.body) {
         Ok(body) => body,
         Err(error) => {
+            if is_gateway_maintenance_page(response) {
+                return GatewayError::new(
+                    GatewayErrorKind::GatewayMaintenance,
+                    operation,
+                    format!(
+                        "gateway returned an HTML maintenance page with HTTP status {}",
+                        response.status
+                    ),
+                    "retry after the maintenance window or replay a normalized gateway error cassette",
+                )
+                .with_gateway_code(format!("HTTP_{}", response.status));
+            }
             return malformed_receipt_error(operation, format!("invalid error JSON: {error}"));
         }
     };
@@ -489,6 +503,29 @@ fn error_from_response(operation: GatewayOperation, response: &RecordedResponse)
     error
 }
 
+fn is_gateway_maintenance_page(response: &RecordedResponse) -> bool {
+    if !(500..=599).contains(&response.status) {
+        return false;
+    }
+
+    let content_type = response
+        .headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+        .map(|(_, value)| value.to_ascii_lowercase());
+    let body = response.body.to_ascii_lowercase();
+    let looks_like_html = content_type
+        .as_deref()
+        .is_some_and(|value| value.contains("text/html"))
+        || body.contains("<!doctype html")
+        || body.contains("<html");
+    let looks_like_maintenance = body.contains("maintenance")
+        || body.contains("temporarily unavailable")
+        || body.contains("service unavailable");
+
+    looks_like_html && looks_like_maintenance
+}
+
 fn malformed_receipt_error(operation: GatewayOperation, message: String) -> GatewayError {
     GatewayError::new(
         GatewayErrorKind::MalformedReceipt,
@@ -512,6 +549,738 @@ fn cassette_error_to_gateway_error(
         | CassetteError::Json(_) => GatewayErrorKind::InvalidRequest,
     };
     GatewayError::new(kind, operation, error.to_string(), remediation)
+}
+
+/// Stable scenario identifiers that every gateway contract suite run must cover.
+pub const GATEWAY_CONTRACT_SCENARIO_IDS: &[&str] = &[
+    "idempotent-replay",
+    "duplicate-submission",
+    "timeout",
+    "malformed-receipt",
+    "auth-failure",
+    "certificate-rejection",
+    "rate-limit",
+    "delayed-async-receipt",
+    "unknown-response-field",
+    "gateway-maintenance-page",
+    "partner-error-translation",
+];
+
+/// Errors raised while building reusable gateway contract scenarios.
+#[derive(Debug, Error)]
+pub enum GatewayContractError {
+    /// Cassette metadata or interaction material was invalid.
+    #[error("gateway contract cassette is invalid: {0}")]
+    Cassette(#[from] CassetteError),
+    /// Synthetic contract invoice IR was invalid.
+    #[error("gateway contract invoice is invalid: {0}")]
+    Ir(#[from] invoicekit_ir::IrError),
+    /// Reconciliation request material was invalid.
+    #[error("gateway contract request is invalid: {0}")]
+    Reconcile(#[from] ReconcileError),
+    /// Mock gateway request recording failed.
+    #[error("gateway contract adapter recording failed: {0}")]
+    Gateway(#[from] GatewayError),
+}
+
+/// Mismatch between a gateway adapter result and the contract expectation.
+#[derive(Debug, Error)]
+#[error("gateway contract scenario {scenario_id} failed: {message}")]
+pub struct GatewayContractMismatch {
+    scenario_id: &'static str,
+    message: String,
+}
+
+impl GatewayContractMismatch {
+    /// Returns the scenario identifier that failed.
+    #[must_use]
+    pub const fn scenario_id(&self) -> &'static str {
+        self.scenario_id
+    }
+
+    /// Returns the human-readable mismatch description.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+/// Expected normalized adapter result for one gateway contract operation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GatewayContractExpectation {
+    /// Adapter should return a normalized receipt.
+    Receipt {
+        /// Expected receipt status.
+        status: GatewayStatus,
+        /// Expected gateway reference.
+        gateway_reference: &'static str,
+    },
+    /// Adapter should return a normalized gateway error.
+    Error {
+        /// Expected error kind.
+        kind: GatewayErrorKind,
+        /// Expected gateway-specific error code.
+        gateway_code: Option<&'static str>,
+        /// Expected retry delay in seconds.
+        retry_after_seconds: Option<u64>,
+        /// Text that must be present in the normalized error message.
+        message_contains: &'static str,
+    },
+}
+
+/// One reusable, cassette-backed `GatewayAdapter` contract scenario.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GatewayContractScenario {
+    id: &'static str,
+    title: &'static str,
+    submit_case: &'static str,
+    submit_response: RecordedResponse,
+    submit_expectation: GatewayContractExpectation,
+    poll_submission_id: Option<&'static str>,
+    poll_response: Option<RecordedResponse>,
+    poll_expectation: Option<GatewayContractExpectation>,
+}
+
+impl GatewayContractScenario {
+    /// Returns the stable scenario identifier.
+    #[must_use]
+    pub const fn id(&self) -> &'static str {
+        self.id
+    }
+
+    /// Returns the human-readable scenario title.
+    #[must_use]
+    pub const fn title(&self) -> &'static str {
+        self.title
+    }
+
+    /// Builds the submit request that adapter implementations must handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GatewayContractError`] if synthetic contract fixture data no
+    /// longer builds a valid invoice or gateway request.
+    pub fn submit_request(&self) -> Result<SubmitRequest, GatewayContractError> {
+        contract_submit_request(self.submit_case)
+    }
+
+    /// Returns the expected submit result.
+    #[must_use]
+    pub const fn submit_expectation(&self) -> GatewayContractExpectation {
+        self.submit_expectation
+    }
+
+    /// Builds the optional poll request for asynchronous scenarios.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GatewayContractError`] if the synthetic poll context or
+    /// submission identifier is invalid.
+    pub fn poll_request(&self) -> Result<Option<PollRequest>, GatewayContractError> {
+        let Some(submission_id) = self.poll_submission_id else {
+            return Ok(None);
+        };
+        Ok(Some(PollRequest::new(
+            contract_gateway_context(self.submit_case)?,
+            GatewaySubmissionId::new(submission_id)?,
+        )))
+    }
+
+    /// Returns the optional expected poll result for asynchronous scenarios.
+    #[must_use]
+    pub const fn poll_expectation(&self) -> Option<GatewayContractExpectation> {
+        self.poll_expectation
+    }
+
+    /// Builds a deterministic mock cassette for this contract scenario.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GatewayContractError`] if the generated scenario metadata,
+    /// recorded request, or recorded response is invalid.
+    pub fn cassette(&self) -> Result<Cassette, GatewayContractError> {
+        let mut metadata = ScenarioMetadata::new(
+            format!("mock/contract/{}", self.id),
+            self.title,
+            "DE",
+            "mock",
+            ScenarioSource::Synthetic,
+            "none",
+        )?;
+        metadata.description = Some(format!(
+            "Synthetic GatewayAdapter contract scenario: {}.",
+            self.id
+        ));
+        metadata.tags = vec!["gateway-contract".to_owned(), self.id.to_owned()];
+
+        let submit_request = self.submit_request()?;
+        let mut recorder = CassetteRecorder::new(metadata);
+        recorder.record(
+            MockGatewayAdapter::recorded_submit_request(&submit_request)?,
+            self.submit_response.clone(),
+        );
+
+        if let Some(poll_request) = self.poll_request()? {
+            let poll_response =
+                self.poll_response
+                    .clone()
+                    .ok_or(GatewayContractError::Cassette(
+                        CassetteError::MissingRequiredField {
+                            field: "poll_response",
+                        },
+                    ))?;
+            recorder.record(
+                MockGatewayAdapter::recorded_poll_request(&poll_request)?,
+                poll_response,
+            );
+        }
+
+        Ok(recorder.finish())
+    }
+
+    /// Verifies a submit operation result against this scenario.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GatewayContractMismatch`] when the adapter result does not
+    /// match the scenario expectation.
+    pub fn verify_submit_result(
+        &self,
+        result: &Result<GatewayReceipt, GatewayError>,
+    ) -> Result<(), GatewayContractMismatch> {
+        verify_contract_result(
+            self.id,
+            GatewayOperation::Submit,
+            self.submit_expectation,
+            result,
+        )
+    }
+
+    /// Verifies a poll operation result against this scenario.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GatewayContractMismatch`] when the scenario has no poll
+    /// expectation or when the adapter result does not match it.
+    pub fn verify_poll_result(
+        &self,
+        result: &Result<GatewayReceipt, GatewayError>,
+    ) -> Result<(), GatewayContractMismatch> {
+        let expectation = self.poll_expectation.ok_or_else(|| {
+            contract_mismatch(self.id, "scenario does not define a poll expectation")
+        })?;
+        verify_contract_result(self.id, GatewayOperation::Poll, expectation, result)
+    }
+}
+
+/// Builds every reusable gateway contract scenario.
+///
+/// # Examples
+///
+/// ```
+/// use invoicekit_transmit_mock::{
+///     gateway_contract_scenarios, GATEWAY_CONTRACT_SCENARIO_IDS,
+/// };
+///
+/// let scenarios = gateway_contract_scenarios().unwrap();
+/// let ids: Vec<&str> = scenarios.iter().map(|scenario| scenario.id()).collect();
+/// assert_eq!(ids, GATEWAY_CONTRACT_SCENARIO_IDS);
+/// ```
+///
+/// # Errors
+///
+/// Returns [`GatewayContractError`] if any synthetic cassette response is no
+/// longer valid according to the cassette schema.
+pub fn gateway_contract_scenarios() -> Result<Vec<GatewayContractScenario>, GatewayContractError> {
+    Ok(vec![
+        contract_idempotent_replay()?,
+        contract_duplicate_submission()?,
+        contract_timeout()?,
+        contract_malformed_receipt()?,
+        contract_auth_failure()?,
+        contract_certificate_rejection()?,
+        contract_rate_limit()?,
+        contract_delayed_async_receipt()?,
+        contract_unknown_response_field()?,
+        contract_gateway_maintenance_page()?,
+        contract_partner_error_translation()?,
+    ])
+}
+
+/// Builds deterministic mock cassettes for every gateway contract scenario.
+///
+/// # Examples
+///
+/// ```
+/// use invoicekit_transmit_mock::{
+///     gateway_contract_cassettes, GATEWAY_CONTRACT_SCENARIO_IDS,
+/// };
+///
+/// let cassettes = gateway_contract_cassettes().unwrap();
+/// assert_eq!(cassettes.len(), GATEWAY_CONTRACT_SCENARIO_IDS.len());
+/// ```
+///
+/// # Errors
+///
+/// Returns [`GatewayContractError`] if a generated scenario or cassette is
+/// invalid.
+pub fn gateway_contract_cassettes() -> Result<Vec<Cassette>, GatewayContractError> {
+    gateway_contract_scenarios()?
+        .iter()
+        .map(GatewayContractScenario::cassette)
+        .collect()
+}
+
+fn verify_contract_result(
+    scenario_id: &'static str,
+    operation: GatewayOperation,
+    expectation: GatewayContractExpectation,
+    result: &Result<GatewayReceipt, GatewayError>,
+) -> Result<(), GatewayContractMismatch> {
+    match (expectation, result) {
+        (
+            GatewayContractExpectation::Receipt {
+                status,
+                gateway_reference,
+            },
+            Ok(receipt),
+        ) => verify_contract_receipt(scenario_id, operation, status, gateway_reference, receipt),
+        (
+            GatewayContractExpectation::Error {
+                kind,
+                gateway_code,
+                retry_after_seconds,
+                message_contains,
+            },
+            Err(error),
+        ) => verify_contract_error(
+            scenario_id,
+            operation,
+            kind,
+            gateway_code,
+            retry_after_seconds,
+            message_contains,
+            error,
+        ),
+        (GatewayContractExpectation::Receipt { .. }, Err(error)) => Err(contract_mismatch(
+            scenario_id,
+            format!("expected receipt, got error kind {}", error.kind),
+        )),
+        (GatewayContractExpectation::Error { .. }, Ok(receipt)) => Err(contract_mismatch(
+            scenario_id,
+            format!("expected error, got receipt status {:?}", receipt.status),
+        )),
+    }
+}
+
+fn verify_contract_receipt(
+    scenario_id: &'static str,
+    operation: GatewayOperation,
+    status: GatewayStatus,
+    gateway_reference: &str,
+    receipt: &GatewayReceipt,
+) -> Result<(), GatewayContractMismatch> {
+    if receipt.operation != operation {
+        return Err(contract_mismatch(
+            scenario_id,
+            format!(
+                "expected operation {operation}, got {}",
+                receipt.operation.as_str()
+            ),
+        ));
+    }
+    if receipt.status != status {
+        return Err(contract_mismatch(
+            scenario_id,
+            format!("expected status {status:?}, got {:?}", receipt.status),
+        ));
+    }
+    if receipt.gateway_reference.as_deref() != Some(gateway_reference) {
+        return Err(contract_mismatch(
+            scenario_id,
+            format!(
+                "expected gateway_reference {gateway_reference}, got {:?}",
+                receipt.gateway_reference
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn verify_contract_error(
+    scenario_id: &'static str,
+    operation: GatewayOperation,
+    kind: GatewayErrorKind,
+    gateway_code: Option<&str>,
+    retry_after_seconds: Option<u64>,
+    message_contains: &str,
+    error: &GatewayError,
+) -> Result<(), GatewayContractMismatch> {
+    if error.operation != operation {
+        return Err(contract_mismatch(
+            scenario_id,
+            format!(
+                "expected operation {operation}, got {}",
+                error.operation.as_str()
+            ),
+        ));
+    }
+    if error.kind != kind {
+        return Err(contract_mismatch(
+            scenario_id,
+            format!("expected error kind {kind}, got {}", error.kind),
+        ));
+    }
+    if error.gateway_code.as_deref() != gateway_code {
+        return Err(contract_mismatch(
+            scenario_id,
+            format!(
+                "expected gateway_code {gateway_code:?}, got {:?}",
+                error.gateway_code
+            ),
+        ));
+    }
+    if error.retry_after_seconds != retry_after_seconds {
+        return Err(contract_mismatch(
+            scenario_id,
+            format!(
+                "expected retry_after_seconds {retry_after_seconds:?}, got {:?}",
+                error.retry_after_seconds
+            ),
+        ));
+    }
+    if !error.message.contains(message_contains) {
+        return Err(contract_mismatch(
+            scenario_id,
+            format!(
+                "expected message containing {message_contains:?}, got {:?}",
+                error.message
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn contract_mismatch(
+    scenario_id: &'static str,
+    message: impl Into<String>,
+) -> GatewayContractMismatch {
+    GatewayContractMismatch {
+        scenario_id,
+        message: message.into(),
+    }
+}
+
+fn contract_idempotent_replay() -> Result<GatewayContractScenario, GatewayContractError> {
+    Ok(GatewayContractScenario {
+        id: "idempotent-replay",
+        title: "Gateway contract idempotent replay",
+        submit_case: "contract_idempotent",
+        submit_response: recorded_response(
+            202,
+            r#"{"submission_id":"mock_sub_contract_idempotent","status":"accepted","gateway_reference":"MOCK-CONTRACT-IDEMPOTENT","received_at":"2026-05-27T01:00:00Z","detail":"Replayable accepted receipt."}"#,
+        )?,
+        submit_expectation: GatewayContractExpectation::Receipt {
+            status: GatewayStatus::Accepted,
+            gateway_reference: "MOCK-CONTRACT-IDEMPOTENT",
+        },
+        poll_submission_id: None,
+        poll_response: None,
+        poll_expectation: None,
+    })
+}
+
+fn contract_duplicate_submission() -> Result<GatewayContractScenario, GatewayContractError> {
+    Ok(GatewayContractScenario {
+        id: "duplicate-submission",
+        title: "Gateway contract duplicate submission",
+        submit_case: "contract_duplicate",
+        submit_response: recorded_response(
+            409,
+            r#"{"kind":"duplicate_submission","message":"gateway already has this invoice","remediation":"poll the existing submission instead of submitting again","gateway_code":"DUPLICATE_SUBMISSION","submission_id":"mock_sub_contract_duplicate"}"#,
+        )?,
+        submit_expectation: GatewayContractExpectation::Error {
+            kind: GatewayErrorKind::DuplicateSubmission,
+            gateway_code: Some("DUPLICATE_SUBMISSION"),
+            retry_after_seconds: None,
+            message_contains: "already has",
+        },
+        poll_submission_id: None,
+        poll_response: None,
+        poll_expectation: None,
+    })
+}
+
+fn contract_timeout() -> Result<GatewayContractScenario, GatewayContractError> {
+    Ok(GatewayContractScenario {
+        id: "timeout",
+        title: "Gateway contract timeout",
+        submit_case: "contract_timeout",
+        submit_response: recorded_response(
+            504,
+            r#"{"kind":"timeout","message":"gateway timed out before a final receipt","remediation":"retry with the same idempotency key or poll the submission","gateway_code":"GATEWAY_TIMEOUT","retry_after_seconds":30}"#,
+        )?,
+        submit_expectation: GatewayContractExpectation::Error {
+            kind: GatewayErrorKind::Timeout,
+            gateway_code: Some("GATEWAY_TIMEOUT"),
+            retry_after_seconds: Some(30),
+            message_contains: "timed out",
+        },
+        poll_submission_id: None,
+        poll_response: None,
+        poll_expectation: None,
+    })
+}
+
+fn contract_malformed_receipt() -> Result<GatewayContractScenario, GatewayContractError> {
+    Ok(GatewayContractScenario {
+        id: "malformed-receipt",
+        title: "Gateway contract malformed receipt",
+        submit_case: "contract_malformed",
+        submit_response: recorded_response(202, "<not-json>")?,
+        submit_expectation: GatewayContractExpectation::Error {
+            kind: GatewayErrorKind::MalformedReceipt,
+            gateway_code: None,
+            retry_after_seconds: None,
+            message_contains: "invalid receipt JSON",
+        },
+        poll_submission_id: None,
+        poll_response: None,
+        poll_expectation: None,
+    })
+}
+
+fn contract_auth_failure() -> Result<GatewayContractScenario, GatewayContractError> {
+    Ok(GatewayContractScenario {
+        id: "auth-failure",
+        title: "Gateway contract auth failure",
+        submit_case: "contract_auth",
+        submit_response: recorded_response(
+            401,
+            r#"{"kind":"auth_failure","message":"gateway rejected the credentials","remediation":"refresh credentials before replaying the cassette","gateway_code":"AUTH_FAILED"}"#,
+        )?,
+        submit_expectation: GatewayContractExpectation::Error {
+            kind: GatewayErrorKind::AuthFailure,
+            gateway_code: Some("AUTH_FAILED"),
+            retry_after_seconds: None,
+            message_contains: "credentials",
+        },
+        poll_submission_id: None,
+        poll_response: None,
+        poll_expectation: None,
+    })
+}
+
+fn contract_certificate_rejection() -> Result<GatewayContractScenario, GatewayContractError> {
+    Ok(GatewayContractScenario {
+        id: "certificate-rejection",
+        title: "Gateway contract certificate rejection",
+        submit_case: "contract_certificate",
+        submit_response: recorded_response(
+            495,
+            r#"{"kind":"certificate_rejected","message":"gateway rejected the signing certificate chain","remediation":"renew or replace the certificate before retrying","gateway_code":"CERT_CHAIN_REJECTED"}"#,
+        )?,
+        submit_expectation: GatewayContractExpectation::Error {
+            kind: GatewayErrorKind::CertificateRejected,
+            gateway_code: Some("CERT_CHAIN_REJECTED"),
+            retry_after_seconds: None,
+            message_contains: "certificate",
+        },
+        poll_submission_id: None,
+        poll_response: None,
+        poll_expectation: None,
+    })
+}
+
+fn contract_rate_limit() -> Result<GatewayContractScenario, GatewayContractError> {
+    Ok(GatewayContractScenario {
+        id: "rate-limit",
+        title: "Gateway contract rate limit",
+        submit_case: "contract_rate_limit",
+        submit_response: recorded_response(
+            429,
+            r#"{"kind":"rate_limited","message":"gateway rate limit exceeded","remediation":"retry after the supplied backoff window","gateway_code":"RATE_LIMIT","retry_after_seconds":60}"#,
+        )?,
+        submit_expectation: GatewayContractExpectation::Error {
+            kind: GatewayErrorKind::RateLimited,
+            gateway_code: Some("RATE_LIMIT"),
+            retry_after_seconds: Some(60),
+            message_contains: "rate limit",
+        },
+        poll_submission_id: None,
+        poll_response: None,
+        poll_expectation: None,
+    })
+}
+
+fn contract_delayed_async_receipt() -> Result<GatewayContractScenario, GatewayContractError> {
+    Ok(GatewayContractScenario {
+        id: "delayed-async-receipt",
+        title: "Gateway contract delayed async receipt",
+        submit_case: "contract_delayed_async",
+        submit_response: recorded_response(
+            202,
+            r#"{"submission_id":"mock_sub_contract_delayed","status":"pending","gateway_reference":"MOCK-CONTRACT-PENDING","received_at":"2026-05-27T01:07:00Z","detail":"Gateway accepted the request for asynchronous processing."}"#,
+        )?,
+        submit_expectation: GatewayContractExpectation::Receipt {
+            status: GatewayStatus::Pending,
+            gateway_reference: "MOCK-CONTRACT-PENDING",
+        },
+        poll_submission_id: Some("mock_sub_contract_delayed"),
+        poll_response: Some(recorded_response(
+            200,
+            r#"{"submission_id":"mock_sub_contract_delayed","status":"accepted","gateway_reference":"MOCK-CONTRACT-DELAYED-RECEIPT","received_at":"2026-05-27T01:09:00Z","detail":"Gateway completed asynchronous processing."}"#,
+        )?),
+        poll_expectation: Some(GatewayContractExpectation::Receipt {
+            status: GatewayStatus::Accepted,
+            gateway_reference: "MOCK-CONTRACT-DELAYED-RECEIPT",
+        }),
+    })
+}
+
+fn contract_unknown_response_field() -> Result<GatewayContractScenario, GatewayContractError> {
+    Ok(GatewayContractScenario {
+        id: "unknown-response-field",
+        title: "Gateway contract unknown response field",
+        submit_case: "contract_unknown_field",
+        submit_response: recorded_response(
+            202,
+            r#"{"submission_id":"mock_sub_contract_unknown_field","status":"accepted","gateway_reference":"MOCK-CONTRACT-UNKNOWN-FIELD","received_at":"2026-05-27T01:08:00Z","detail":"Unknown response members are ignored.","future_gateway_member":"kept out of the normalized receipt"}"#,
+        )?,
+        submit_expectation: GatewayContractExpectation::Receipt {
+            status: GatewayStatus::Accepted,
+            gateway_reference: "MOCK-CONTRACT-UNKNOWN-FIELD",
+        },
+        poll_submission_id: None,
+        poll_response: None,
+        poll_expectation: None,
+    })
+}
+
+fn contract_gateway_maintenance_page() -> Result<GatewayContractScenario, GatewayContractError> {
+    Ok(GatewayContractScenario {
+        id: "gateway-maintenance-page",
+        title: "Gateway contract maintenance page",
+        submit_case: "contract_maintenance",
+        submit_response: html_response(
+            503,
+            "<!doctype html><html><title>Maintenance</title><body>Service unavailable for maintenance.</body></html>",
+        )?,
+        submit_expectation: GatewayContractExpectation::Error {
+            kind: GatewayErrorKind::GatewayMaintenance,
+            gateway_code: Some("HTTP_503"),
+            retry_after_seconds: None,
+            message_contains: "maintenance page",
+        },
+        poll_submission_id: None,
+        poll_response: None,
+        poll_expectation: None,
+    })
+}
+
+fn contract_partner_error_translation() -> Result<GatewayContractScenario, GatewayContractError> {
+    Ok(GatewayContractScenario {
+        id: "partner-error-translation",
+        title: "Gateway contract partner error translation",
+        submit_case: "contract_partner_error",
+        submit_response: recorded_response(
+            502,
+            r#"{"kind":"partner_error","message":"partner access point returned an opaque failure","remediation":"inspect the partner incident reference and retry after recovery","gateway_code":"PARTNER_PEP_503","retry_after_seconds":120}"#,
+        )?,
+        submit_expectation: GatewayContractExpectation::Error {
+            kind: GatewayErrorKind::PartnerError,
+            gateway_code: Some("PARTNER_PEP_503"),
+            retry_after_seconds: Some(120),
+            message_contains: "partner",
+        },
+        poll_submission_id: None,
+        poll_response: None,
+        poll_expectation: None,
+    })
+}
+
+fn recorded_response(status: u16, body: &'static str) -> Result<RecordedResponse, CassetteError> {
+    RecordedResponse::new(status, BTreeMap::new(), body)
+}
+
+fn html_response(status: u16, body: &'static str) -> Result<RecordedResponse, CassetteError> {
+    let mut headers = BTreeMap::new();
+    headers.insert(
+        "content-type".to_owned(),
+        "text/html; charset=utf-8".to_owned(),
+    );
+    RecordedResponse::new(status, headers, body)
+}
+
+fn contract_submit_request(case: &str) -> Result<SubmitRequest, GatewayContractError> {
+    Ok(SubmitRequest::new(
+        contract_gateway_context(case)?,
+        GatewayRoute::new("mock", "mock-profile", Some("DE"))?,
+        contract_synthetic_document(case)?,
+    )?)
+}
+
+fn contract_gateway_context(case: &str) -> Result<GatewayContext, ReconcileError> {
+    Ok(GatewayContext::new(
+        TenantId::new("tenant_mock")?,
+        TraceId::new(format!("trace_mock_{case}"))?,
+        IdempotencyKey::new(format!("idem_mock_{case}"))?,
+        GatewayAttemptId::new(format!("attempt_mock_{case}"))?,
+    ))
+}
+
+fn contract_synthetic_document(case: &str) -> Result<CommercialDocument, invoicekit_ir::IrError> {
+    CommercialDocument::try_from_value(serde_json::json!({
+        "schema_version": "1.0",
+        "id": format!("doc_mock_{case}"),
+        "document_type": "invoice",
+        "issue_date": "2026-05-27",
+        "document_number": format!("INV-MOCK-{}", case.to_ascii_uppercase()),
+        "currency": "EUR",
+        "supplier": contract_party_json("supplier_mock", "Mock Supplier GmbH", "DE"),
+        "customer": contract_party_json("customer_mock", "Mock Buyer SAS", "FR"),
+        "lines": [{
+            "id": "1",
+            "description": "Mock gateway fixture",
+            "quantity": "1",
+            "unit_price": "100.00",
+            "line_extension_amount": "100.00"
+        }],
+        "tax_summary": [{
+            "category_code": "S",
+            "taxable_amount": "100.00",
+            "tax_amount": "19.00",
+            "tax_rate": "19.00"
+        }],
+        "monetary_total": {
+            "line_extension_amount": "100.00",
+            "tax_exclusive_amount": "100.00",
+            "tax_inclusive_amount": "119.00",
+            "payable_amount": "119.00"
+        },
+        "meta": {
+            "tenant_id": "tenant_mock",
+            "trace_id": format!("trace_mock_{case}"),
+            "source_system": "transmit-mock-contract"
+        }
+    }))
+}
+
+fn contract_party_json(id: &str, name: &str, country: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "name": name,
+        "tax_ids": [{
+            "scheme": "test",
+            "value": format!("{country}-MOCK-TAX")
+        }],
+        "address": {
+            "lines": ["Mock Street 1"],
+            "city": "Mock City",
+            "postal_code": "10000",
+            "country": country
+        }
+    })
 }
 
 /// Metadata stored in each cassette directory as `scenario.json`.
@@ -1823,6 +2592,111 @@ mod tests {
     }
 
     #[test]
+    fn gateway_contract_required_scenarios_pass_for_mock_adapter() {
+        let scenarios = super::gateway_contract_scenarios().unwrap();
+        let actual_scenarios: Vec<&str> = scenarios
+            .iter()
+            .map(super::GatewayContractScenario::id)
+            .collect();
+        assert_eq!(
+            actual_scenarios.as_slice(),
+            super::GATEWAY_CONTRACT_SCENARIO_IDS
+        );
+        let adapter =
+            MockGatewayAdapter::new(super::gateway_contract_cassettes().unwrap()).unwrap();
+
+        for scenario in &scenarios {
+            let request = scenario.submit_request().unwrap();
+            let submit_result = block_on_ready(adapter.submit(request));
+            scenario.verify_submit_result(&submit_result).unwrap();
+
+            if let Some(request) = scenario.poll_request().unwrap() {
+                let poll_result = block_on_ready(adapter.poll(request));
+                scenario.verify_poll_result(&poll_result).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn gateway_contract_idempotent_replay_returns_same_receipt() {
+        let scenario = super::gateway_contract_scenarios()
+            .unwrap()
+            .into_iter()
+            .find(|scenario| scenario.id() == "idempotent-replay")
+            .unwrap();
+        let adapter = MockGatewayAdapter::new([scenario.cassette().unwrap()]).unwrap();
+        let request = scenario.submit_request().unwrap();
+
+        let first_result = block_on_ready(adapter.submit(request.clone()));
+        scenario.verify_submit_result(&first_result).unwrap();
+        let second_result = block_on_ready(adapter.submit(request));
+        scenario.verify_submit_result(&second_result).unwrap();
+        let first = first_result.unwrap();
+        let second = second_result.unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(first.status, GatewayStatus::Accepted);
+        assert_eq!(
+            first.gateway_reference.as_deref(),
+            Some("MOCK-CONTRACT-IDEMPOTENT")
+        );
+    }
+
+    #[test]
+    fn gateway_contract_cassettes_are_byte_stable_and_scrubbed() {
+        let first = gateway_contract_cassette_bytes();
+        let second = gateway_contract_cassette_bytes();
+
+        assert_eq!(first, second);
+
+        for cassette in super::gateway_contract_cassettes().unwrap() {
+            assert!(cassette
+                .scenario
+                .tags
+                .iter()
+                .any(|tag| tag == "gateway-contract"));
+            assert_no_unscrubbed_pii_patterns(&cassette).unwrap();
+        }
+    }
+
+    #[test]
+    fn mock_gateway_preserves_structured_error_with_incorrect_html_header() {
+        let request = submit_request("structured-html-header");
+        let mut recorder = CassetteRecorder::new(
+            ScenarioMetadata::new(
+                "mock/contract/structured-html-header",
+                "Structured error with incorrect HTML header",
+                "DE",
+                "mock",
+                ScenarioSource::Synthetic,
+                "none",
+            )
+            .unwrap(),
+        );
+        let mut headers = BTreeMap::new();
+        headers.insert(
+            "content-type".to_owned(),
+            "text/html; charset=utf-8".to_owned(),
+        );
+        recorder.record(
+            MockGatewayAdapter::recorded_submit_request(&request).unwrap(),
+            RecordedResponse::new(
+                503,
+                headers,
+                r#"{"kind":"partner_error","message":"partner service unavailable","remediation":"retry after partner recovery","gateway_code":"PARTNER_STRUCTURED","retry_after_seconds":90}"#,
+            )
+            .unwrap(),
+        );
+        let adapter = MockGatewayAdapter::new([recorder.finish()]).unwrap();
+
+        let error = block_on_ready(adapter.submit(request)).unwrap_err();
+
+        assert_eq!(error.kind, GatewayErrorKind::PartnerError);
+        assert_eq!(error.gateway_code.as_deref(), Some("PARTNER_STRUCTURED"));
+        assert_eq!(error.retry_after_seconds, Some(90));
+    }
+
+    #[test]
     fn cassette_corpus_has_no_unscrubbed_pii() {
         let repo = repo_root();
         let cassette_root = repo.join("conformance-corpus").join("cassettes");
@@ -1832,6 +2706,14 @@ mod tests {
 
         let mut checked = 0;
         scan_cassette_dir(&cassette_root, &mut checked);
+    }
+
+    fn gateway_contract_cassette_bytes() -> Vec<Vec<u8>> {
+        super::gateway_contract_cassettes()
+            .unwrap()
+            .iter()
+            .map(|cassette| cassette.to_vcr_bytes().unwrap())
+            .collect()
     }
 
     fn sample_cassette_bytes() -> Vec<u8> {
