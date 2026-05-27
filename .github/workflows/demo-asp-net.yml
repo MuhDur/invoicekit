@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: Apache-2.0
+# T-1404 reference ASP.NET demo: CI gate.
+#
+# Builds the cdylib then runs dotnet test against the
+# InvoiceKit .NET SDK + the WebApplicationFactory smoke suite.
+
+name: demo-asp-net
+
+on:
+  push:
+    paths:
+      - "examples/asp-net/**"
+      - "bindings/dotnet/**"
+      - "crates/invoicekit-ffi/**"
+      - "crates/invoicekit-engine/**"
+      - ".github/workflows/demo-asp-net.yml"
+  pull_request:
+    paths:
+      - "examples/asp-net/**"
+      - "bindings/dotnet/**"
+      - "crates/invoicekit-ffi/**"
+      - "crates/invoicekit-engine/**"
+      - ".github/workflows/demo-asp-net.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: demo smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build invoicekit-ffi cdylib
+        run: cargo build -p invoicekit-ffi --locked
+
+      - name: Run demo smoke (6 xunit rows)
+        working-directory: examples/asp-net/tests
+        env:
+          INVOICEKIT_FFI_LIB: ${{ github.workspace }}/target/debug/libinvoicekit_ffi.so
+        run: dotnet test --verbosity minimal
