@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+[package]
+name = "invoicekit-inbound-peppol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Inbound Peppol invoice pipeline: format-detect -> parse -> validate -> archive. Library half of the eventual services/inbound-peppol axum binary."
+publish = false
+
+[lib]
+name = "invoicekit_inbound_peppol"
+path = "src/lib.rs"
+
+[dependencies]
+invoicekit-format-cii = { path = "../format-cii", version = "0.0.0" }
+invoicekit-format-detect = { path = "../format-detect", version = "0.0.0" }
+invoicekit-format-ubl = { path = "../format-ubl", version = "0.0.0" }
+invoicekit-ir = { path = "../ir", version = "0.0.0" }
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true
