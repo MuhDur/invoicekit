@@ -15,6 +15,13 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+pub mod observability;
+pub use observability::{
+    redact_log_value, GatewayDashboardSnapshot, ManagedRequestObservation,
+    ManagedRequestObservationInput, ObservedRequestSpan, OpenTelemetryIds, SloMetricEvent,
+    SloOperation, TelemetryOutcome, LOG_REDACTION_PLACEHOLDER, OBSERVABILITY_BEAD_ID,
+};
+
 /// Google's `OpenID` Connect discovery document URL.
 ///
 /// Google documents this URI as the hard-coded discovery entry point for
