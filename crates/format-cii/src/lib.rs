@@ -208,6 +208,7 @@ pub fn from_xml(input: &str) -> Result<CommercialDocument, CiiError> {
     reader.config_mut().trim_text(false);
     let mut xml_version = XmlVersion::default();
     let mut stack = Vec::<String>::new();
+    let mut text_stack = Vec::<String>::new();
     let mut state = ParseState::default();
 
     loop {
@@ -217,6 +218,7 @@ pub fn from_xml(input: &str) -> Result<CommercialDocument, CiiError> {
                 let attrs = read_attrs(&reader, &start, xml_version)?;
                 state.start_element(&stack, &name, &attrs)?;
                 stack.push(name);
+                text_stack.push(String::new());
             }
             Event::Empty(start) => {
                 let name = decode_local_name(start.name().as_ref())?;
@@ -226,26 +228,33 @@ pub fn from_xml(input: &str) -> Result<CommercialDocument, CiiError> {
             }
             Event::End(end) => {
                 let name = decode_local_name(end.name().as_ref())?;
-                state.end_element(&name)?;
-                let Some(opened) = stack.pop() else {
+                let Some(opened) = stack.last() else {
                     return Err(CiiError::UnsupportedRoot(name));
                 };
-                if opened != name {
+                if opened != &name {
                     return Err(CiiError::UnsupportedRoot(format!("{opened}/{name}")));
                 }
+                let text = text_stack
+                    .pop()
+                    .ok_or_else(|| CiiError::UnsupportedRoot(format!("{name}:text")))?;
+                if !text.is_empty() {
+                    state.text(&stack, &text)?;
+                }
+                state.end_element(&name)?;
+                stack.pop();
             }
             Event::Text(text) => {
                 let text = text.xml_content(xml_version)?;
-                state.text(&stack, text.as_ref())?;
+                append_text(&mut text_stack, text.as_ref())?;
             }
             Event::CData(cdata) => {
                 let text = cdata.xml_content(xml_version)?;
-                state.text(&stack, text.as_ref())?;
+                append_text(&mut text_stack, text.as_ref())?;
             }
             Event::GeneralRef(reference) => {
                 let reference = reference.xml_content(xml_version)?;
                 let text = resolve_xml_reference(&reference)?;
-                state.text(&stack, &text)?;
+                append_text(&mut text_stack, &text)?;
             }
             Event::Decl(decl) => {
                 let version = decl.version()?;
@@ -1303,7 +1312,29 @@ fn decode_local_name(raw: &[u8]) -> Result<String, CiiError> {
         .to_owned())
 }
 
+fn append_text(text_stack: &mut [String], text: &str) -> Result<(), CiiError> {
+    let Some(current) = text_stack.last_mut() else {
+        return if text.trim().is_empty() {
+            Ok(())
+        } else {
+            Err(CiiError::UnsupportedRoot("#text".to_owned()))
+        };
+    };
+    current.push_str(text);
+    Ok(())
+}
+
 fn resolve_xml_reference(reference: &str) -> Result<String, CiiError> {
+    if let Some(hex) = reference
+        .strip_prefix("#x")
+        .or_else(|| reference.strip_prefix("#X"))
+    {
+        return char_from_reference(reference, u32::from_str_radix(hex, 16));
+    }
+    if let Some(decimal) = reference.strip_prefix('#') {
+        return char_from_reference(reference, decimal.parse::<u32>());
+    }
+
     match reference {
         "amp" => Ok("&".to_owned()),
         "lt" => Ok("<".to_owned()),
@@ -1312,6 +1343,17 @@ fn resolve_xml_reference(reference: &str) -> Result<String, CiiError> {
         "quot" => Ok("\"".to_owned()),
         other => Err(CiiError::UnsupportedRoot(format!("entity:{other}"))),
     }
+}
+
+fn char_from_reference(
+    reference: &str,
+    parsed: Result<u32, impl std::error::Error>,
+) -> Result<String, CiiError> {
+    parsed
+        .ok()
+        .and_then(char::from_u32)
+        .map(|character| character.to_string())
+        .ok_or_else(|| CiiError::UnsupportedRoot(format!("entity:{reference}")))
 }
 
 fn path_ends(stack: &[String], suffix: &[&str]) -> bool {
@@ -1400,6 +1442,24 @@ mod tests {
             let xml = to_xml(&document).unwrap();
             assert_eq!(from_xml(&xml).unwrap(), document);
         }
+    }
+
+    #[test]
+    fn escaped_text_and_numeric_references_round_trip() {
+        let mut document = fixture(DocumentType::Invoice, 8);
+        document.supplier.name = "Supplier & Sons".to_owned();
+        document.customer.name = "Customer <EU>".to_owned();
+        document.lines.first_mut().unwrap().description =
+            "Research & implementation <core>".to_owned();
+        document.notes.first_mut().unwrap().text = "Line break & Co".to_owned();
+
+        let xml = to_xml(&document).unwrap();
+        assert!(xml.contains("Supplier &amp; Sons"));
+        assert!(xml.contains("Customer &lt;EU&gt;"));
+        assert_eq!(from_xml(&xml).unwrap(), document);
+
+        let numeric_reference_xml = xml.replace("Supplier &amp; Sons", "Supplier &#x26; Sons");
+        assert_eq!(from_xml(&numeric_reference_xml).unwrap(), document);
     }
 
     #[test]
