@@ -212,6 +212,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be5eb007b7cacc6c660343e96f650fedf4b5a77512399eb952ca6642cf8d13f7"
 
 [[package]]
+name = "base32"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "022dfe9eb35f19ebbcb51e0b40a5ab759f46ad60cadf7297e0bd085afb50e076"
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2135,6 +2141,18 @@ dependencies = [
  "invoicekit-ir",
  "proptest",
  "rust_decimal",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "invoicekit-peppol-smp-sml"
+version = "0.0.0"
+dependencies = [
+ "base32",
+ "md-5 0.10.6",
+ "quick-xml 0.40.1",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

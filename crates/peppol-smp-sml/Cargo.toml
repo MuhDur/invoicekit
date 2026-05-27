@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+[package]
+name = "invoicekit-peppol-smp-sml"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "InvoiceKit Peppol SMP/SML participant lookup client (DNS + HTTP + TTL cache, transport-injected)."
+publish = false
+
+[lib]
+name = "invoicekit_peppol_smp_sml"
+path = "src/lib.rs"
+
+[dependencies]
+base32 = "0.5"
+md-5 = "0.10"
+quick-xml = "0.40.1"
+serde = "1"
+serde_json = "1"
+thiserror.workspace = true
+
+[lints]
+workspace = true
