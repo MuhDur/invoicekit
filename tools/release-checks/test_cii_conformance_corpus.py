@@ -12,6 +12,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 CORPUS = REPO / "conformance-corpus" / "synthetic" / "cii-d16b-profiled"
+LEGACY_CORPUS = REPO / "conformance-corpus" / "synthetic" / "cii-d16b"
 CONFORMANCE_TOOL = REPO / "tools" / "conformance-corpus"
 sys.path.insert(0, str(CONFORMANCE_TOOL))
 import validate_fixture_metadata as metadata_validator  # noqa: E402
@@ -54,7 +55,7 @@ PROFILE_GUIDELINES = {
     "Factur-X EN 16931": "urn:cen.eu:en16931:2017",
     "Factur-X EXTENDED": "urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended",
     "XRechnung CII": (
-        "urn:cen.eu:en16931:2017#compliant#urn:xoev-de:kosit:standard:xrechnung_3.0"
+        "urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0"
     ),
 }
 
@@ -66,10 +67,34 @@ def load_metadata() -> list[dict[str, object]]:
     return [metadata_validator.load_json(path) for path in metadata_paths]
 
 
+def load_legacy_metadata() -> list[dict[str, object]]:
+    metadata_paths = sorted(LEGACY_CORPUS.glob("cii-d16b-*/metadata.json"))
+    if len(metadata_paths) != EXPECTED_FIXTURES:
+        raise AssertionError(f"expected {EXPECTED_FIXTURES} legacy CII metadata files, got {len(metadata_paths)}")
+    return [metadata_validator.load_json(path) for path in metadata_paths]
+
+
 def test_cii_corpus_metadata_and_hashes_validate() -> None:
     metadata_files = metadata_validator.validate_all()
     cii_metadata = [path for path in metadata_files if CORPUS in path.parents]
     assert len(cii_metadata) == EXPECTED_FIXTURES
+
+
+def test_cii_fixture_ids_are_unique_across_active_and_legacy_corpora() -> None:
+    fixture_ids = [item["fixture_id"] for item in load_metadata() + load_legacy_metadata()]
+    assert len(fixture_ids) == EXPECTED_FIXTURES * 2
+    assert len(set(fixture_ids)) == len(fixture_ids)
+
+
+def test_legacy_cii_corpus_is_retired_parser_regression_data() -> None:
+    for item in load_legacy_metadata():
+        coverage = item["coverage"]
+        jurisdiction = item["jurisdiction"]
+        assert item["status"] == "retired"
+        assert str(item["fixture_id"]).startswith("ik-synthetic-cii-d16b-legacy-")
+        assert jurisdiction["profile"] == "Retired CII D16B legacy parser regression"
+        assert "legacy-profile-context-overload" in coverage["scenarios"]
+        assert not any(str(scenario).startswith("profile-") for scenario in coverage["scenarios"])
 
 
 def test_cii_corpus_has_expected_count_and_unique_fixture_ids() -> None:

@@ -54,7 +54,7 @@ const PROFILES: &[Profile] = &[
     Profile {
         name: "XRechnung CII",
         scenario: "profile-xrechnung",
-        guideline_id: "urn:cen.eu:en16931:2017#compliant#urn:xoev-de:kosit:standard:xrechnung_3.0",
+        guideline_id: "urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0",
     },
 ];
 

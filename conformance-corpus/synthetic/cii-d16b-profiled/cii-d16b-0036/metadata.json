@@ -9,8 +9,8 @@
   "artifact": {
     "path": "fixture.xml",
     "media_type": "application/xml",
-    "sha256": "498a79314f4807e4e0de219cf40447b7ede48421d7091f67a80ad3711fac22b0",
-    "size_bytes": 10517,
+    "sha256": "8c7d28c6199c0e111e81cb9498078141ad83d5829028e807c1238ac9e1314b4f",
+    "size_bytes": 10512,
     "format_family": "cii",
     "document_type": "credit_note"
   },

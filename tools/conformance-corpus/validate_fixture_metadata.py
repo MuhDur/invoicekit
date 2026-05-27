@@ -321,8 +321,17 @@ def validate_all(corpus_root: Path = CORPUS_ROOT, schema_path: Path = SCHEMA_PAT
     metadata_files = iter_metadata_files(corpus_root)
     if not metadata_files:
         raise MetadataError(f"{corpus_root}: no metadata.json files found")
+    fixture_ids: dict[str, Path] = {}
     for metadata_path in metadata_files:
         validate_metadata_file(metadata_path, schema)
+        fixture_id = load_json(metadata_path)["fixture_id"]
+        previous = fixture_ids.get(fixture_id)
+        if previous is not None:
+            raise MetadataError(
+                f"{metadata_path}: duplicate fixture_id {fixture_id!r}; "
+                f"already declared by {previous}"
+            )
+        fixture_ids[fixture_id] = metadata_path
     validate_metadata_coverage(corpus_root, metadata_files)
     return metadata_files
 
