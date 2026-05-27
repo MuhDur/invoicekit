@@ -33,15 +33,16 @@ QDT_SCHEMA = "CrossIndustryInvoice_QualifiedDataType_100pD16B.xsd"
 UDT_SCHEMA = "CrossIndustryInvoice_UnqualifiedDataType_100pD16B.xsd"
 
 CII_DOCUMENT_FIELDS_EXTENSION_URN = "urn:invoicekit:cii:d16b:document-fields"
+CII_PROFILE_CONTEXT_EXTENSION_URN = "urn:invoicekit:cii:d16b:profile-context"
 INVOICEKIT_CII_METADATA_EXTENSION_URN = "urn:invoicekit:cii:extension:metadata:v1"
 
 CLASSES = {
+    "cii_preserved_xml_extension",
     "current_ir",
     "invoicekit_metadata_extension",
     "cii_document_field_extension",
     "profile_extension_payload",
     "lossiness_ledger_preserved",
-    "unsupported_gap",
 }
 
 
@@ -129,6 +130,9 @@ def classify(declaring_type: str, element: str, type_name: str) -> dict[str, obj
         return row_class(
             "profile_extension_payload",
             "Application context is repeatable CII application/profile data; the InvoiceKit-owned metadata parameter is recorded as a named mapping decision.",
+            extension_fields=[
+                f"CommercialDocument.extensions[{CII_PROFILE_CONTEXT_EXTENSION_URN}].application_contexts[]"
+            ],
         )
 
     core = {
@@ -288,9 +292,11 @@ def classify(declaring_type: str, element: str, type_name: str) -> dict[str, obj
 
     if key in {("TradePartyType", "ID"), ("TradePartyType", "GlobalID")}:
         return row_class(
-            "lossiness_ledger_preserved",
-            "CII party identifiers are repeatable; the current parser can collapse one value into Party.id, but full multiplicity and scheme data need preservation.",
-            current_ir_paths=["Party.id"],
+            "cii_preserved_xml_extension",
+            "CII party identifiers are repeatable and scheme-qualified; preserve them as CII XML fragments instead of collapsing multiplicity into Party.id.",
+            extension_fields=[
+                f"CommercialDocument.extensions[{CII_DOCUMENT_FIELDS_EXTENSION_URN}].preserved_xml[]"
+            ],
         )
 
     if key == ("CrossIndustryInvoiceType", "ExchangedDocumentContext"):
@@ -299,21 +305,37 @@ def classify(declaring_type: str, element: str, type_name: str) -> dict[str, obj
             "Document context is the CII profile/application metadata container; child rows record the exact current mappings.",
         )
 
-    profile_names = (
-        "BIMSpecifiedDocumentContextParameter",
-        "ScenarioSpecifiedDocumentContextParameter",
-        "GuidelineSpecifiedDocumentContextParameter",
-        "SubsetSpecifiedDocumentContextParameter",
-        "MessageStandardSpecifiedDocumentContextParameter",
-        "TestIndicator",
-        "SpecifiedTransactionID",
-    )
-    if declaring_type == "ExchangedDocumentContextType" and (
-        element in profile_names or element.endswith("DocumentContextParameter")
-    ):
+    profile_extension_fields = {
+        "GuidelineSpecifiedDocumentContextParameter": "guideline_context_ids[]",
+        "TestIndicator": "test_indicators[]",
+        "SpecifiedTransactionID": "transaction_ids[]",
+    }
+    if declaring_type == "ExchangedDocumentContextType" and element in profile_extension_fields:
         return row_class(
             "profile_extension_payload",
-            "Document-context/profile assertion belongs to profile-specific payload handling.",
+            "CII document-context/profile assertion is preserved in the CII profile-context extension.",
+            extension_fields=[
+                "CommercialDocument.extensions"
+                f"[{CII_PROFILE_CONTEXT_EXTENSION_URN}].{profile_extension_fields[element]}"
+            ],
+        )
+
+    if declaring_type == "ExchangedDocumentContextType" and (
+        element
+        in {
+            "BIMSpecifiedDocumentContextParameter",
+            "ScenarioSpecifiedDocumentContextParameter",
+            "SubsetSpecifiedDocumentContextParameter",
+            "MessageStandardSpecifiedDocumentContextParameter",
+        }
+        or element.endswith("DocumentContextParameter")
+    ):
+        return row_class(
+            "cii_preserved_xml_extension",
+            "CII document-context/profile assertion is standard CII data that is preserved as a replayable XML fragment until a typed profile field exists.",
+            extension_fields=[
+                f"CommercialDocument.extensions[{CII_DOCUMENT_FIELDS_EXTENSION_URN}].preserved_xml[]"
+            ],
         )
 
     lossiness_terms = (
@@ -348,13 +370,19 @@ def classify(declaring_type: str, element: str, type_name: str) -> dict[str, obj
 
     if "CurrencyCode" in element and element != "InvoiceCurrencyCode":
         return row_class(
-            "unsupported_gap",
-            "Currency specialization is outside the current single-document-currency IR.",
+            "cii_preserved_xml_extension",
+            "Currency specialization is outside the current single-document-currency IR; preserve the standard CII XML fragment.",
+            extension_fields=[
+                f"CommercialDocument.extensions[{CII_DOCUMENT_FIELDS_EXTENSION_URN}].preserved_xml[]"
+            ],
         )
 
     return row_class(
-        "unsupported_gap",
-        "No current IR field, profile-extension strategy, or lossiness-ledger preservation strategy is implemented yet.",
+        "cii_preserved_xml_extension",
+        "Standard CII element without a typed IR field yet; preserve it as a replayable XML fragment instead of dropping it.",
+        extension_fields=[
+            f"CommercialDocument.extensions[{CII_DOCUMENT_FIELDS_EXTENSION_URN}].preserved_xml[]"
+        ],
     )
 
 
@@ -434,6 +462,42 @@ def generate(schema_root: Path) -> dict[str, object]:
                 "class": "cii_document_field_extension",
                 "representation": f"CommercialDocument.extensions[{CII_DOCUMENT_FIELDS_EXTENSION_URN}].business_process_context_ids[]",
                 "rationale": "Business-process context is repeatable and identifies business processes; it is never trace_id.",
+            },
+            {
+                "element": "ExchangedDocumentContextType/SpecifiedTransactionID",
+                "class": "profile_extension_payload",
+                "representation": (
+                    f"CommercialDocument.extensions[{CII_PROFILE_CONTEXT_EXTENSION_URN}]"
+                    ".transaction_ids[]"
+                ),
+                "rationale": "Transaction context is repeatable CII profile data and is not an invoice document number.",
+            },
+            {
+                "element": "ExchangedDocumentContextType/TestIndicator",
+                "class": "profile_extension_payload",
+                "representation": (
+                    f"CommercialDocument.extensions[{CII_PROFILE_CONTEXT_EXTENSION_URN}]"
+                    ".test_indicators[]"
+                ),
+                "rationale": "CII test indicators describe profile/test context and are not InvoiceKit runtime flags.",
+            },
+            {
+                "element": "ExchangedDocumentContextType/GuidelineSpecifiedDocumentContextParameter",
+                "class": "profile_extension_payload",
+                "representation": (
+                    f"CommercialDocument.extensions[{CII_PROFILE_CONTEXT_EXTENSION_URN}]"
+                    ".guideline_context_ids[]"
+                ),
+                "rationale": "Guideline context declares the CII profile or CIUS; it is never a business-process context.",
+            },
+            {
+                "element": "ExchangedDocumentContextType/ApplicationSpecifiedDocumentContextParameter",
+                "class": "profile_extension_payload",
+                "representation": (
+                    f"CommercialDocument.extensions[{CII_PROFILE_CONTEXT_EXTENSION_URN}]"
+                    ".application_contexts[]"
+                ),
+                "rationale": "Third-party application context parameters are preserved separately from InvoiceKit-owned metadata.",
             },
             {
                 "element": (
