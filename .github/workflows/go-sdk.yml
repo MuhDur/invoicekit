@@ -54,12 +54,28 @@ jobs:
         with:
           go-version: "1.24.x"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain (MSVC default on Windows, default elsewhere)
+        if: runner.os != 'Windows'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust toolchain (GNU on Windows)
+        if: runner.os == 'Windows'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # The Windows MSVC Rust target produces a .lib that
+          # cgo's mingw-w64 ld cannot link. Use the GNU target
+          # which produces an import library mingw can consume.
+          targets: x86_64-pc-windows-gnu
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build invoicekit-ffi cdylib
+      - name: Build invoicekit-ffi cdylib (non-Windows)
+        if: runner.os != 'Windows'
         run: cargo build -p invoicekit-ffi --locked
+
+      - name: Build invoicekit-ffi cdylib (Windows, GNU target)
+        if: runner.os == 'Windows'
+        run: cargo build -p invoicekit-ffi --locked --target x86_64-pc-windows-gnu
 
       - name: Export FFI library path (Linux)
         if: runner.os == 'Linux'
@@ -77,18 +93,19 @@ jobs:
           echo "DYLD_LIBRARY_PATH=${GITHUB_WORKSPACE}/target/debug" >> "$GITHUB_ENV"
           echo "CGO_LDFLAGS=-L${GITHUB_WORKSPACE}/target/debug -linvoicekit_ffi" >> "$GITHUB_ENV"
 
-      - name: Export FFI library path (Windows)
+      - name: Export FFI library path (Windows, GNU target)
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          # On Windows the Rust toolchain produces invoicekit_ffi.dll
-          # plus invoicekit_ffi.dll.lib for linking. cgo on Windows
-          # needs gcc; the GitHub-hosted runner ships mingw-w64 at
-          # C:\mingw64\bin which we add to PATH.
-          echo "INVOICEKIT_FFI_LIB=${GITHUB_WORKSPACE}/target/debug/invoicekit_ffi.dll" >> "$GITHUB_ENV"
-          echo "${GITHUB_WORKSPACE}/target/debug" >> "$GITHUB_PATH"
+          # With --target x86_64-pc-windows-gnu cargo writes the
+          # cdylib under target/x86_64-pc-windows-gnu/debug. The
+          # GitHub-hosted runner ships mingw-w64 at C:\mingw64\bin
+          # which we put on PATH so cgo finds gcc + ld.
+          DLL_DIR="${GITHUB_WORKSPACE}/target/x86_64-pc-windows-gnu/debug"
+          echo "INVOICEKIT_FFI_LIB=${DLL_DIR}/invoicekit_ffi.dll" >> "$GITHUB_ENV"
+          echo "${DLL_DIR}" >> "$GITHUB_PATH"
           echo "C:\\mingw64\\bin" >> "$GITHUB_PATH"
-          echo "CGO_LDFLAGS=-L${GITHUB_WORKSPACE}/target/debug -linvoicekit_ffi" >> "$GITHUB_ENV"
+          echo "CGO_LDFLAGS=-L${DLL_DIR} -linvoicekit_ffi" >> "$GITHUB_ENV"
 
       - name: go vet
         env:
