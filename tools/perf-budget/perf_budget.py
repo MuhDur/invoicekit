@@ -101,6 +101,21 @@ def load_budget(path: Path) -> tuple[float, Mapping[str, float]]:
             data = tomllib.load(handle)
     except FileNotFoundError as exc:
         raise InvalidInputError(f"budget file not found: {exc.filename}") from exc
+    except IsADirectoryError as exc:
+        raise InvalidInputError(
+            f"budget file path is a directory, not a file: {exc.filename}"
+        ) from exc
+    except PermissionError as exc:
+        raise InvalidInputError(
+            f"budget file is not readable: {exc.filename}"
+        ) from exc
+    except OSError as exc:
+        # gox1: any other I/O failure (broken symlink, ELOOP, etc.) is
+        # still invalid input — the contract guarantees exit code 2,
+        # not a Python traceback masquerading as a generic exit code 1.
+        raise InvalidInputError(
+            f"budget file could not be opened: {exc}"
+        ) from exc
     except tomllib.TOMLDecodeError as exc:
         raise InvalidInputError(f"budget file is not valid TOML: {exc}") from exc
 
@@ -110,6 +125,13 @@ def load_budget(path: Path) -> tuple[float, Mapping[str, float]]:
         raise InvalidInputError(
             "budget file: `default_max_regression_pct` must be numeric"
         ) from exc
+    # gox1: validate the default the same way per-operation thresholds
+    # are validated below; a silently-accepted negative default would
+    # disable every per-operation gate that inherits it.
+    if default_pct <= 0.0:
+        raise InvalidInputError(
+            "budget file: `default_max_regression_pct` must be > 0"
+        )
     operations_section = data.get("operations", {})
     if not isinstance(operations_section, dict):
         raise InvalidInputError("budget file: `operations` must be a table")
@@ -145,9 +167,16 @@ def load_estimate(criterion_dir: Path, op_name: str) -> float | None:
     if not estimates_path.is_file():
         return None
     try:
-        payload = json.JSONDecoder().decode(
-            estimates_path.read_text(encoding="utf-8")
-        )
+        raw = estimates_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        # gox1: a broken-symlink or permission failure while reading
+        # the estimates file is still invalid input under the
+        # documented contract.
+        raise InvalidInputError(
+            f"criterion estimates file at {estimates_path} could not be read: {exc}"
+        ) from exc
+    try:
+        payload = json.JSONDecoder().decode(raw)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise InvalidInputError(
             f"malformed criterion JSON at {estimates_path}: {exc}"
@@ -249,7 +278,16 @@ def main(argv: list[str] | None = None) -> int:
         summary = render_summary(results)
         print(summary)
         if args.summary_out is not None:
-            args.summary_out.write_text(summary)
+            try:
+                args.summary_out.write_text(summary)
+            except OSError as exc:
+                # gox1: an unwritable --summary-out is invalid input
+                # under the documented contract; report it as exit
+                # code 2 rather than letting Python's traceback collapse
+                # the failure into a generic exit code 1.
+                raise InvalidInputError(
+                    f"--summary-out path is not writable: {exc}"
+                ) from exc
     except InvalidInputError as exc:
         print(str(exc), file=sys.stderr)
         return EXIT_INVALID_INPUT
