@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+[package]
+name = "invoicekit-lossiness-ledger-generator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Computes a populated LossinessLedger for every supported cross-format projection."
+publish = false
+
+[lib]
+name = "invoicekit_lossiness_ledger_generator"
+path = "src/lib.rs"
+
+[dependencies]
+invoicekit-format-cii = { path = "../format-cii", version = "0.0.0" }
+invoicekit-format-ubl = { path = "../format-ubl", version = "0.0.0" }
+invoicekit-ir = { path = "../ir", version = "0.0.0" }
+invoicekit-profile-factur-x = { path = "../profile-factur-x", version = "0.0.0" }
+thiserror.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+rust_decimal = { version = "1", default-features = false, features = ["serde-with-str", "std"] }
