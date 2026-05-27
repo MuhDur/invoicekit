@@ -2081,6 +2081,7 @@ version = "0.0.0"
 name = "invoicekit-ir"
 version = "0.0.0"
 dependencies = [
+ "proptest",
  "rust_decimal",
  "schemars",
  "serde",
