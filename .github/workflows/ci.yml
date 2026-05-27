@@ -240,3 +240,56 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check bans licenses sources advisories
+
+  # 9cty: workspace coverage measurement gate. Reports per-crate
+  # line coverage on every PR and fails when a foundation crate
+  # drops below its floor (see scripts/coverage-thresholds.json).
+  # plans/COVERAGE.md documents the ramp toward the universal 90%
+  # target. Coverage runs only on Ubuntu — cargo-llvm-cov on macOS
+  # is flaky on shared runners.
+  coverage:
+    name: workspace coverage gate
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Run workspace coverage
+        run: |
+          cargo llvm-cov --workspace --locked \
+            --ignore-filename-regex '(^|/)(bindings|services|examples)/' \
+            --lcov --output-path coverage.lcov
+          cargo llvm-cov report \
+            --ignore-filename-regex '(^|/)(bindings|services|examples)/' \
+            --json --output-path coverage-summary.json
+      - name: Enforce coverage floors
+        id: floors
+        run: |
+          {
+            echo "## Workspace coverage"
+            echo
+            scripts/check-coverage.sh coverage-summary.json scripts/coverage-thresholds.json
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload lcov artefact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: coverage.lcov
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload JSON summary artefact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-summary
+          path: coverage-summary.json
+          if-no-files-found: error
+          retention-days: 14
