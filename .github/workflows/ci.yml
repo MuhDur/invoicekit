@@ -110,6 +110,27 @@ jobs:
       - run: docker build -f services/validator-saxon/Dockerfile -t invoicekit/validator-saxon:ci .
       - run: python3 services/validator-smoke.py
 
+  validator-jvm-tests:
+    name: validator JVM unit tests (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [phive, kosit, saxon]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      # 7psv: mvn test under each profile exercises the
+      # PhiveReport / KositReport reflection wrappers. The phive
+      # profile is the one that proves a known-bad Peppol invoice
+      # emits at least one BR-* finding from the EN 16931 oracle.
+      - run: mvn -B -ntp -P${{ matrix.profile }} test
+        working-directory: services/validator-common
+
   abi-golden:
     name: engine ABI golden suite
     runs-on: ubuntu-latest
