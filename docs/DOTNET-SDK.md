@@ -1,8 +1,12 @@
-# InvoiceKit .NET SDK
+<!--
+SPDX-License-Identifier: Apache-2.0
+Copyright 2026 The InvoiceKit Authors
+-->
+# .NET SDK
 
 The .NET SDK wraps the stable InvoiceKit Engine ABI. It targets .NET 8 LTS,
-calls `invoicekit-ffi` through P/Invoke-compatible native exports, and falls
-back to a REST sidecar when native loading is unavailable.
+calls the `invoicekit-ffi` native library through the C ABI, and falls back to a
+REST sidecar when native loading is unavailable.
 
 ## Install
 
@@ -21,7 +25,7 @@ Build or install `invoicekit-ffi`, then point the SDK at the shared library:
 export INVOICEKIT_FFI_LIB=/path/to/libinvoicekit_ffi.so
 ```
 
-Use the native client from any .NET 8 application:
+Use the native client from a .NET 8 application:
 
 ```csharp
 using InvoiceKit;

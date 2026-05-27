@@ -23,6 +23,8 @@ yarn-error.log*
 # Build artifacts (add project-specific patterns below)
 dist/
 build/
+**/bin/
+**/obj/
 *.pyc
 __pycache__/
 node_modules/

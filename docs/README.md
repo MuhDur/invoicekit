@@ -6,4 +6,5 @@ Current user-facing quickstarts:
 
 - [Python SDK](PYTHON-SDK.md)
 - [Java SDK](JAVA-SDK.md)
+- [.NET SDK](DOTNET-SDK.md)
 - [TypeScript templates](TYPESCRIPT-TEMPLATES.md)

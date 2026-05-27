@@ -161,6 +161,7 @@ jobs:
         working-directory: bindings/go
       - run: mvn -B -ntp test
         working-directory: bindings/java
+      - run: dotnet test bindings/dotnet/tests/InvoiceKit.Tests/InvoiceKit.Tests.csproj -c Release
       - run: dotnet run --project bindings/dotnet/InvoiceKit.AbiGolden/InvoiceKit.AbiGolden.csproj
 
   typescript-templates:
