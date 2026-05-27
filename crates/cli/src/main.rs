@@ -9,7 +9,7 @@
 use std::env;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: invoicekit <command> [<args>...]\n\nCommands:\n  capabilities     resolve accepted e-invoice profiles for a route/scenario/date\n  migrate-archive  migrate a directory of invoice JSON archives between schema versions\n\nRun `invoicekit <command> --help` for command-specific flags.\n";
+const USAGE: &str = "usage: invoicekit <command> [<args>...]\n\nCommands:\n  capabilities     resolve accepted e-invoice profiles for a route/scenario/date\n  codelist-update  refresh a code-list manifest from a locally-staged upstream payload\n  migrate-archive  migrate a directory of invoice JSON archives between schema versions\n\nRun `invoicekit <command> --help` for command-specific flags.\n";
 
 fn main() -> ExitCode {
     let _ = invoicekit_cli::crate_name();
@@ -25,6 +25,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         "capabilities" => invoicekit_cli::commands::capabilities::run(&rest),
+        "codelist-update" => invoicekit_cli::commands::codelist_update::run(&rest),
         "migrate-archive" => invoicekit_cli::commands::migrate_archive::run(&rest),
         unknown => {
             eprintln!("invoicekit: unknown subcommand {unknown:?}");

@@ -1648,6 +1648,7 @@ dependencies = [
 name = "invoicekit-cli"
 version = "0.0.0"
 dependencies = [
+ "invoicekit-codelists",
  "invoicekit-ir",
  "invoicekit-migration",
  "serde",

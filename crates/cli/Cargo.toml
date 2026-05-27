@@ -29,6 +29,7 @@ name = "migrate-archive"
 path = "src/bin/migrate_archive.rs"
 
 [dependencies]
+invoicekit-codelists = { path = "../codelists", version = "0.0.0" }
 invoicekit-ir = { path = "../ir", version = "0.0.0" }
 invoicekit-migration = { path = "../migration", version = "0.0.0" }
 serde = { version = "1", features = ["derive"] }

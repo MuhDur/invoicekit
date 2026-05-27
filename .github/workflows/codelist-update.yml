@@ -1,0 +1,129 @@
+name: Codelist update
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Daily at 05:13 UTC. Off-peak to avoid colliding with the bench/CI
+    # cron windows and pre-dawn so a drift PR is waiting for the
+    # principal's morning triage.
+    - cron: "13 5 * * *"
+  workflow_dispatch:
+    inputs:
+      list:
+        description: "Code list identifier to refresh"
+        required: false
+        default: "iso-4217"
+
+concurrency:
+  group: codelist-update-${{ github.workflow }}-${{ github.ref }}-${{ github.event.schedule }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  smoke:
+    name: codelist-update CLI smoke
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the published `invoicekit` binary
+        run: cargo build -p invoicekit-cli --bin invoicekit --locked
+      - name: Run codelist-update against the checked-in CSV fixture
+        run: |
+          set -euo pipefail
+          OUT=$(mktemp)
+          ./target/debug/invoicekit codelist-update \
+            --list=iso-4217 \
+            --source-file=crates/codelists/data/sources/iso-4217-sample.csv \
+            --output="$OUT" \
+            --retrieved-at=2026-05-27
+          test -s "$OUT"
+          grep -q '"list": "iso-4217"' "$OUT"
+          grep -q '"retrieved_at": "2026-05-27"' "$OUT"
+          grep -q '"signature_alg": "sha256:identity"' "$OUT"
+      - name: Reject unknown list (exit 2)
+        run: |
+          set +e
+          ./target/debug/invoicekit codelist-update \
+            --list=not-a-real-list \
+            --source-file=crates/codelists/data/sources/iso-4217-sample.csv
+          test $? -eq 2 || (echo "expected exit 2 for unknown list" && exit 1)
+      - name: Reject missing source-file (exit 3)
+        run: |
+          set +e
+          ./target/debug/invoicekit codelist-update \
+            --list=iso-4217 \
+            --source-file=/nonexistent/iso-4217.csv
+          test $? -eq 3 || (echo "expected exit 3 for missing file" && exit 1)
+      - name: Verify embedded manifest still verifies after rebuild
+        run: |
+          cargo test -p invoicekit-codelists --lib --quiet
+  nightly-refresh:
+    name: nightly upstream refresh (opens PR on drift)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the published `invoicekit` binary
+        run: cargo build -p invoicekit-cli --bin invoicekit --locked
+      - name: Fetch upstream and normalize to CSV
+        id: fetch
+        env:
+          LIST: ${{ github.event.inputs.list || 'iso-4217' }}
+        run: |
+          set -euo pipefail
+          # T-018 follow-up: the nightly fetch is intentionally pinned
+          # to the checked-in fixture today because the SIX Group XML
+          # publication isn't a stable URL we can `curl` without
+          # auth. A follow-up bead (invoices-t-018-followup-fetcher)
+          # will wire the real upstream + XML->CSV conversion. For
+          # now this job exercises the full PR-on-drift code path
+          # using the same fixture as the pull-request smoke; a real
+          # drift PR will only fire when the fixture itself changes
+          # via a code review.
+          cp crates/codelists/data/sources/iso-4217-sample.csv /tmp/upstream.csv
+          echo "csv=/tmp/upstream.csv" >> "$GITHUB_OUTPUT"
+      - name: Run codelist-update against the upstream payload
+        env:
+          LIST: ${{ github.event.inputs.list || 'iso-4217' }}
+        run: |
+          set -euo pipefail
+          ./target/debug/invoicekit codelist-update \
+            --list="$LIST" \
+            --source-file="${{ steps.fetch.outputs.csv }}" \
+            --retrieved-at="$(date -u +%Y-%m-%d)"
+      - name: Open PR if drift detected
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet --exit-code -- crates/codelists/data; then
+            echo "codelist-update: no drift detected, nothing to PR"
+            exit 0
+          fi
+          BRANCH="auto/codelist-update-$(date -u +%Y%m%d)"
+          git config user.name "invoicekit-codelist-bot"
+          git config user.email "noreply@anthropic.com"
+          git checkout -b "$BRANCH"
+          git add crates/codelists/data
+          git commit -m "Codelist drift: refresh upstream snapshots ($(date -u +%Y-%m-%d))"
+          git push -u origin "$BRANCH"
+          gh pr create \
+            --title "Codelist drift refresh ($(date -u +%Y-%m-%d))" \
+            --body "Automated drift PR from .github/workflows/codelist-update.yml. Compare the diff in crates/codelists/data against the upstream sources listed in invoicekit_codelists::sources::BUILTIN_SOURCES. Merging this PR refreshes the seed manifests; close it without merging if the upstream change should not propagate."
