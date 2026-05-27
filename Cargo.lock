@@ -1868,6 +1868,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoicekit-adversarial-generator"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-format-cii",
+ "invoicekit-format-gobl",
+ "invoicekit-format-ubl",
+ "invoicekit-ir",
+ "invoicekit-profile-peppol-bis",
+ "invoicekit-profile-peppol-pint",
+ "invoicekit-profile-xrechnung",
+ "rust_decimal",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "invoicekit-archive"
 version = "0.0.0"
 

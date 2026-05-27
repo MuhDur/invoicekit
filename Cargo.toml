@@ -11,6 +11,7 @@ members = [
   "crates/rulepack",
   "crates/ir",
   "crates/canonical",
+  "crates/adversarial-generator",
   "crates/format-detect",
   "crates/format-ubl",
   "crates/format-cii",
