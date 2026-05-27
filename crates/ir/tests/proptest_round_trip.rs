@@ -227,7 +227,7 @@ fn try_from_value_rejects_blank_id() {
     let err = CommercialDocument::try_from_value(bad).unwrap_err();
     assert!(
         matches!(err, IrError::MissingRequiredField("id")),
-        "unexpected: {err}",
+        "unexpected: {err}"
     );
 }
 
@@ -252,7 +252,7 @@ fn try_from_value_rejects_invalid_currency() {
     let err = CommercialDocument::try_from_value(bad).unwrap_err();
     assert!(
         matches!(err, IrError::InvalidCurrency(_)),
-        "unexpected: {err}",
+        "unexpected: {err}"
     );
 }
 
@@ -275,7 +275,7 @@ fn try_from_value_rejects_invalid_date() {
         "meta": minimal_meta(),
     });
     let err = CommercialDocument::try_from_value(bad).unwrap_err();
-    assert!(matches!(err, IrError::InvalidDate(_)), "unexpected: {err}",);
+    assert!(matches!(err, IrError::InvalidDate(_)), "unexpected: {err}");
 }
 
 #[test]
@@ -299,7 +299,7 @@ fn try_from_value_rejects_empty_lines() {
     let err = CommercialDocument::try_from_value(bad).unwrap_err();
     assert!(
         matches!(err, IrError::EmptyCollection("lines")),
-        "unexpected: {err}",
+        "unexpected: {err}"
     );
 }
 
