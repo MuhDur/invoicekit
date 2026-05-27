@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0",
+  "fixture_id": "ik-synthetic-ubl-invoice-basic-0001",
+  "corpus_partition": "synthetic",
+  "publication": "public",
+  "status": "active",
+  "title": "Synthetic UBL invoice with two fictional parties",
+  "description": "Small public sample used to prove the T-120 fixture metadata contract for UBL-style invoice artifacts.",
+  "artifact": {
+    "path": "fixture.xml",
+    "media_type": "application/xml",
+    "sha256": "865bb4b396863f7e308002674472ff0d050536ca911b64b6b8a06c322a85484a",
+    "size_bytes": 1039,
+    "format_family": "ubl",
+    "document_type": "invoice"
+  },
+  "jurisdiction": {
+    "countries": ["DE", "FR"],
+    "profile": "InvoiceKit synthetic UBL sample",
+    "syntax": "UBL-like XML",
+    "version": "2.1-sample"
+  },
+  "license": {
+    "license_id": "CC0-1.0",
+    "copyright_holder": "InvoiceKit Authors",
+    "redistribution": "public-ok"
+  },
+  "provenance": {
+    "source_kind": "generated",
+    "source_name": "InvoiceKit T-120 synthetic sample",
+    "generated_by": "WindyEagle",
+    "generator_version": "manual-t-120-sample-1",
+    "created_at": "2026-05-27T02:30:00Z"
+  },
+  "pii": {
+    "classification": "synthetic",
+    "redaction_status": "not-required",
+    "contains_personal_data": false,
+    "notes": "All party names and identifiers are fictional."
+  },
+  "coverage": {
+    "capabilities": ["redaction-policy"],
+    "scenarios": ["ubl metadata policy sample", "public synthetic fixture"],
+    "negative_case": false
+  },
+  "validation": {
+    "expected_outcome": "not-yet-validated",
+    "validators": [
+      {
+        "name": "format validator",
+        "version": "not-run",
+        "result": "not-run"
+      }
+    ],
+    "known_gaps": [
+      "Fixture exercises metadata policy only; format conformance validation is out of scope for T-120."
+    ]
+  },
+  "maintenance": {
+    "owner": "InvoiceKit maintainers",
+    "created_at": "2026-05-27",
+    "reviewed_at": "2026-05-27",
+    "review_due": "2027-05-27",
+    "labels": ["synthetic", "ubl", "metadata-policy"]
+  }
+}

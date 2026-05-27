@@ -32,7 +32,11 @@ jobs:
         run: pytest tools/release-checks/tests -q
       - name: Run IR JSON Schema gate (T-011)
         run: pytest tools/release-checks/test_ir_schema_match.py -q
+      - name: Run conformance corpus metadata tests
+        run: pytest tools/conformance-corpus/tests -q
       - name: Check Apache 2.0 SPDX header on every Rust source
         run: python3 tools/license-header/check_headers.py --check
+      - name: Validate conformance fixture metadata
+        run: python3 tools/conformance-corpus/validate_fixture_metadata.py
       - name: Verify ci.yml + release.yml + license-header.yml still wired
         run: python3 tools/release-checks/verify_release_checks.py

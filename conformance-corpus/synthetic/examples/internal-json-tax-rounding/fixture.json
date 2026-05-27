@@ -1,0 +1,29 @@
+{
+  "schema": "urn:invoicekit:sample:internal-json:tax-rounding",
+  "document_type": "invoice",
+  "document_id": "IK-SYN-JSON-0001",
+  "issue_date": "2026-05-27",
+  "currency": "EUR",
+  "supplier": {
+    "name": "Helios Test Supplies GmbH",
+    "country": "DE"
+  },
+  "customer": {
+    "name": "Fabrikam Audit Labs SAS",
+    "country": "FR"
+  },
+  "lines": [
+    {
+      "description": "Fictional calibration service",
+      "quantity": "1",
+      "unit_price": "19.995",
+      "tax_category": "S",
+      "tax_rate": "19.00"
+    }
+  ],
+  "expected": {
+    "line_extension_amount": "20.00",
+    "tax_amount": "3.80",
+    "payable_amount": "23.80"
+  }
+}
