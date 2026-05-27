@@ -1,0 +1,43 @@
+# T-138 — InvoiceKit public status page configuration.
+#
+# Edited by the operator on call when adding a new country or
+# gateway to the public site. The build script reads this file
+# plus the incidents/ directory and writes a single-file
+# index.html at target/status-page/.
+
+[site]
+title = "InvoiceKit Status"
+url = "https://status.invoicekit.org"
+window_days = 90
+
+[targets.peppol-storecove]
+kind = "gateway"
+label = "Peppol — Storecove access point"
+
+[targets.peppol-ecosio]
+kind = "gateway"
+label = "Peppol — ecosio access point"
+
+[targets.peppol-b2brouter]
+kind = "gateway"
+label = "Peppol — B2BRouter access point"
+
+[targets.it-sdi]
+kind = "country"
+label = "Italy — SdI"
+
+[targets.fr-ctc]
+kind = "country"
+label = "France — CTC"
+
+[targets.es-verifactu]
+kind = "country"
+label = "Spain — Verifactu"
+
+[targets.pl-ksef]
+kind = "country"
+label = "Poland — KSeF"
+
+[targets.de-xrechnung]
+kind = "country"
+label = "Germany — XRechnung partner endpoint"
