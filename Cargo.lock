@@ -2630,6 +2630,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoicekit-timestamping"
+version = "0.0.0"
+dependencies = [
+ "blake3",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "invoicekit-transmit-email"
 version = "0.0.0"
 
