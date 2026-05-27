@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "allowImportingTsExtensions": false,
+    "exactOptionalPropertyTypes": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "lib": ["DOM", "DOM.Iterable", "ES2023"],
+    "module": "ESNext",
+    "moduleDetection": "force",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "strict": true,
+    "target": "ES2022",
+    "types": ["bun"],
+    "useDefineForClassFields": true
+  },
+  "include": [
+    "components/**/*.tsx",
+    "routes/**/*.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "tests/**/*.tsx",
+    "vite.config.ts"
+  ]
+}
