@@ -20,6 +20,10 @@ SCHEMA_PATH = CORPUS_ROOT / "fixture-metadata.schema.json"
 ARTIFACT_SUFFIXES = frozenset({".json", ".xml", ".pdf"})
 IGNORED_ARTIFACT_PATHS = frozenset({Path("fixture-metadata.schema.json")})
 IGNORED_ARTIFACT_DIRS = frozenset({"generators"})
+REFERENCE_PATH_FIELDS = (
+    ("license", "evidence_path"),
+    ("pii", "redaction_report_path"),
+)
 
 
 class MetadataError(ValueError):
@@ -208,7 +212,10 @@ def validate_optional_reference_path(
 
 def validate_metadata_coverage(corpus_root: Path, metadata_files: list[Path]) -> None:
     metadata_by_dir = {path.parent.resolve(): load_json(path) for path in metadata_files}
+    reference_paths = collect_reference_paths(metadata_by_dir)
     for artifact_path in iter_artifact_files(corpus_root):
+        if artifact_path.resolve() in reference_paths:
+            continue
         metadata_path = artifact_path.parent / "metadata.json"
         metadata = metadata_by_dir.get(artifact_path.parent.resolve())
         if metadata is None:
@@ -219,6 +226,16 @@ def validate_metadata_coverage(corpus_root: Path, metadata_files: list[Path]) ->
             raise MetadataError(
                 f"{metadata_path}: artifact.path does not reference {artifact_path.name}"
             )
+
+
+def collect_reference_paths(metadata_by_dir: dict[Path, dict[str, Any]]) -> set[Path]:
+    paths: set[Path] = set()
+    for fixture_dir, metadata in metadata_by_dir.items():
+        for object_name, field_name in REFERENCE_PATH_FIELDS:
+            container = metadata.get(object_name)
+            if isinstance(container, dict) and field_name in container:
+                paths.add((fixture_dir / Path(container[field_name])).resolve())
+    return paths
 
 
 def iter_artifact_files(corpus_root: Path) -> list[Path]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -40,6 +41,21 @@ def test_artifact_without_sibling_metadata_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(validator.MetadataError, match="missing sibling metadata"):
         validator.validate_metadata_coverage(tmp_path, metadata_files)
+
+
+def test_reference_json_is_not_treated_as_fixture_artifact(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "licensed-real" / "examples" / "redacted"
+    fixture_dir.mkdir(parents=True)
+    (fixture_dir / "fixture.xml").write_text("<Invoice />", encoding="utf-8")
+    (fixture_dir / "redaction-report.json").write_text("{}", encoding="utf-8")
+
+    metadata = copy.deepcopy(sample_metadata())
+    metadata["artifact"]["path"] = "fixture.xml"
+    metadata["pii"]["redaction_report_path"] = "redaction-report.json"
+    metadata_path = fixture_dir / "metadata.json"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    validator.validate_metadata_coverage(tmp_path, [metadata_path])
 
 
 def test_unknown_top_level_property_is_rejected() -> None:
