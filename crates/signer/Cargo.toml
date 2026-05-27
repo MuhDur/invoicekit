@@ -2,7 +2,7 @@
 # Copyright 2026 The InvoiceKit Authors
 
 [package]
-name = "invoicekit-signer-agent"
+name = "invoicekit-signer"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,15 +10,15 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Local on-host signer daemon. Listens on a Unix socket and serves the JSON-RPC contract documented at services/validator-rpc.md; engine calls go through it so customer keys never leave the host process."
+description = "InvoiceKit signing substrate: Signer trait + SoftwareSigner. The signer-agent daemon (services/invoicekit-signer-agent) calls this crate over a local Unix socket so customer keys never leave the host."
 publish = false
 
-[[bin]]
-name = "invoicekit-signer-agent"
-path = "src/main.rs"
+[lib]
+name = "invoicekit_signer"
+path = "src/lib.rs"
 
 [dependencies]
-invoicekit-signer = { path = "../../crates/signer", version = "0.0.0" }
+blake3 = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror.workspace = true
