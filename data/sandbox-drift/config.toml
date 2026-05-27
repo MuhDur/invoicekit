@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-074c sandbox drift canary configuration.
+#
+# Each `[[gateway]]` stanza declares one government / regulator sandbox
+# the canary should check nightly. The canary loops over every stanza
+# and runs the corresponding check IF and only if the named
+# `auth_env_var` is set in the workflow environment. When the env var
+# is absent (typical: most country sandbox accounts don't exist yet),
+# the canary records a "skipped: no credentials" line and moves on
+# without failing the run.
+#
+# Adding a new sandbox is a three-line change here plus a recorded
+# cassette under `conformance-corpus/cassette/sandbox/<gateway>/`.
+# See `tools/sandbox-drift/sandbox_drift.py` for the request-comparison
+# semantics.
+
+schema_version = "1.0"
+
+# Every stanza below is intentionally disabled (auth_env_var pointing
+# at a variable that doesn't exist) so the workflow has a hermetic
+# "every gateway skipped, zero drift" baseline. Real credentials are
+# added per-country as actual sandbox accounts come online.
+
+[[gateway]]
+country = "IT"
+gateway_id = "italy-sdi-test"
+description = "Italy SDI test environment (Agenzia delle Entrate)"
+endpoint = "https://testservizi.fatturapa.gov.it"
+auth_env_var = "INVOICEKIT_SANDBOX_IT_SDI_TOKEN"
+cassette_path = "conformance-corpus/cassette/sandbox/italy-sdi-test.json"
+request_fixture = "conformance-corpus/cassette/sandbox/italy-sdi-test.request.json"
+
+[[gateway]]
+country = "FR"
+gateway_id = "france-chorus-pro-test"
+description = "France Chorus Pro pre-production environment (DGFiP)"
+endpoint = "https://sandbox.chorus-pro.gouv.fr"
+auth_env_var = "INVOICEKIT_SANDBOX_FR_CHORUS_TOKEN"
+cassette_path = "conformance-corpus/cassette/sandbox/france-chorus-pro-test.json"
+request_fixture = "conformance-corpus/cassette/sandbox/france-chorus-pro-test.request.json"
+
+[[gateway]]
+country = "ES"
+gateway_id = "spain-verifactu-test"
+description = "Spain VeriFactu pre-production (AEAT)"
+endpoint = "https://prewww1.aeat.es/wlpl/TIKE-CONT/ConsultaQR"
+auth_env_var = "INVOICEKIT_SANDBOX_ES_VERIFACTU_TOKEN"
+cassette_path = "conformance-corpus/cassette/sandbox/spain-verifactu-test.json"
+request_fixture = "conformance-corpus/cassette/sandbox/spain-verifactu-test.request.json"
+
+[[gateway]]
+country = "SA"
+gateway_id = "saudi-zatca-sandbox"
+description = "Saudi ZATCA Fatoora sandbox"
+endpoint = "https://gw-fatoora.zatca.gov.sa/e-invoicing/developer-portal"
+auth_env_var = "INVOICEKIT_SANDBOX_SA_ZATCA_TOKEN"
+cassette_path = "conformance-corpus/cassette/sandbox/saudi-zatca-sandbox.json"
+request_fixture = "conformance-corpus/cassette/sandbox/saudi-zatca-sandbox.request.json"

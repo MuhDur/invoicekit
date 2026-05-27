@@ -16,6 +16,7 @@ members = [
   "crates/format-gobl",
   "crates/validate",
   "crates/validate-ubl-cii",
+  "crates/render-html",
   "crates/render-pdf",
   "crates/render-pdf-postproc",
   "crates/render-verify",

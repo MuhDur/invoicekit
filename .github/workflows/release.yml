@@ -30,6 +30,19 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+      # T-133: dependency-scan gate. Any known-vulnerable or banned
+      # crate fails the release BEFORE we burn a build slot. Both
+      # tools also run on every PR via ci.yml; checking again here
+      # closes the "advisory landed AFTER the PR merged but BEFORE
+      # the tag was cut" window.
+      - name: Install cargo-audit + cargo-deny
+        run: |
+          cargo install --locked cargo-audit
+          cargo install --locked cargo-deny
+      - name: cargo audit (RUSTSEC advisory DB)
+        run: cargo audit --deny warnings
+      - name: cargo deny (license + bans + sources + advisories)
+        run: cargo deny check
       - name: Install cargo-cyclonedx (CycloneDX SBOM generator)
         run: cargo install --locked cargo-cyclonedx
       - name: Install cosign (sigstore keyless signer)

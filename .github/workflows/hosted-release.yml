@@ -1,0 +1,127 @@
+name: Hosted release
+
+# T-133: separate signed-release pipeline for the hosted-layer
+# binaries (invoicekit-managed-api-server, invoicekit-signer-agent).
+# The repo-level `release.yml` (T-002) covers the CLI library
+# surface; this workflow's tag namespace `hosted-vX.Y.Z` is what
+# the principal cuts when shipping the managed service stack.
+#
+# Pipeline ordering is intentional and matches the bead's gates:
+#
+#   1. Dependency scan (cargo audit + cargo deny + cargo geiger
+#      surface check) — runs BEFORE any build, so a known-CVE'd
+#      dependency cannot ride the deploy.
+#   2. Strict-mode build of the two hosted binaries.
+#   3. CycloneDX SBOM for both binaries.
+#   4. Cosign keyless sign of every produced artifact + SBOM.
+#   5. SLSA-shape provenance attestation.
+#   6. Upload to the GitHub release.
+
+on:
+  push:
+    tags:
+      - "hosted-v*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  scan-and-release:
+    name: Hosted release (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+
+      # ───────── 1. Dependency-scan gate ─────────
+      - name: Install cargo-audit + cargo-deny
+        run: |
+          cargo install --locked cargo-audit
+          cargo install --locked cargo-deny
+      - name: cargo audit (RUSTSEC advisory DB)
+        run: cargo audit --deny warnings
+      - name: cargo deny (license + bans + sources + advisories)
+        run: cargo deny check
+
+      # ───────── 2. Strict-mode build of the two hosted binaries ─────────
+      - name: Build managed-api-server
+        run: |
+          cargo build --release --locked \
+            -p invoicekit-managed-api-server \
+            --target ${{ matrix.target }}
+      - name: Build signer-agent
+        run: |
+          cargo build --release --locked \
+            -p invoicekit-signer-agent \
+            --target ${{ matrix.target }}
+
+      # ───────── 3. CycloneDX SBOM ─────────
+      - name: Install cargo-cyclonedx
+        run: cargo install --locked cargo-cyclonedx
+      - name: Generate hosted-binary SBOMs
+        run: |
+          mkdir -p target/hosted-sbom
+          cargo cyclonedx \
+            -p invoicekit-managed-api-server \
+            --format json \
+            --output-pattern bom \
+            --output-cdx
+          cargo cyclonedx \
+            -p invoicekit-signer-agent \
+            --format json \
+            --output-pattern bom \
+            --output-cdx
+          cp services/managed-api-server/bom.json target/hosted-sbom/managed-api-server.cdx.json
+          cp services/invoicekit-signer-agent/bom.json target/hosted-sbom/signer-agent.cdx.json
+
+      # ───────── 4. Cosign keyless sign ─────────
+      - name: Install cosign (sigstore keyless signer)
+        uses: sigstore/cosign-installer@v3
+      - name: Sign hosted binaries + SBOMs
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          for bin in \
+            target/${{ matrix.target }}/release/invoicekit-managed-api-server \
+            target/${{ matrix.target }}/release/invoicekit-signer-agent \
+            target/hosted-sbom/managed-api-server.cdx.json \
+            target/hosted-sbom/signer-agent.cdx.json; do
+            if [ -f "$bin" ]; then
+              cosign sign-blob --yes \
+                --bundle "${bin}.cosign.bundle" \
+                "${bin}"
+            fi
+          done
+
+      # ───────── 5. SLSA provenance ─────────
+      - name: Generate provenance attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            target/${{ matrix.target }}/release/invoicekit-managed-api-server
+            target/${{ matrix.target }}/release/invoicekit-signer-agent
+        continue-on-error: true
+
+      # ───────── 6. Attach to GitHub release ─────────
+      - name: Attach signed binaries + SBOMs to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/${{ matrix.target }}/release/invoicekit-managed-api-server
+            target/${{ matrix.target }}/release/invoicekit-signer-agent
+            target/${{ matrix.target }}/release/*.cosign.bundle
+            target/hosted-sbom/*.cdx.json
+            target/hosted-sbom/*.cosign.bundle

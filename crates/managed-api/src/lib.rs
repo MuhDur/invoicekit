@@ -15,7 +15,9 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+pub mod audit_log;
 pub mod observability;
+pub mod sse_ack;
 pub use observability::{
     redact_log_value, GatewayDashboardSnapshot, ManagedRequestObservation,
     ManagedRequestObservationInput, ObservedRequestSpan, OpenTelemetryIds, SloMetricEvent,
