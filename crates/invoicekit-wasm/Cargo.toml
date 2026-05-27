@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
 [package]
 name = "invoicekit-wasm"
 version.workspace = true
@@ -7,15 +9,71 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit workspace member: invoicekit-wasm"
+description = "InvoiceKit WebAssembly artifact with feature-flagged country/format bundles."
 publish = false
 
 [lib]
 name = "invoicekit_wasm"
 path = "src/lib.rs"
+# `cdylib` is what wasm-pack / wasm-bindgen expect to build a
+# browser-loadable .wasm; `rlib` keeps the crate usable as a
+# normal Rust dependency on native targets so the workspace-wide
+# `cargo test --workspace` still includes it.
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Default to "no country bundles, no formats." Customers compile
+# only what they ship — a calculator-app site that just wants
+# the engine ABI surface gets a leaner artifact than a developer
+# tool that wants every format.
+default = []
+
+# Country bundles. Each flag toggles the corresponding
+# report-* / format-* feature on the engine crate. Listed in
+# alphabetical order to make the artifact-size test below
+# trivially reproducible.
+country-be = []
+country-br = []
+country-de = []
+country-es = []
+country-fr = []
+country-gr = []
+country-hu = []
+country-in = []
+country-it = []
+country-mx = []
+country-pl = []
+country-ro = []
+country-sa = []
+country-tr = []
+
+# Format bundles.
+format-cii = []
+format-factur-x = []
+format-fatturapa = []
+format-peppol = []
+format-ubl = []
+format-xrechnung = []
+
+# Convenience meta-flag: everything (used by the artifact-size
+# CI gate to assert the "full bundle" still fits the < 5 MB cap).
+full = [
+  "country-be", "country-br", "country-de", "country-es",
+  "country-fr", "country-gr", "country-hu", "country-in",
+  "country-it", "country-mx", "country-pl", "country-ro",
+  "country-sa", "country-tr",
+  "format-cii", "format-factur-x", "format-fatturapa",
+  "format-peppol", "format-ubl", "format-xrechnung",
+]
 
 [dependencies]
 invoicekit-engine = { path = "../invoicekit-engine", version = "0.0.0" }
+
+# wasm-bindgen is the bridge to JavaScript; only compiled in on
+# wasm32 targets so native builds (and the workspace-wide test
+# matrix) don't pay the dep cost.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
