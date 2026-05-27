@@ -1851,6 +1851,12 @@ dependencies = [
 [[package]]
 name = "invoicekit-intake-ocr"
 version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+]
 
 [[package]]
 name = "invoicekit-intake-pdf"
