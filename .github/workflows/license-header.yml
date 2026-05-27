@@ -34,6 +34,8 @@ jobs:
         run: pytest tools/release-checks/test_ir_schema_match.py -q
       - name: Run capabilities matrix schema gate (T-006a)
         run: pytest tools/release-checks/test_capabilities_matrix.py -q
+      - name: Run TypeScript types parity gate (T-012)
+        run: pytest tools/release-checks/test_typescript_types_match.py -q
       - name: Run conformance corpus metadata tests
         run: pytest tools/conformance-corpus/tests -q
       - name: Check Apache 2.0 SPDX header on every Rust source
