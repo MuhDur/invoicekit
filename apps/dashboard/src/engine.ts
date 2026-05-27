@@ -39,6 +39,22 @@ export interface TenantOverview {
   readonly generatedAt: string;
 }
 
+export interface UsageMonth {
+  readonly month: string;
+  readonly documentsSent: number;
+  readonly documentsReceived: number;
+  readonly partnerApCost: string;
+}
+
+export interface TenantUsage {
+  readonly periodLabel: string;
+  readonly totalSent: number;
+  readonly totalReceived: number;
+  readonly partnerApCostTotal: string;
+  readonly currency: string;
+  readonly months: readonly UsageMonth[];
+}
+
 export interface AuditEvent {
   readonly id: string;
   readonly occurredAt: string;
@@ -96,6 +112,7 @@ export interface TransmissionListParams {
 export interface DashboardEngineClient {
   listAuditEvents(params?: AuditEventListParams): Promise<AuditEventPage>;
   listTransmissions(params?: TransmissionListParams): Promise<TransmissionPage>;
+  tenantUsage(): Promise<TenantUsage>;
   tenantOverview(): Promise<TenantOverview>;
 }
 
@@ -151,6 +168,16 @@ export function createHttpDashboardClient(options: EngineRpcClientOptions = {}):
         requestId: requestIdFactory()
       });
     },
+    async tenantUsage() {
+      return callEngineMethod({
+        endpoint,
+        fetcher,
+        method: "engine.tenant_usage",
+        params: {},
+        parse: parseTenantUsage,
+        requestId: requestIdFactory()
+      });
+    },
     async tenantOverview() {
       return callEngineMethod({
         endpoint,
@@ -188,13 +215,17 @@ export function billingTone(state: BillingState): "neutral" | "good" | "warning"
 interface EngineMethodCall<Result> {
   readonly endpoint: string;
   readonly fetcher: FetchLike;
-  readonly method: "engine.list_audit_events" | "engine.list_transmissions" | "engine.tenant_overview";
+  readonly method:
+    | "engine.list_audit_events"
+    | "engine.list_transmissions"
+    | "engine.tenant_overview"
+    | "engine.tenant_usage";
   readonly params: unknown;
   readonly parse: (value: unknown) => Result;
   readonly requestId: string;
 }
 
-async function callEngineMethod<Result extends AuditEventPage | TenantOverview | TransmissionPage>({
+async function callEngineMethod<Result extends AuditEventPage | TenantOverview | TenantUsage | TransmissionPage>({
   endpoint,
   fetcher,
   method,
@@ -323,6 +354,30 @@ function parseAuditEvent(value: unknown): AuditEvent {
     resourceId: readString(record, "resourceId", "audit event"),
     outcome: readAuditOutcome(record, "outcome", "audit event"),
     traceId: readString(record, "traceId", "audit event")
+  };
+}
+
+function parseTenantUsage(value: unknown): TenantUsage {
+  const record = asRecord(value, "tenant usage");
+
+  return {
+    periodLabel: readString(record, "periodLabel", "tenant usage"),
+    totalSent: readNumber(record, "totalSent", "tenant usage"),
+    totalReceived: readNumber(record, "totalReceived", "tenant usage"),
+    partnerApCostTotal: readString(record, "partnerApCostTotal", "tenant usage"),
+    currency: readString(record, "currency", "tenant usage"),
+    months: readArray(record, "months", "tenant usage").map(parseUsageMonth)
+  };
+}
+
+function parseUsageMonth(value: unknown): UsageMonth {
+  const record = asRecord(value, "usage month");
+
+  return {
+    month: readString(record, "month", "usage month"),
+    documentsSent: readNumber(record, "documentsSent", "usage month"),
+    documentsReceived: readNumber(record, "documentsReceived", "usage month"),
+    partnerApCost: readString(record, "partnerApCost", "usage month")
   };
 }
 
