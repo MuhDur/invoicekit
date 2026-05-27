@@ -52,6 +52,15 @@ jobs:
       - run: cargo build --workspace --all-targets --locked
       - run: cargo test --workspace --locked
 
+  cassette-pii-scan:
+    name: cassette PII scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p invoicekit-transmit-mock cassette_corpus_has_no_unscrubbed_pii --locked
+
   outbox-db-migrations:
     name: outbox DB migrations
     runs-on: ubuntu-latest

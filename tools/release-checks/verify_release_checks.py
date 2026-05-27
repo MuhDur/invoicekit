@@ -11,6 +11,8 @@ Specifically the script verifies:
 
 * ``.github/workflows/ci.yml`` contains both a job that runs ``cargo audit``
   and one that runs ``cargo deny``.
+* ``.github/workflows/ci.yml`` contains a cassette PII scan that runs the
+  ``cassette_corpus_has_no_unscrubbed_pii`` guard.
 * ``.github/workflows/release.yml`` contains a step that runs
   ``cargo cyclonedx`` (the CycloneDX SBOM generator) and a step that runs
   ``cosign sign-blob`` (the keyless OIDC signer).
@@ -70,6 +72,11 @@ class AdvisoryWaiver:
 REQUIREMENTS: tuple[Requirement, ...] = (
     Requirement("ci.yml", "cargo audit", "ci.yml runs cargo audit"),
     Requirement("ci.yml", "cargo deny", "ci.yml runs cargo deny"),
+    Requirement(
+        "ci.yml",
+        "cassette_corpus_has_no_unscrubbed_pii",
+        "ci.yml runs the cassette PII scan",
+    ),
     Requirement("release.yml", "cargo cyclonedx", "release.yml emits a CycloneDX SBOM"),
     Requirement("release.yml", "cosign sign-blob", "release.yml signs artifacts with cosign"),
     Requirement(
