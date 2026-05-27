@@ -1,0 +1,172 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-05-27T00:00:00Z",
+  "stale_after_days": 180,
+  "entries": [
+    {
+      "route_from": "DE",
+      "route_to": "DE",
+      "scenario": "B2G",
+      "valid_from": "2020-11-27",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "xrechnung-3.0",
+          "format": "XRechnung",
+          "transport": "peppol"
+        },
+        {
+          "id": "xrechnung-3.0",
+          "format": "XRechnung",
+          "transport": "email"
+        }
+      ],
+      "source": {
+        "name": "KoSIT XRechnung specification",
+        "url": "https://xeinkauf.de/xrechnung/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "authoritative"
+      }
+    },
+    {
+      "route_from": "DE",
+      "route_to": "DE",
+      "scenario": "B2B",
+      "valid_from": "2025-01-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "xrechnung-3.0",
+          "format": "XRechnung",
+          "transport": "email"
+        },
+        {
+          "id": "factur-x-1.0.07",
+          "format": "Factur-X",
+          "transport": "email"
+        }
+      ],
+      "source": {
+        "name": "Wachstumschancengesetz e-invoicing rules",
+        "url": "https://www.bundesfinanzministerium.de/",
+        "fetched_at": "2026-04-15T00:00:00Z",
+        "confidence": "authoritative"
+      }
+    },
+    {
+      "route_from": "FR",
+      "route_to": "FR",
+      "scenario": "B2B",
+      "valid_from": "2026-09-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "factur-x-1.0.07",
+          "format": "Factur-X",
+          "transport": "portal"
+        },
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal"
+        },
+        {
+          "id": "cii-d16b",
+          "format": "CII",
+          "transport": "portal"
+        }
+      ],
+      "source": {
+        "name": "DGFiP e-invoicing reform spec",
+        "url": "https://www.impots.gouv.fr/specifications-externes-b2b",
+        "fetched_at": "2026-05-10T00:00:00Z",
+        "confidence": "authoritative"
+      }
+    },
+    {
+      "route_from": "FR",
+      "route_to": "FR",
+      "scenario": "B2G",
+      "valid_from": "2020-01-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "factur-x-1.0.06",
+          "format": "Chorus Pro",
+          "transport": "portal"
+        },
+        {
+          "id": "factur-x-1.0.07",
+          "format": "Factur-X",
+          "transport": "portal"
+        }
+      ],
+      "source": {
+        "name": "Chorus Pro mandatory profiles",
+        "url": "https://communaute.chorus-pro.gouv.fr/",
+        "fetched_at": "2026-04-20T00:00:00Z",
+        "confidence": "authoritative"
+      }
+    },
+    {
+      "route_from": "DE",
+      "route_to": "FR",
+      "scenario": "B2B",
+      "valid_from": "2026-09-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "peppol-bis-3.0",
+          "format": "Peppol BIS",
+          "transport": "peppol"
+        }
+      ],
+      "source": {
+        "name": "Cross-border Peppol BIS guidance (DE -> FR PDP)",
+        "url": "https://openpeppol.org/",
+        "fetched_at": "2026-04-20T00:00:00Z",
+        "confidence": "high"
+      }
+    },
+    {
+      "route_from": "IT",
+      "route_to": "IT",
+      "scenario": "B2B",
+      "valid_from": "2019-01-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "fatturapa-1.2.2",
+          "format": "FatturaPA",
+          "transport": "portal"
+        }
+      ],
+      "source": {
+        "name": "Agenzia delle Entrate SDI specification",
+        "url": "https://www.fatturapa.gov.it/",
+        "fetched_at": "2025-09-15T00:00:00Z",
+        "confidence": "authoritative"
+      }
+    },
+    {
+      "route_from": "NL",
+      "route_to": "NL",
+      "scenario": "B2G",
+      "valid_from": "2017-01-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "peppol-bis-3.0",
+          "format": "Peppol BIS",
+          "transport": "peppol"
+        }
+      ],
+      "source": {
+        "name": "Dutch government Peppol mandate",
+        "url": "https://www.digitaleoverheid.nl/",
+        "fetched_at": "2025-12-01T00:00:00Z",
+        "confidence": "high"
+      }
+    }
+  ]
+}

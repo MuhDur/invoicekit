@@ -1650,7 +1650,9 @@ version = "0.0.0"
 dependencies = [
  "invoicekit-ir",
  "invoicekit-migration",
+ "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
