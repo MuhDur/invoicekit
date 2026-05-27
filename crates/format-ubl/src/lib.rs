@@ -361,7 +361,7 @@ impl ParseState {
             });
         }
         if is_element(element, "UBLExtension", UBL_EXT_NAMESPACE_URI)
-            && path_ends_ns(stack, &[("UBLExtensions", UBL_EXT_NAMESPACE_URI)])
+            && is_root_ubl_extensions(stack)
         {
             self.current_extension_uri = None;
         }
@@ -427,7 +427,8 @@ impl ParseState {
                 ("UBLExtension", UBL_EXT_NAMESPACE_URI),
                 ("ExtensionURI", UBL_EXT_NAMESPACE_URI),
             ],
-        ) {
+        ) && in_top_level_ubl_extension(stack)
+        {
             self.current_extension_uri = Some(value.to_owned());
             return Ok(());
         }
@@ -723,7 +724,7 @@ impl ParseState {
 
     fn is_invoicekit_metadata_field(&self, stack: &[ParsedElement], field: &str) -> bool {
         self.current_extension_uri.as_deref() == Some(INVOICEKIT_METADATA_EXTENSION_URN)
-            && in_element_ns(stack, "UBLExtension", UBL_EXT_NAMESPACE_URI)
+            && in_top_level_ubl_extension(stack)
             && path_ends_ns(
                 stack,
                 &[
@@ -1428,8 +1429,21 @@ fn in_any(stack: &[ParsedElement], names: &[&str]) -> bool {
         .any(|item| names.iter().any(|name| item.local_name == *name))
 }
 
-fn in_element_ns(stack: &[ParsedElement], name: &str, namespace: &str) -> bool {
-    stack.iter().any(|item| is_element(item, name, namespace))
+fn is_root_ubl_extensions(stack: &[ParsedElement]) -> bool {
+    stack.len() == 2
+        && stack
+            .last()
+            .is_some_and(|item| is_element(item, "UBLExtensions", UBL_EXT_NAMESPACE_URI))
+}
+
+fn in_top_level_ubl_extension(stack: &[ParsedElement]) -> bool {
+    stack.len() >= 3
+        && stack
+            .get(1)
+            .is_some_and(|item| is_element(item, "UBLExtensions", UBL_EXT_NAMESPACE_URI))
+        && stack
+            .get(2)
+            .is_some_and(|item| is_element(item, "UBLExtension", UBL_EXT_NAMESPACE_URI))
 }
 
 fn is_root_child(stack: &[ParsedElement], child: &str) -> bool {
@@ -1460,7 +1474,7 @@ mod tests {
         coverage_for, crate_name, from_xml, to_xml, top_level_coverage, UblCoverageClass,
         UblDocumentKind, UblError, BEAD_ID, INVOICEKIT_EXTENSION_NAMESPACE_URI,
         INVOICEKIT_METADATA_EXTENSION_URN, UBL_CBC_NAMESPACE_URI,
-        UBL_DOCUMENT_FIELDS_EXTENSION_URN,
+        UBL_DOCUMENT_FIELDS_EXTENSION_URN, UBL_EXT_NAMESPACE_URI,
     };
     use invoicekit_canonical::canonicalize_xml;
     use invoicekit_ir::{
@@ -1637,6 +1651,20 @@ mod tests {
         assert_eq!(parsed.meta.tenant_id, "ubl-import");
         assert!(parsed.meta.trace_id.starts_with(BEAD_ID));
         assert_ne!(parsed.meta, document.meta);
+    }
+
+    #[test]
+    fn metadata_extension_requires_top_level_ubl_extensions_container() {
+        let document = fixture(DocumentType::Invoice, 13);
+        let fake_extension = format!(
+            r#"<ext:UBLExtension xmlns:ext="{UBL_EXT_NAMESPACE_URI}"><ext:ExtensionURI>{INVOICEKIT_METADATA_EXTENSION_URN}</ext:ExtensionURI><ext:ExtensionContent><ik:DocumentMeta xmlns:ik="{INVOICEKIT_EXTENSION_NAMESPACE_URI}"><ik:TenantID>foreign-tenant</ik:TenantID><ik:TraceID>foreign-trace</ik:TraceID></ik:DocumentMeta></ext:ExtensionContent></ext:UBLExtension><cac:Party>"#
+        );
+        let xml = to_xml(&document)
+            .unwrap()
+            .replacen("<cac:Party>", &fake_extension, 1);
+
+        let parsed = from_xml(&xml).unwrap();
+        assert_eq!(parsed.meta, document.meta);
     }
 
     #[test]
