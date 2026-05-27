@@ -22,5 +22,8 @@ invoicekit-intake-pdf = { path = "../intake-pdf", version = "0.0.0" }
 lopdf = { version = "0.36", default-features = false }
 thiserror.workspace = true
 
+[dev-dependencies]
+quick-xml = "0.40.1"
+
 [lints]
 workspace = true
