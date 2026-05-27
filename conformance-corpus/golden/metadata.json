@@ -1,0 +1,64 @@
+{
+  "schema_version": "1.0",
+  "fixture_id": "ik-synthetic-engine-abi-golden-0004",
+  "corpus_partition": "synthetic",
+  "publication": "public",
+  "status": "active",
+  "title": "Synthetic engine ABI canonical document golden",
+  "description": "Public golden artifact for the InvoiceKit engine ABI commercial document canonicalization contract.",
+  "artifact": {
+    "path": "engine-abi-v1-commercial-document.json",
+    "media_type": "application/json",
+    "sha256": "333f3a25519efd6f583dab1bb8e06282b52cb3760130f2637c7480143dc086e7",
+    "size_bytes": 4387,
+    "format_family": "internal-json",
+    "document_type": "invoice"
+  },
+  "jurisdiction": {
+    "countries": ["DE", "FR"],
+    "profile": "InvoiceKit engine ABI golden",
+    "syntax": "InvoiceKit ABI JSON",
+    "version": "1"
+  },
+  "license": {
+    "license_id": "Apache-2.0",
+    "copyright_holder": "InvoiceKit Authors",
+    "redistribution": "public-ok"
+  },
+  "provenance": {
+    "source_kind": "generated",
+    "source_name": "InvoiceKit engine ABI golden suite",
+    "generated_by": "InvoiceKit test fixture",
+    "generator_version": "engine-abi-v1",
+    "created_at": "2026-05-27T02:42:00Z"
+  },
+  "pii": {
+    "classification": "synthetic",
+    "redaction_status": "not-required",
+    "contains_personal_data": false,
+    "notes": "All names, tax identifiers, tenant identifiers, and trace identifiers are fictional."
+  },
+  "coverage": {
+    "capabilities": ["serialize"],
+    "scenarios": ["engine abi canonicalization golden", "cross-language fixture"],
+    "negative_case": false
+  },
+  "validation": {
+    "expected_outcome": "valid",
+    "validators": [
+      {
+        "name": "engine ABI golden suite",
+        "version": "1",
+        "result": "pass"
+      }
+    ],
+    "known_gaps": []
+  },
+  "maintenance": {
+    "owner": "InvoiceKit maintainers",
+    "created_at": "2026-05-27",
+    "reviewed_at": "2026-05-27",
+    "review_due": "2027-05-27",
+    "labels": ["synthetic", "golden", "engine-abi"]
+  }
+}

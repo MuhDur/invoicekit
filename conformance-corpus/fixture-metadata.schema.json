@@ -1,0 +1,323 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://invoicekit.dev/schemas/conformance/fixture-metadata-v1.schema.json",
+  "title": "InvoiceKit conformance fixture metadata",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "fixture_id",
+    "corpus_partition",
+    "publication",
+    "status",
+    "title",
+    "description",
+    "artifact",
+    "jurisdiction",
+    "license",
+    "provenance",
+    "pii",
+    "coverage",
+    "validation",
+    "maintenance"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "fixture_id": {
+      "type": "string",
+      "pattern": "^ik-(synthetic|licensed-real|private)-[a-z0-9][a-z0-9-]*-[0-9]{4}$"
+    },
+    "corpus_partition": {
+      "type": "string",
+      "enum": ["synthetic", "licensed-real", "private-regression"]
+    },
+    "publication": {
+      "type": "string",
+      "enum": ["public", "private"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "quarantined", "retired"]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 12
+    },
+    "description": {
+      "type": "string",
+      "minLength": 24
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "media_type",
+        "sha256",
+        "size_bytes",
+        "format_family",
+        "document_type"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._/-]+$"
+        },
+        "media_type": {
+          "type": "string",
+          "enum": ["application/json", "application/xml", "application/pdf"]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "format_family": {
+          "type": "string",
+          "enum": [
+            "ubl",
+            "cii",
+            "factur-x",
+            "fatturapa",
+            "ksef",
+            "zatca",
+            "cfdi",
+            "nfe",
+            "myinvois",
+            "mydata",
+            "verifactu",
+            "internal-json",
+            "other"
+          ]
+        },
+        "document_type": {
+          "type": "string",
+          "enum": ["invoice", "credit_note", "debit_note", "receipt", "gateway_cassette", "other"]
+        }
+      }
+    },
+    "jurisdiction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["countries", "profile", "syntax", "version"],
+      "properties": {
+        "countries": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          }
+        },
+        "profile": {
+          "type": "string",
+          "minLength": 2
+        },
+        "syntax": {
+          "type": "string",
+          "minLength": 2
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "license": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["license_id", "copyright_holder", "redistribution"],
+      "properties": {
+        "license_id": {
+          "type": "string",
+          "enum": ["CC0-1.0", "Apache-2.0", "CC-BY-4.0", "LICENSE-FILE", "PRIVATE-REGRESSION"]
+        },
+        "copyright_holder": {
+          "type": "string",
+          "minLength": 2
+        },
+        "evidence_path": {
+          "type": "string",
+          "pattern": "^(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
+        },
+        "redistribution": {
+          "type": "string",
+          "enum": ["public-ok", "internal-only", "prohibited"]
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_kind", "source_name", "created_at"],
+      "properties": {
+        "source_kind": {
+          "type": "string",
+          "enum": ["generated", "official-sample", "licensed-real", "customer-private"]
+        },
+        "source_name": {
+          "type": "string",
+          "minLength": 2
+        },
+        "source_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "generated_by": {
+          "type": "string",
+          "minLength": 2
+        },
+        "generator_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "pii": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classification", "redaction_status", "contains_personal_data", "notes"],
+      "properties": {
+        "classification": {
+          "type": "string",
+          "enum": ["none", "synthetic", "redacted-real", "private"]
+        },
+        "redaction_status": {
+          "type": "string",
+          "enum": ["not-required", "redacted", "private-retained", "rejected"]
+        },
+        "contains_personal_data": {
+          "type": "boolean"
+        },
+        "redaction_report_path": {
+          "type": "string",
+          "pattern": "^(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 8
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capabilities", "scenarios", "negative_case"],
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "serialize",
+              "parse",
+              "validate",
+              "render",
+              "intake",
+              "transmit",
+              "archive",
+              "redaction-policy"
+            ]
+          }
+        },
+        "scenarios": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3
+          }
+        },
+        "negative_case": {
+          "type": "boolean"
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expected_outcome", "validators", "known_gaps"],
+      "properties": {
+        "expected_outcome": {
+          "type": "string",
+          "enum": ["valid", "invalid", "not-yet-validated"]
+        },
+        "validators": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "version", "result"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 2
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1
+              },
+              "result": {
+                "type": "string",
+                "enum": ["pass", "fail", "not-run"]
+              }
+            }
+          }
+        },
+        "known_gaps": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 4
+          }
+        }
+      }
+    },
+    "maintenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "created_at", "reviewed_at", "review_due", "labels"],
+      "properties": {
+        "owner": {
+          "type": "string",
+          "minLength": 2
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date"
+        },
+        "reviewed_at": {
+          "type": "string",
+          "format": "date"
+        },
+        "review_due": {
+          "type": "string",
+          "format": "date"
+        },
+        "labels": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          }
+        }
+      }
+    }
+  }
+}

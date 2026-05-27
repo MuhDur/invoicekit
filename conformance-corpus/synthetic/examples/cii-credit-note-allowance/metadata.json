@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0",
+  "fixture_id": "ik-synthetic-cii-credit-note-0002",
+  "corpus_partition": "synthetic",
+  "publication": "public",
+  "status": "active",
+  "title": "Synthetic CII credit note with allowance charge",
+  "description": "Small public sample used to prove fixture metadata for CII-style credit note artifacts with allowance coverage labels.",
+  "artifact": {
+    "path": "fixture.xml",
+    "media_type": "application/xml",
+    "sha256": "e18eae6465acc63acde451cda3724d8266d9567a7b83181f9664b0e56ef55ab1",
+    "size_bytes": 1289,
+    "format_family": "cii",
+    "document_type": "credit_note"
+  },
+  "jurisdiction": {
+    "countries": ["DE"],
+    "profile": "InvoiceKit synthetic CII sample",
+    "syntax": "CII-like XML",
+    "version": "D16B-sample"
+  },
+  "license": {
+    "license_id": "CC0-1.0",
+    "copyright_holder": "InvoiceKit Authors",
+    "redistribution": "public-ok"
+  },
+  "provenance": {
+    "source_kind": "generated",
+    "source_name": "InvoiceKit T-120 synthetic sample",
+    "generated_by": "WindyEagle",
+    "generator_version": "manual-t-120-sample-1",
+    "created_at": "2026-05-27T02:30:00Z"
+  },
+  "pii": {
+    "classification": "synthetic",
+    "redaction_status": "not-required",
+    "contains_personal_data": false,
+    "notes": "Document identifiers and business content are fictional."
+  },
+  "coverage": {
+    "capabilities": ["redaction-policy"],
+    "scenarios": ["cii metadata policy sample", "credit note allowance label"],
+    "negative_case": false
+  },
+  "validation": {
+    "expected_outcome": "not-yet-validated",
+    "validators": [
+      {
+        "name": "format validator",
+        "version": "not-run",
+        "result": "not-run"
+      }
+    ],
+    "known_gaps": [
+      "Fixture exercises metadata policy only; format conformance validation is out of scope for T-120."
+    ]
+  },
+  "maintenance": {
+    "owner": "InvoiceKit maintainers",
+    "created_at": "2026-05-27",
+    "reviewed_at": "2026-05-27",
+    "review_due": "2027-05-27",
+    "labels": ["synthetic", "cii", "metadata-policy"]
+  }
+}
