@@ -50,6 +50,7 @@ using IEngineClient client = EngineClients.NativeOrSidecar(
 string response = EngineClients.ProcessEngineAbiJson(client, requestJson);
 ```
 
-The sidecar endpoint accepts the same Engine ABI JSON bytes as the C ABI. When
-the sidecar preserves the C ABI status code it sets the
-`X-InvoiceKit-Status-Code` response header.
+The sidecar endpoint accepts the same Engine ABI JSON bytes as the C ABI. A
+sidecar can preserve the C ABI status code with the `X-InvoiceKit-Status-Code`
+response header; when the header is absent, the SDK derives the status from the
+canonical response body's top-level `status` field.

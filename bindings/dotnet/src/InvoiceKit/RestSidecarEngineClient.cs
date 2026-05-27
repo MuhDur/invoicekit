@@ -3,6 +3,7 @@
 
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
 
 namespace InvoiceKit;
 
@@ -87,7 +88,7 @@ public sealed class RestSidecarEngineClient : IEngineClient
 
             var statusCode = response.Headers.TryGetValues(StatusHeader, out var values)
                 ? ParseStatusHeader(values.FirstOrDefault())
-                : EngineStatusCode.Ok;
+                : DeriveStatusCode(responseBytes);
             return new EngineResult(statusCode, responseBytes);
         }
     }
@@ -128,5 +129,25 @@ public sealed class RestSidecarEngineClient : IEngineClient
         return uint.TryParse(value, out var parsed)
             ? (EngineStatusCode)parsed
             : EngineStatusCode.Error;
+    }
+
+    private static EngineStatusCode DeriveStatusCode(byte[] responseBytes)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(responseBytes);
+            if (!document.RootElement.TryGetProperty("status", out var status))
+            {
+                return EngineStatusCode.Error;
+            }
+
+            return status.GetString() == "ok"
+                ? EngineStatusCode.Ok
+                : EngineStatusCode.Error;
+        }
+        catch (JsonException)
+        {
+            return EngineStatusCode.Error;
+        }
     }
 }

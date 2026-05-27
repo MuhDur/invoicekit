@@ -37,6 +37,28 @@ public sealed class RestSidecarEngineClientTests
     }
 
     [Fact]
+    public void RestSidecarDerivesOkStatusWhenHeaderIsMissing()
+    {
+        using var sidecar = TestSidecar.RespondingWithoutStatusHeader(Encoding.UTF8.GetBytes("{\"status\":\"ok\"}"));
+
+        using var client = EngineClients.RestSidecar(sidecar.Endpoint);
+        var result = client.Process(Array.Empty<byte>());
+
+        Assert.Equal(EngineStatusCode.Ok, result.StatusCode);
+    }
+
+    [Fact]
+    public void RestSidecarDerivesErrorStatusWhenHeaderIsMissing()
+    {
+        using var sidecar = TestSidecar.RespondingWithoutStatusHeader(Encoding.UTF8.GetBytes("{\"status\":\"error\"}"));
+
+        using var client = EngineClients.RestSidecar(sidecar.Endpoint);
+        var result = client.Process(Array.Empty<byte>());
+
+        Assert.Equal(EngineStatusCode.Error, result.StatusCode);
+    }
+
+    [Fact]
     public void RestSidecarMapsInvalidStatusHeaderToError()
     {
         using var sidecar = TestSidecar.Responding(Encoding.UTF8.GetBytes("{\"status\":\"ok\"}"), "not-a-number");
@@ -105,6 +127,11 @@ public sealed class RestSidecarEngineClientTests
         public static TestSidecar Responding(byte[] response, string statusHeader)
         {
             return new TestSidecar(response, statusHeader, HttpStatusCode.OK);
+        }
+
+        public static TestSidecar RespondingWithoutStatusHeader(byte[] response)
+        {
+            return new TestSidecar(response, null, HttpStatusCode.OK);
         }
 
         public static TestSidecar WithHttpStatus(HttpStatusCode statusCode)
