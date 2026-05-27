@@ -1,0 +1,640 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CommercialDocument",
+  "description": "Jurisdiction-agnostic commercial invoice or credit note semantics.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "description": "Schema version.",
+      "$ref": "#/$defs/SchemaVersion",
+      "default": "1.0"
+    },
+    "id": {
+      "description": "Stable document identifier.",
+      "type": "string"
+    },
+    "document_type": {
+      "description": "Document type.",
+      "$ref": "#/$defs/DocumentType"
+    },
+    "issue_date": {
+      "description": "Issue date.",
+      "type": "string"
+    },
+    "tax_point_date": {
+      "description": "Optional tax point date.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "due_date": {
+      "description": "Optional due date.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_number": {
+      "description": "Document number.",
+      "type": "string"
+    },
+    "currency": {
+      "description": "Document currency.",
+      "type": "string"
+    },
+    "supplier": {
+      "description": "Supplier party.",
+      "$ref": "#/$defs/Party"
+    },
+    "customer": {
+      "description": "Customer party.",
+      "$ref": "#/$defs/Party"
+    },
+    "payee": {
+      "description": "Optional payee party.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Party"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "payment_terms": {
+      "description": "Optional payment terms.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PaymentTerms"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "payment_instructions": {
+      "description": "Payment instructions.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PaymentInstruction"
+      },
+      "default": []
+    },
+    "lines": {
+      "description": "Document lines.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DocumentLine"
+      }
+    },
+    "tax_summary": {
+      "description": "Tax summaries.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/TaxCategorySummary"
+      },
+      "default": []
+    },
+    "monetary_total": {
+      "description": "Monetary total.",
+      "$ref": "#/$defs/MonetaryTotal"
+    },
+    "attachments": {
+      "description": "Content-addressed attachments.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Attachment"
+      }
+    },
+    "references": {
+      "description": "Commercial document references.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DocumentReference"
+      }
+    },
+    "notes": {
+      "description": "Human-readable notes.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/LocalizedString"
+      }
+    },
+    "extensions": {
+      "description": "Jurisdiction extension envelopes.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/JurisdictionExtension"
+      },
+      "default": []
+    },
+    "meta": {
+      "description": "Operational metadata.",
+      "$ref": "#/$defs/DocumentMeta"
+    }
+  },
+  "required": [
+    "id",
+    "document_type",
+    "issue_date",
+    "document_number",
+    "currency",
+    "supplier",
+    "customer",
+    "lines",
+    "monetary_total",
+    "meta"
+  ],
+  "$defs": {
+    "SchemaVersion": {
+      "description": "Canonical schema version carried by every serialized document.",
+      "oneOf": [
+        {
+          "description": "Initial public IR version.",
+          "type": "string",
+          "const": "1.0"
+        }
+      ]
+    },
+    "DocumentType": {
+      "description": "Top-level document type.",
+      "oneOf": [
+        {
+          "description": "Commercial invoice.",
+          "type": "string",
+          "const": "invoice"
+        },
+        {
+          "description": "Credit note.",
+          "type": "string",
+          "const": "credit_note"
+        },
+        {
+          "description": "Debit note.",
+          "type": "string",
+          "const": "debit_note"
+        },
+        {
+          "description": "Pro forma invoice.",
+          "type": "string",
+          "const": "pro_forma"
+        },
+        {
+          "description": "Self-billed invoice.",
+          "type": "string",
+          "const": "self_billed"
+        }
+      ]
+    },
+    "Party": {
+      "description": "Commercial party.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Optional stable party identifier.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Legal or trading name.",
+          "type": "string"
+        },
+        "tax_ids": {
+          "description": "Tax identifiers carried by the party.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PartyTaxId"
+          }
+        },
+        "address": {
+          "description": "Postal address.",
+          "$ref": "#/$defs/PostalAddress"
+        },
+        "contact": {
+          "description": "Optional contact details.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Contact"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "address"
+      ]
+    },
+    "PartyTaxId": {
+      "description": "Party tax identifier.",
+      "type": "object",
+      "properties": {
+        "scheme": {
+          "description": "Identifier scheme, such as `vat`.",
+          "type": "string"
+        },
+        "value": {
+          "description": "Identifier value.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scheme",
+        "value"
+      ]
+    },
+    "PostalAddress": {
+      "description": "Postal address for a supplier, customer, payee, or other party.",
+      "type": "object",
+      "properties": {
+        "lines": {
+          "description": "Address lines in display order.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "city": {
+          "description": "Locality or city.",
+          "type": "string"
+        },
+        "subdivision": {
+          "description": "Optional subdivision, state, province, or region.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "postal_code": {
+          "description": "Postal code.",
+          "type": "string"
+        },
+        "country": {
+          "description": "Country code.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "lines",
+        "city",
+        "postal_code",
+        "country"
+      ]
+    },
+    "Contact": {
+      "description": "Contact details for a party.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Optional contact name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "email": {
+          "description": "Optional email address.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phone": {
+          "description": "Optional telephone number.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "PaymentTerms": {
+      "description": "Payment terms attached to the document.",
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "Human-readable payment terms.",
+          "type": "string"
+        },
+        "due_date": {
+          "description": "Optional due date stated in the terms.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "description"
+      ]
+    },
+    "PaymentInstruction": {
+      "description": "Payment instruction.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "Instruction kind.",
+          "$ref": "#/$defs/PaymentInstructionKind"
+        },
+        "account": {
+          "description": "Optional account or payment address.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reference": {
+          "description": "Optional payment reference.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ]
+    },
+    "PaymentInstructionKind": {
+      "description": "Payment rail or instruction kind.",
+      "oneOf": [
+        {
+          "description": "SEPA credit transfer.",
+          "type": "string",
+          "const": "sepa"
+        },
+        {
+          "description": "IBAN or BIC transfer.",
+          "type": "string",
+          "const": "iban_bic"
+        },
+        {
+          "description": "Swiss QR payment.",
+          "type": "string",
+          "const": "swiss_qr"
+        },
+        {
+          "description": "EPC QR payment.",
+          "type": "string",
+          "const": "epc_qr"
+        },
+        {
+          "description": "Saudi ZATCA QR payload.",
+          "type": "string",
+          "const": "zatca_qr"
+        },
+        {
+          "description": "Other instruction kind described by the `account` or `reference`.",
+          "type": "string",
+          "const": "other"
+        }
+      ]
+    },
+    "DocumentLine": {
+      "description": "Document line.",
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "Line description.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Line identifier.",
+          "type": "string"
+        },
+        "quantity": {
+          "description": "Invoiced quantity.",
+          "type": "string"
+        },
+        "unit_code": {
+          "description": "Optional unit code.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unit_price": {
+          "description": "Unit price amount.",
+          "type": "string"
+        },
+        "line_extension_amount": {
+          "description": "Line extension amount.",
+          "type": "string"
+        },
+        "tax_category": {
+          "description": "Optional tax category code.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "extensions": {
+          "description": "Line-level jurisdiction extensions.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/JurisdictionExtension"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "description",
+        "quantity",
+        "unit_price",
+        "line_extension_amount"
+      ]
+    },
+    "JurisdictionExtension": {
+      "description": "Polymorphic jurisdiction or profile extension payload.",
+      "type": "object",
+      "properties": {
+        "urn": {
+          "description": "Uniform resource name for the extension schema.",
+          "type": "string"
+        },
+        "payload": {
+          "description": "Extension payload validated by the country or profile registry."
+        }
+      },
+      "required": [
+        "urn",
+        "payload"
+      ]
+    },
+    "TaxCategorySummary": {
+      "description": "Tax category summary.",
+      "type": "object",
+      "properties": {
+        "category_code": {
+          "description": "Tax category code.",
+          "type": "string"
+        },
+        "taxable_amount": {
+          "description": "Taxable amount.",
+          "type": "string"
+        },
+        "tax_amount": {
+          "description": "Tax amount.",
+          "type": "string"
+        },
+        "tax_rate": {
+          "description": "Optional tax rate.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "category_code",
+        "taxable_amount",
+        "tax_amount"
+      ]
+    },
+    "MonetaryTotal": {
+      "description": "Document monetary totals.",
+      "type": "object",
+      "properties": {
+        "line_extension_amount": {
+          "description": "Sum of line extension amounts.",
+          "type": "string"
+        },
+        "tax_exclusive_amount": {
+          "description": "Tax-exclusive amount.",
+          "type": "string"
+        },
+        "tax_inclusive_amount": {
+          "description": "Tax-inclusive amount.",
+          "type": "string"
+        },
+        "allowance_total_amount": {
+          "description": "Optional allowance total.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "charge_total_amount": {
+          "description": "Optional charge total.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "prepaid_amount": {
+          "description": "Optional prepaid amount.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payable_amount": {
+          "description": "Payable amount.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "line_extension_amount",
+        "tax_exclusive_amount",
+        "tax_inclusive_amount",
+        "payable_amount"
+      ]
+    },
+    "Attachment": {
+      "description": "Content-addressed attachment reference.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "Attachment role or semantic type.",
+          "type": "string"
+        },
+        "digest": {
+          "description": "Content digest.",
+          "type": "string"
+        },
+        "media_type": {
+          "description": "Media type.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "digest",
+        "media_type"
+      ]
+    },
+    "DocumentReference": {
+      "description": "Reference to another commercial document.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "Reference type, such as purchase order.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Referenced identifier.",
+          "type": "string"
+        },
+        "issue_date": {
+          "description": "Optional referenced issue date.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ]
+    },
+    "LocalizedString": {
+      "description": "Localized human text.",
+      "type": "object",
+      "properties": {
+        "language": {
+          "description": "BCP 47 language tag.",
+          "type": "string"
+        },
+        "text": {
+          "description": "Localized text value.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "language",
+        "text"
+      ]
+    },
+    "DocumentMeta": {
+      "description": "Operational metadata for a document.",
+      "type": "object",
+      "properties": {
+        "tenant_id": {
+          "description": "Tenant identifier.",
+          "type": "string"
+        },
+        "trace_id": {
+          "description": "Trace identifier for audit correlation.",
+          "type": "string"
+        },
+        "source_system": {
+          "description": "Optional source system.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "tenant_id",
+        "trace_id"
+      ]
+    }
+  }
+}
