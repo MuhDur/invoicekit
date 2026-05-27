@@ -8,6 +8,7 @@
 //! See [`plans/PLAN.md`](../../plans/PLAN.md) for the architectural role
 //! of this crate.
 
+pub mod admin;
 pub mod commands;
 
 /// Canonical Cargo package name of this crate.
