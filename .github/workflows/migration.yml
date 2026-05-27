@@ -23,15 +23,22 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build migrate-archive binary
-        run: cargo build -p invoicekit-cli --bin migrate-archive --locked
-      - name: Identity migration smoke (v1.0 -> v1.0)
+      - name: Build invoicekit + migrate-archive shim binaries
+        run: |
+          cargo build -p invoicekit-cli --bin invoicekit --locked
+          cargo build -p invoicekit-cli --bin migrate-archive --locked
+      - name: Identity migration smoke via the published `invoicekit migrate-archive`
         # The bead's CI gate (migrate every prior version's fixture set
         # on every PR) is vacuous today because only V1_0 exists; the
-        # smoke test exercises the binary against a generated synthetic
-        # archive of three V1_0 documents and asserts the binary exits 0
-        # plus the files round-trip identically. When a V1_1 / V2_0
-        # variant ships, extend the matrix below to cover each pair.
+        # smoke test exercises the published `invoicekit migrate-archive`
+        # subcommand against a generated archive of three V1_0 documents
+        # and asserts identity round-trip. When a V1_1 / V2_0 variant
+        # ships, extend this job to a matrix covering each pair.
+        #
+        # Both the `invoicekit migrate-archive` and the standalone
+        # `migrate-archive` shim invocations dispatch through the same
+        # library runner; exercising the published path is what closes
+        # the T-026 follow-up flagged in PR #33's fresh-eyes review.
         run: |
           set -euo pipefail
           ARCHIVE="$(mktemp -d)/archive"
@@ -45,8 +52,10 @@ jobs:
           }
           JSON
           done
-          ./target/debug/migrate-archive --from-version=1.0 --to-version=1.0 "$ARCHIVE"
+          ./target/debug/invoicekit migrate-archive --from-version=1.0 --to-version=1.0 "$ARCHIVE"
           for i in 1 2 3; do
             grep -q '"schema_version": "1.0"' "$ARCHIVE/sample-$i.json"
             grep -q "v1-untouched-$i" "$ARCHIVE/sample-$i.json"
           done
+          # Also exercise the standalone shim so both paths stay live.
+          ./target/debug/migrate-archive --from-version=1.0 --to-version=1.0 "$ARCHIVE"
