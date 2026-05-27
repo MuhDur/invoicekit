@@ -1,0 +1,88 @@
+{{/*
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2026 The InvoiceKit Authors
+*/}}
+{{- if .Values.archive.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "invoicekit.fullname" . }}-archive
+  labels:
+    {{- include "invoicekit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: archive
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9000
+      targetPort: 9000
+      protocol: TCP
+      name: s3
+    - port: 9001
+      targetPort: 9001
+      protocol: TCP
+      name: console
+  selector:
+    {{- include "invoicekit.selectorLabels" (merge (dict "component" "archive") .) | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "invoicekit.fullname" . }}-archive
+  labels:
+    {{- include "invoicekit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: archive
+spec:
+  serviceName: {{ include "invoicekit.fullname" . }}-archive
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "invoicekit.selectorLabels" (merge (dict "component" "archive") .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "invoicekit.selectorLabels" (merge (dict "component" "archive") .) | nindent 8 }}
+    spec:
+      containers:
+        - name: archive
+          image: {{ printf "%s:%s" .Values.archive.image.repository .Values.archive.image.tag }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args: ["server", "/data", "--console-address", ":9001"]
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.archive.existingSecret }}
+                  key: root_user
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.archive.existingSecret }}
+                  key: root_password
+          ports:
+            - containerPort: 9000
+              name: s3
+            - containerPort: 9001
+              name: console
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: s3
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.archive.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        {{- with .Values.archive.storage.storageClassName }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.archive.storage.size }}
+{{- end }}
