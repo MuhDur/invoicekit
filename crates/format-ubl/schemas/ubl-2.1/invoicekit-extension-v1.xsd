@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2026 The InvoiceKit Authors
+-->
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns:ik="urn:invoicekit:ubl:extension"
+            targetNamespace="urn:invoicekit:ubl:extension"
+            elementFormDefault="qualified"
+            attributeFormDefault="unqualified"
+            version="1.0">
+  <xsd:element name="DocumentMeta" type="ik:DocumentMetaType"/>
+
+  <xsd:complexType name="DocumentMetaType">
+    <xsd:sequence>
+      <xsd:element name="TenantID" type="xsd:string" minOccurs="1" maxOccurs="1"/>
+      <xsd:element name="TraceID" type="xsd:string" minOccurs="1" maxOccurs="1"/>
+      <xsd:element name="SourceSystem" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+    </xsd:sequence>
+  </xsd:complexType>
+</xsd:schema>

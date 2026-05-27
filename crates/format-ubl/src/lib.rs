@@ -27,12 +27,17 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 mod mapping;
+mod schema;
 
 pub use mapping::{
     coverage_for, top_level_coverage, UblCoverageClass, UblDocumentKind, UblElementCoverage,
     CREDIT_NOTE_ELEMENT_COVERAGE, INVOICEKIT_METADATA_EXTENSION_URN, INVOICE_ELEMENT_COVERAGE,
     UBL_2_1_CREDIT_NOTE_SCHEMA_URI, UBL_2_1_INVOICE_SCHEMA_URI, UBL_2_1_OS_SPEC_URI,
     UBL_DOCUMENT_FIELDS_EXTENSION_URN,
+};
+pub use schema::{
+    validate_oasis_ubl_2_1_schema, UblSchemaValidatedFixture, UblSchemaValidationFinding,
+    UblSchemaValidationReport, OASIS_UBL_2_1_SCHEMA_VALIDATED_FIXTURES,
 };
 
 const BEAD_ID: &str = "invoices-t-040-ubl-2-1-parser-serializer-1v2";
@@ -105,6 +110,14 @@ pub enum UblError {
     /// Canonical XML output could not be produced.
     #[error("could not canonicalize UBL XML output: {0}")]
     Canonicalize(#[from] XmlCanonicalizeError),
+    /// OASIS UBL 2.1 XSD validation harness failed before producing findings.
+    #[error("OASIS UBL 2.1 schema harness failed during {operation}: {message}; hint: check the vendored schema corpus and XML well-formedness")]
+    SchemaHarness {
+        /// Operation that failed.
+        operation: &'static str,
+        /// Validator or I/O diagnostic.
+        message: String,
+    },
 }
 
 /// Serialize an InvoiceKit commercial document into deterministic UBL 2.1 XML.
@@ -974,22 +987,29 @@ fn serialize_document(
     );
     write_text_element(&mut xml, "cbc:UUID", document.id.as_str());
     write_text_element(&mut xml, "cbc:IssueDate", document.issue_date.as_str());
-    if let Some(date) = &document.tax_point_date {
-        write_text_element(&mut xml, "cbc:TaxPointDate", date.as_str());
+    if document.document_type == DocumentType::Invoice {
+        if let Some(date) = &document.due_date {
+            write_text_element(&mut xml, "cbc:DueDate", date.as_str());
+        }
     }
     if document.document_type == DocumentType::Invoice {
         write_text_element(&mut xml, "cbc:InvoiceTypeCode", "380");
     } else {
+        if let Some(date) = &document.tax_point_date {
+            write_text_element(&mut xml, "cbc:TaxPointDate", date.as_str());
+        }
         write_text_element(&mut xml, "cbc:CreditNoteTypeCode", "381");
     }
-    write_text_element(&mut xml, "cbc:DocumentCurrencyCode", &currency);
-    if let Some(date) = &document.due_date {
-        write_text_element(&mut xml, "cbc:DueDate", date.as_str());
-    }
-    write_ubl_document_fields(&mut xml, document);
     for note in &document.notes {
         write_note(&mut xml, note);
     }
+    if document.document_type == DocumentType::Invoice {
+        if let Some(date) = &document.tax_point_date {
+            write_text_element(&mut xml, "cbc:TaxPointDate", date.as_str());
+        }
+    }
+    write_text_element(&mut xml, "cbc:DocumentCurrencyCode", &currency);
+    write_ubl_document_fields(&mut xml, document);
     write_party(
         &mut xml,
         "cac:AccountingSupplierParty",
@@ -1171,10 +1191,17 @@ fn write_tax_total(xml: &mut String, summaries: &[TaxCategorySummary], currency:
         if let Some(rate) = &summary.tax_rate {
             write_text_element(xml, "cbc:Percent", &rate.inner().to_string());
         }
+        write_tax_scheme(xml);
         xml.push_str("</cac:TaxCategory>");
         xml.push_str("</cac:TaxSubtotal>");
     }
     xml.push_str("</cac:TaxTotal>");
+}
+
+fn write_tax_scheme(xml: &mut String) {
+    xml.push_str("<cac:TaxScheme>");
+    write_text_element(xml, "cbc:ID", "VAT");
+    xml.push_str("</cac:TaxScheme>");
 }
 
 fn write_monetary_total(xml: &mut String, total: &MonetaryTotal, currency: &str) {
@@ -1243,6 +1270,7 @@ fn write_line(xml: &mut String, document_type: DocumentType, line: &DocumentLine
     if let Some(category) = &line.tax_category {
         xml.push_str("<cac:ClassifiedTaxCategory>");
         write_text_element(xml, "cbc:ID", category);
+        write_tax_scheme(xml);
         xml.push_str("</cac:ClassifiedTaxCategory>");
     }
     xml.push_str("</cac:Item>");
@@ -1471,9 +1499,10 @@ mod tests {
     use proptest::prelude::*;
 
     use super::{
-        coverage_for, crate_name, from_xml, to_xml, top_level_coverage, UblCoverageClass,
-        UblDocumentKind, UblError, BEAD_ID, INVOICEKIT_EXTENSION_NAMESPACE_URI,
-        INVOICEKIT_METADATA_EXTENSION_URN, UBL_CBC_NAMESPACE_URI,
+        coverage_for, crate_name, from_xml, to_xml, top_level_coverage,
+        validate_oasis_ubl_2_1_schema, UblCoverageClass, UblDocumentKind, UblError, BEAD_ID,
+        INVOICEKIT_EXTENSION_NAMESPACE_URI, INVOICEKIT_METADATA_EXTENSION_URN,
+        OASIS_UBL_2_1_SCHEMA_VALIDATED_FIXTURES, UBL_CBC_NAMESPACE_URI,
         UBL_DOCUMENT_FIELDS_EXTENSION_URN, UBL_EXT_NAMESPACE_URI,
     };
     use invoicekit_canonical::canonicalize_xml;
@@ -1681,6 +1710,69 @@ mod tests {
             let xml = to_xml(&document).unwrap();
             assert_eq!(from_xml(&xml).unwrap(), document);
         }
+    }
+
+    #[test]
+    fn oasis_ubl_2_1_schema_validated_fixtures_are_documented() {
+        assert_eq!(OASIS_UBL_2_1_SCHEMA_VALIDATED_FIXTURES.len(), 2);
+        assert_eq!(
+            OASIS_UBL_2_1_SCHEMA_VALIDATED_FIXTURES[0].document_kind,
+            UblDocumentKind::Invoice
+        );
+        assert_eq!(
+            OASIS_UBL_2_1_SCHEMA_VALIDATED_FIXTURES[1].document_kind,
+            UblDocumentKind::CreditNote
+        );
+    }
+
+    #[test]
+    fn serialized_invoice_fixture_passes_oasis_ubl_2_1_xsd() {
+        let xml = to_xml(&fixture(DocumentType::Invoice, 20)).unwrap();
+        let report = validate_oasis_ubl_2_1_schema(&xml).unwrap();
+
+        assert_eq!(report.document_kind, UblDocumentKind::Invoice);
+        assert_eq!(report.schema_file, "xsd/maindoc/UBL-Invoice-2.1.xsd");
+        assert!(
+            report.is_valid(),
+            "expected schema-valid Invoice fixture, findings: {:?}",
+            report.findings
+        );
+    }
+
+    #[test]
+    fn serialized_credit_note_fixture_passes_oasis_ubl_2_1_xsd() {
+        let xml = to_xml(&fixture(DocumentType::CreditNote, 21)).unwrap();
+        let report = validate_oasis_ubl_2_1_schema(&xml).unwrap();
+
+        assert_eq!(report.document_kind, UblDocumentKind::CreditNote);
+        assert_eq!(report.schema_file, "xsd/maindoc/UBL-CreditNote-2.1.xsd");
+        assert!(
+            report.is_valid(),
+            "expected schema-valid CreditNote fixture, findings: {:?}",
+            report.findings
+        );
+    }
+
+    #[test]
+    fn schema_harness_rejects_invalid_credit_note_due_date() {
+        let xml = to_xml(&fixture(DocumentType::CreditNote, 22))
+            .unwrap()
+            .replacen(
+                "<cbc:DocumentCurrencyCode",
+                "<cbc:DueDate xmlns:cbc=\"urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2\">2026-06-25</cbc:DueDate><cbc:DocumentCurrencyCode",
+                1,
+            );
+        let report = validate_oasis_ubl_2_1_schema(&xml).unwrap();
+
+        assert!(!report.is_valid());
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.message.contains("DueDate")),
+            "expected DueDate validation finding, got {:?}",
+            report.findings
+        );
     }
 
     #[test]

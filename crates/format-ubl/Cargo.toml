@@ -18,6 +18,7 @@ name = "invoicekit_format_ubl"
 path = "src/lib.rs"
 
 [dependencies]
+fastxml = "0.8.1"
 invoicekit-canonical = { path = "../canonical", version = "0.0.0" }
 invoicekit-ir = { path = "../ir", version = "0.0.0" }
 quick-xml = "0.40.1"
