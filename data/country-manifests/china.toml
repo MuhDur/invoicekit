@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-7a0 country feasibility manifest: China.
+#
+# China's STA (State Taxation Administration) is rolling out a
+# unified fully-digital e-invoice system (Quanguoji shuzihua dianzi
+# fapiao) replacing the legacy Special VAT Invoice (Zengzhishui
+# zhuanyong fapiao) and General VAT Invoice flows. The new system
+# eliminates pre-printed Golden Tax invoice paper and runs through
+# the National Unified Electronic Invoice Service Platform.
+
+schema_version = "1.0"
+country = "CN"
+country_name = "China"
+program = "Fully Digital e-Invoice (Quanguoji shuzihua dianzi fapiao) — STA"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-7a0-manifest-china-tdb"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "STA — fully digital e-invoice portal"
+url = "http://www.chinatax.gov.cn/chinatax/n810219/n810744/n4438089/index.html"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "STA Announcement 2021 No 30 (pilot legal framework)"
+url = "http://www.chinatax.gov.cn/chinatax/n810341/n810825/c5169814/content.html"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "National Unified Electronic Invoice Service Platform technical guideline"
+url = "https://etax.chinatax.gov.cn/"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "partner_gated"
+notes = """
+STA does not operate a public sandbox; the National Unified
+Electronic Invoice Service Platform is accessible only through
+approved tax-service-platform vendors (Aisino, Baiwang, Servyou,
+PingAn DianDian) who provide both legacy Golden Tax integration
+and the new fully digital platform connectivity. Sandbox access
+is partner-mediated; production access requires a Chinese
+Taxpayer Identification Number (Naxueren shibie hao).
+"""
+endpoint = "https://etax-test.chinatax.gov.cn/api/v1/invoice/submit"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_CN_STA_TOKEN"
+
+[production]
+endpoint = "https://etax.chinatax.gov.cn/api/v1/invoice/submit"
+production_credentials_env_var = "INVOICEKIT_PROD_CN_STA_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every fully digital e-invoice must be signed with a Chinese
+SM2/SM3-based digital signature using a Chinese Cryptography
+Algorithm Administration-licensed CA certificate (Beijing CA,
+Tianjin CA, Shanghai CA). The certificate is tied to the
+issuer's Naxueren shibie hao. The legacy Golden Tax system
+required physical UKey tokens; the fully digital system uses
+software-based certificates plus mandatory face-recognition
+verification for invoice issuance above thresholds.
+"""
+smart_card_requirement = "common_in_legacy_golden_tax"
+hsm_requirement = "common_for_high_volume_taxpayers"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses cannot obtain a Naxueren shibie hao directly;
+they must establish a Chinese entity (WFOE, JV, or representative
+office) or appoint a Chinese tax representative. Cross-border
+B2B inbound transactions typically use the Chinese buyer's
+self-invoicing path; the cross-border digital-services VAT
+regime is in active development.
+"""
+
+[validator]
+backend = "rest:sta-china"
+backend_notes = """
+STA is the authoritative validator: it accepts the fully digital
+e-invoice JSON/XML envelope, runs server-side validation, and
+returns rule-level diagnostics. The rust side runs a minimal
+pre-validator (Naxueren shibie hao checksum, VAT rate enumeration
+13/9/6/0%, invoice number format) before submission.
+"""
+
+[interop]
+formats = ["STA fully digital e-invoice (JSON/XML, OFD container)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+China's e-invoice system is entirely national; Peppol envelopes
+are NOT accepted. There is no PEPPOL PINT-CN profile.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/china"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/china"
+
+[follow_ups]
+items = [
+    "Track STA's full mandate timeline for fully digital e-invoice (currently rolling out province-by-province)",
+    "Pin a Chinese tax-service-platform partner for the hosted layer's Naxueren shibie hao-holding entity",
+    "Add support for the OFD (Open Fixed-layout Document) container format for invoice rendering",
+]
