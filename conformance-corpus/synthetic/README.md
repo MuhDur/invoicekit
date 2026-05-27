@@ -8,7 +8,9 @@ Synthetic fixtures are fictional and public. Each fixture directory must include
 The `examples/` directory contains small T-120 samples that prove the metadata
 contract before the larger generated corpus lands.
 
-The `cii-d16b-profiled/` directory contains the `invoices-h4b3` synthetic CII corpus.
+The `cii-d16b-profiled/` directory contains the active `invoices-h4b3`
+synthetic CII corpus. The older `cii-d16b/` corpus is retained as retired
+legacy parser-regression data only; it is not profile-conformance coverage.
 Regenerate it with:
 
 ```bash
