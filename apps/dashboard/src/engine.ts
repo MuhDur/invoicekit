@@ -2,6 +2,8 @@ export type BillingState = "trial" | "active" | "past_due" | "suspended";
 
 export type ActivityKind = "sent" | "validated" | "failed" | "archived";
 
+export type ApiKeyStatus = "active" | "revoked";
+
 export type AuditOutcome = "denied" | "failed" | "succeeded";
 
 export type RecentErrorSeverity = "critical" | "info" | "warning";
@@ -45,6 +47,28 @@ export interface TenantOverview {
   readonly recentActivity: readonly RecentActivityItem[];
   readonly validationFailures: number;
   readonly generatedAt: string;
+}
+
+export interface ApiKey {
+  readonly id: string;
+  readonly name: string;
+  readonly prefix: string;
+  readonly scopes: readonly string[];
+  readonly status: ApiKeyStatus;
+  readonly createdAt: string;
+  readonly lastUsedAt?: string;
+  readonly expiresAt?: string;
+}
+
+export interface ApiKeyPage {
+  readonly items: readonly ApiKey[];
+  readonly pageInfo: TransmissionPageInfo;
+}
+
+export interface ApiKeyListParams {
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly status?: ApiKeyStatus;
 }
 
 export interface UsageMonth {
@@ -161,6 +185,7 @@ export interface TransmissionListParams {
 }
 
 export interface DashboardEngineClient {
+  listApiKeys(params?: ApiKeyListParams): Promise<ApiKeyPage>;
   listAuditEvents(params?: AuditEventListParams): Promise<AuditEventPage>;
   listRecentErrors(params?: RecentErrorListParams): Promise<RecentErrorPage>;
   listTeamMembers(params?: TeamMemberListParams): Promise<TeamMemberPage>;
@@ -201,6 +226,16 @@ export function createHttpDashboardClient(options: EngineRpcClientOptions = {}):
   }
 
   return {
+    async listApiKeys(params = {}) {
+      return callEngineMethod({
+        endpoint,
+        fetcher,
+        method: "engine.list_api_keys",
+        params,
+        parse: parseApiKeyPage,
+        requestId: requestIdFactory()
+      });
+    },
     async listAuditEvents(params = {}) {
       return callEngineMethod({
         endpoint,
@@ -289,6 +324,7 @@ interface EngineMethodCall<Result> {
   readonly endpoint: string;
   readonly fetcher: FetchLike;
   readonly method:
+    | "engine.list_api_keys"
     | "engine.list_audit_events"
     | "engine.list_recent_errors"
     | "engine.list_team_members"
@@ -301,7 +337,14 @@ interface EngineMethodCall<Result> {
 }
 
 async function callEngineMethod<
-  Result extends AuditEventPage | RecentErrorPage | TeamMemberPage | TenantOverview | TenantUsage | TransmissionPage
+  Result extends
+    | ApiKeyPage
+    | AuditEventPage
+    | RecentErrorPage
+    | TeamMemberPage
+    | TenantOverview
+    | TenantUsage
+    | TransmissionPage
 >({
   endpoint,
   fetcher,
@@ -372,6 +415,32 @@ function parseTenantOverview(value: unknown): TenantOverview {
     validationFailures: readNumber(record, "validationFailures", "tenant overview"),
     generatedAt: readString(record, "generatedAt", "tenant overview")
   };
+}
+
+function parseApiKeyPage(value: unknown): ApiKeyPage {
+  const record = asRecord(value, "API key page");
+
+  return {
+    items: readArray(record, "items", "API key page").map(parseApiKey),
+    pageInfo: parseTransmissionPageInfo(readRequired(record, "pageInfo", "API key page"))
+  };
+}
+
+function parseApiKey(value: unknown): ApiKey {
+  const record = asRecord(value, "API key");
+  const apiKey: ApiKey = {
+    id: readString(record, "id", "API key"),
+    name: readString(record, "name", "API key"),
+    prefix: readString(record, "prefix", "API key"),
+    scopes: readStringArray(record, "scopes", "API key"),
+    status: readApiKeyStatus(record, "status", "API key"),
+    createdAt: readString(record, "createdAt", "API key")
+  };
+
+  appendOptionalStringField(apiKey, "lastUsedAt", readOptionalString(record, "lastUsedAt", "API key"));
+  appendOptionalStringField(apiKey, "expiresAt", readOptionalString(record, "expiresAt", "API key"));
+
+  return apiKey;
 }
 
 function parseDocumentsSent(value: unknown): DocumentsSentGauge {
@@ -590,6 +659,14 @@ function readOptionalString(record: Record<string, unknown>, key: string, label:
   return value;
 }
 
+function appendOptionalStringField(target: object, key: string, value: string | undefined): void {
+  if (value === undefined) {
+    return;
+  }
+
+  Object.assign(target, { [key]: value });
+}
+
 function readNumber(record: Record<string, unknown>, key: string, label: string): number {
   const value = readRequired(record, key, label);
 
@@ -632,6 +709,26 @@ function readArray(record: Record<string, unknown>, key: string, label: string):
   }
 
   return value;
+}
+
+function readStringArray(record: Record<string, unknown>, key: string, label: string): readonly string[] {
+  return readArray(record, key, label).map((value) => {
+    if (typeof value !== "string") {
+      throw new EngineRpcError(`Invalid ${label}: ${key} must contain only strings`, { data: record });
+    }
+
+    return value;
+  });
+}
+
+function readApiKeyStatus(record: Record<string, unknown>, key: string, label: string): ApiKeyStatus {
+  const value = readString(record, key, label);
+
+  if (value === "active" || value === "revoked") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported API key status`, { data: record });
 }
 
 function readBillingState(record: Record<string, unknown>, key: string, label: string): BillingState {
