@@ -1,0 +1,127 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-776 country feasibility manifest: Greece.
+#
+# Phase 2.5 prerequisite for `crates/report-gr-mydata`. Greece's
+# myDATA platform (Independent Authority for Public Revenue, AADE)
+# requires real-time reporting of every B2B and B2G transaction;
+# B2C summaries follow at month end.
+
+schema_version = "1.0"
+country = "GR"
+country_name = "Greece"
+program = "myDATA (AADE)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-776-manifest-greece-uo1"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "AADE — myDATA portal"
+url = "https://www.aade.gr/mydata"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "myDATA REST API technical documentation"
+url = "https://www.aade.gr/sites/default/files/2024-09/myDATA_API_Documentation_v1.0.10.pdf"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "AADE law (4308/2014, Hellenic Accounting Standards)"
+url = "https://www.aade.gr/sites/default/files/2019-04/n4308_2014.pdf"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "AADE accredited e-invoicing providers list"
+url = "https://www.aade.gr/epicheireseis/forologikes-yperesies/pistopoiemenoi-paroxoi-ilektronikis-timologisis"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "requires_local_tax_id"
+notes = """
+The myDATA sandbox at mydata-dev.aade.gr is publicly reachable but
+requires a sandbox token bound to a Greek AFM (Arithmos Forologikou
+Mitroou). AADE issues sandbox AFMs to accredited e-invoicing
+providers on request; ad-hoc developers can obtain a test AFM
+through a Greek tax representative. Foreign-only providers must
+either become an accredited provider (a documented multi-month
+process) or work through one of the existing accredited providers.
+"""
+endpoint = "https://mydata-dev.aade.gr/myDATA/RestApi"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_GR_MYDATA_TOKEN"
+
+[production]
+endpoint = "https://mydatapi.aade.gr/myDATA/RestApi"
+production_credentials_env_var = "INVOICEKIT_PROD_GR_MYDATA_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_optional"
+qualified_seal_notes = """
+myDATA submissions authenticate with a per-tenant Subscription Key
+plus a User ID + per-call HMAC; a qualified electronic seal is NOT
+required for the API call itself. However, invoices issued through
+an accredited e-invoicing provider (which is one of the two paths
+recognised by AADE for B2B documents) MUST carry the provider's
+qualified digital seal. Customers using their own ERP without an
+accredited provider can submit via myDATA directly with the lighter
+HMAC-only authentication.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "required_for_accredited_provider"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign sellers without a Greek establishment that issue invoices
+to Greek B2B customers must register for Greek VAT (obtain an AFM)
+or appoint a Greek fiscal representative to do so. Distance-sales
+to Greek consumers below the EU One-Stop Shop threshold can use
+OSS instead. The fiscal representative submits myDATA data and
+carries joint VAT liability for the foreign seller's Greek
+transactions.
+"""
+
+[validator]
+backend = "rest:aade-mydata"
+backend_notes = """
+myDATA submissions are validated server-side by AADE itself, which
+returns rule-level diagnostics in the response payload. The rust
+side runs a minimal pre-validator (required fields, AFM format,
+VAT rate enumeration) before the REST call to avoid trivially
+malformed submissions consuming AADE quota. A future migration to
+validator-saxon for offline XSD checking is queued behind the
+release of AADE's official XSD bundle, currently distributed only
+as part of the API documentation PDF.
+"""
+
+[interop]
+formats = ["myDATA REST JSON (PEPPOL BIS 3.0 mapping documented by AADE)"]
+peppol_bis_accepted = true
+peppol_pint_accepted = false
+notes = """
+Greece's PEPPOL access-point operators (publicly listed) can
+translate inbound Peppol BIS Billing 3.0 envelopes into myDATA
+submissions automatically. Direct Peppol BIS acceptance into the
+myDATA REST API is mediated by the accredited-provider tier;
+InvoiceKit's hosted layer will integrate via an accredited provider
+to avoid the AADE accreditation queue in Year 1.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/greece"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/greece"
+
+[follow_ups]
+items = [
+    "Choose a Greek accredited e-invoicing provider as the production access point and document the partner-pricing schedule",
+    "When AADE publishes an official myDATA XSD bundle, migrate validator.backend to jvm:saxon for offline pre-validation",
+    "Track the rollout of the myDATA B2C summary submissions deadline (currently month-end) so the scheduler honours it",
+]
