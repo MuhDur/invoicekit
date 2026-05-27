@@ -206,7 +206,9 @@ fn strict_gate_no_false_positives_on_corpus_at_large() {
         total >= 20,
         "expected at least 20 corpus files, got {total}"
     );
-    let allowed = (total as f64 * 0.01).ceil() as usize;
+    // 1% of `total`, rounded up so a 20-file corpus tolerates 1
+    // false positive (matches the spirit of the strict gate).
+    let allowed = total.div_ceil(100).max(1);
     assert!(
         false_positives.len() <= allowed,
         "false-positive rate {} / {total} exceeds 1% (allowed up to {allowed}):\n  - {}",
