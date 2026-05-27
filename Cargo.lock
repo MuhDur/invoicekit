@@ -2218,20 +2218,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "invoicekit-inbound-peppol"
-version = "0.0.0"
-dependencies = [
- "invoicekit-format-cii",
- "invoicekit-format-detect",
- "invoicekit-format-ubl",
- "invoicekit-ir",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "invoicekit-intake-ocr"
 version = "0.0.0"
 
@@ -2650,23 +2636,13 @@ name = "invoicekit-transmit-peppol"
 version = "0.0.0"
 
 [[package]]
-name = "invoicekit-transmit-peppol-native-as4"
+name = "invoicekit-transmit-peppol-phase4"
 version = "0.0.0"
 dependencies = [
- "invoicekit-format-ubl",
- "invoicekit-ir",
  "invoicekit-reconcile",
  "pollster",
  "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "invoicekit-transmit-peppol-native-as4-receive"
-version = "0.0.0"
-dependencies = [
- "invoicekit-transmit-peppol-native-as4",
- "pollster",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 

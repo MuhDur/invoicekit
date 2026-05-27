@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+[package]
+name = "invoicekit-transmit-peppol-phase4"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Rust Phase4Adapter implementation of GatewayAdapter that delegates to the validator-phase4 JSON-RPC sidecar. Used as InvoiceKit's AS4 reference / differential-test oracle (T-092 / T-094)."
+publish = false
+
+[lib]
+name = "invoicekit_transmit_peppol_phase4"
+path = "src/lib.rs"
+
+[dependencies]
+invoicekit-reconcile = { path = "../reconcile", version = "0.0.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
+
+[dev-dependencies]
+pollster = "0.4"
+
+[lints]
+workspace = true

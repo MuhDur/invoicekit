@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2026 The InvoiceKit Authors
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>dev.invoicekit</groupId>
+  <artifactId>phase4-server</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+
+  <name>InvoiceKit phase4 sidecar</name>
+  <description>
+    JVM sidecar that wraps Helger's phase4 AS4 reference
+    implementation behind the InvoiceKit JSON-RPC contract
+    documented at docs/operators/PHASE4-REFERENCE-ADAPTER.md.
+  </description>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.source>21</maven.compiler.source>
+    <maven.compiler.target>21</maven.compiler.target>
+    <phase4.version>3.0.4</phase4.version>
+    <jackson.version>2.18.1</jackson.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.helger.phase4</groupId>
+      <artifactId>phase4-peppol-client</artifactId>
+      <version>${phase4.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.helger.peppol</groupId>
+      <artifactId>peppol-smp-client</artifactId>
+      <version>9.4.0</version>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.11.3</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>phase4-server</finalName>
+    <plugins>
+      <plugin>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <version>3.8.1</version>
+        <executions>
+          <execution>
+            <id>copy-runtime-deps</id>
+            <phase>package</phase>
+            <goals><goal>copy-dependencies</goal></goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/dependency</outputDirectory>
+              <includeScope>runtime</includeScope>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

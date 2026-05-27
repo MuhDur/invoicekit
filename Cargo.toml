@@ -98,6 +98,7 @@ members = [
   "crates/inbound-peppol",
   "crates/transmit-peppol-native-as4",
   "crates/transmit-peppol-partner",
+  "crates/transmit-peppol-phase4",
   "tools/pdf-visual-regression",
   "tools/render-factur-x-acceptance",
 ]
