@@ -1,6 +1,6 @@
 import { Link, Outlet, createRootRoute, createRoute, createRouter, useRouterState } from "@tanstack/react-router";
 import { Suspense } from "react";
-import { Activity, AlertTriangle, BarChart3, Gauge, Inbox, KeyRound, Settings, Users } from "lucide-react";
+import { Activity, AlertTriangle, BarChart3, Gauge, Inbox, KeyRound, Settings, Users, Webhook } from "lucide-react";
 import { ApiKeysRoute } from "../routes/api-keys";
 import { AuditRoute } from "../routes/audit";
 import { DocumentsRoute } from "../routes/documents";
@@ -8,6 +8,7 @@ import { ErrorsRoute } from "../routes/errors";
 import { OverviewRoute } from "../routes/overview";
 import { TeamRoute } from "../routes/team";
 import { UsageRoute } from "../routes/usage";
+import { WebhooksRoute } from "../routes/webhooks";
 
 function AppShell() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -18,6 +19,7 @@ function AppShell() {
   const errorsActive = pathname.startsWith("/errors");
   const teamActive = pathname.startsWith("/settings/team");
   const apiKeysActive = pathname.startsWith("/settings/api-keys");
+  const webhooksActive = pathname.startsWith("/settings/webhooks");
 
   return (
     <div className="app-shell">
@@ -57,6 +59,10 @@ function AppShell() {
           <Link className="nav-item" data-active={apiKeysActive ? true : undefined} to="/settings/api-keys">
             <KeyRound size={18} aria-hidden="true" />
             API keys
+          </Link>
+          <Link className="nav-item" data-active={webhooksActive ? true : undefined} to="/settings/webhooks">
+            <Webhook size={18} aria-hidden="true" />
+            Webhooks
           </Link>
           <span className="nav-item nav-item-disabled">
             <Settings size={18} aria-hidden="true" />
@@ -126,6 +132,12 @@ const apiKeysRoute = createRoute({
   component: ApiKeysRoute
 });
 
+const webhooksRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings/webhooks",
+  component: WebhooksRoute
+});
+
 const routeTree = rootRoute.addChildren([
   overviewIndexRoute,
   overviewRoute,
@@ -134,7 +146,8 @@ const routeTree = rootRoute.addChildren([
   usageRoute,
   errorsRoute,
   teamRoute,
-  apiKeysRoute
+  apiKeysRoute,
+  webhooksRoute
 ]);
 
 export const router = createRouter({
