@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+[package]
+name = "invoicekit-profile-factur-x"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "InvoiceKit projection to the six Factur-X / ZUGFeRD profiles (CII D16B). Profile downgrade/upgrade emits a LossinessLedger."
+publish = false
+
+[lib]
+name = "invoicekit_profile_factur_x"
+path = "src/lib.rs"
+
+[dependencies]
+invoicekit-format-cii = { path = "../format-cii", version = "0.0.0" }
+invoicekit-ir = { path = "../ir", version = "0.0.0" }
+serde_json = "1"
+thiserror.workspace = true
+
+[dev-dependencies]
+rust_decimal = { version = "1", default-features = false, features = ["serde-with-str", "std"] }
+
+[lints]
+workspace = true
