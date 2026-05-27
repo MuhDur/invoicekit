@@ -194,6 +194,17 @@ impl Money {
     /// # Errors
     ///
     /// Returns [`MoneyError::CurrencyMismatch`] or [`MoneyError::Overflow`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use invoicekit_money::Money;
+    /// # use invoicekit_ir::Iso4217Code;
+    /// # use rust_decimal::Decimal;
+    /// let gross = Money::new(Decimal::new(12000, 2), Iso4217Code::new("EUR").unwrap());
+    /// let tax = Money::new(Decimal::new(2000, 2), Iso4217Code::new("EUR").unwrap());
+    /// assert_eq!(gross.sub(&tax).unwrap().amount().to_string(), "100.00");
+    /// ```
     pub fn sub(&self, other: &Self) -> Result<Self, MoneyError> {
         self.require_same_currency(other)?;
         let amount = self
@@ -212,6 +223,17 @@ impl Money {
     ///
     /// Returns [`MoneyError::Overflow`] when the product exceeds the `Decimal`
     /// range.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use invoicekit_money::Money;
+    /// # use invoicekit_ir::Iso4217Code;
+    /// # use rust_decimal::Decimal;
+    /// let unit_price = Money::new(Decimal::new(2500, 2), Iso4217Code::new("EUR").unwrap());
+    /// let line_total = unit_price.mul_scalar(Decimal::new(3, 0)).unwrap();
+    /// assert_eq!(line_total.amount().to_string(), "75.00");
+    /// ```
     pub fn mul_scalar(&self, scalar: Decimal) -> Result<Self, MoneyError> {
         let amount = self
             .amount
@@ -224,6 +246,20 @@ impl Money {
     }
 
     /// Round the amount to `dp` decimal places using `mode`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use invoicekit_money::{Money, Rounding};
+    /// # use invoicekit_ir::Iso4217Code;
+    /// # use rust_decimal::Decimal;
+    /// let raw = Money::new(
+    ///     Decimal::new(123456, 4), // 12.3456
+    ///     Iso4217Code::new("EUR").unwrap(),
+    /// );
+    /// let rounded = raw.round(2, Rounding::HalfEven);
+    /// assert_eq!(rounded.amount().to_string(), "12.35");
+    /// ```
     #[must_use]
     pub fn round(&self, dp: u32, mode: Rounding) -> Self {
         let strategy = RoundingStrategy::from(mode);

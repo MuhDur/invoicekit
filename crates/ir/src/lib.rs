@@ -49,11 +49,33 @@ impl DocumentId {
     /// # Errors
     ///
     /// Returns [`IrError::MissingRequiredField`] when `value` is blank.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_ir::{DocumentId, IrError};
+    ///
+    /// let id = DocumentId::new("doc-2026-0001")?;
+    /// assert_eq!(id.as_str(), "doc-2026-0001");
+    ///
+    /// assert!(matches!(
+    ///     DocumentId::new(""),
+    ///     Err(IrError::MissingRequiredField("id"))
+    /// ));
+    /// # Ok::<(), IrError>(())
+    /// ```
     pub fn new(value: impl Into<String>) -> Result<Self, IrError> {
         Ok(Self(non_empty(value, "id")?))
     }
 
     /// Returns the identifier as a string slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let id = invoicekit_ir::DocumentId::new("doc-2026-0001").unwrap();
+    /// assert_eq!(id.as_str(), "doc-2026-0001");
+    /// ```
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -75,6 +97,16 @@ impl DocumentNumber {
     /// # Errors
     ///
     /// Returns [`IrError::MissingRequiredField`] when `value` is blank.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_ir::{DocumentNumber, IrError};
+    ///
+    /// let n = DocumentNumber::new("INV-2026-0001")?;
+    /// assert_eq!(n.as_str(), "INV-2026-0001");
+    /// # Ok::<(), IrError>(())
+    /// ```
     pub fn new(value: impl Into<String>) -> Result<Self, IrError> {
         Ok(Self(non_empty(value, "document_number")?))
     }
@@ -109,6 +141,19 @@ impl DateOnly {
     ///
     /// Returns [`IrError::InvalidDate`] when the value is not a valid calendar
     /// date in `YYYY-MM-DD` form.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_ir::{DateOnly, IrError};
+    ///
+    /// let d = DateOnly::new("2026-05-27")?;
+    /// assert_eq!(d.as_str(), "2026-05-27");
+    ///
+    /// assert!(matches!(DateOnly::new("2026-13-01"), Err(IrError::InvalidDate(_))));
+    /// assert!(matches!(DateOnly::new("not-a-date"), Err(IrError::InvalidDate(_))));
+    /// # Ok::<(), IrError>(())
+    /// ```
     pub fn new(value: impl Into<String>) -> Result<Self, IrError> {
         let value = value.into();
         if is_valid_date(&value) {
@@ -145,6 +190,19 @@ impl Iso4217Code {
     ///
     /// Returns [`IrError::InvalidCurrency`] when the code is not three
     /// uppercase ASCII letters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_ir::{Iso4217Code, IrError};
+    ///
+    /// let eur = Iso4217Code::new("EUR")?;
+    /// assert_eq!(eur.as_str(), "EUR");
+    ///
+    /// assert!(matches!(Iso4217Code::new("eur"), Err(IrError::InvalidCurrency(_))));
+    /// assert!(matches!(Iso4217Code::new("EURO"), Err(IrError::InvalidCurrency(_))));
+    /// # Ok::<(), IrError>(())
+    /// ```
     pub fn new(value: impl Into<String>) -> Result<Self, IrError> {
         let value = value.into();
         if is_upper_ascii_code(&value, 3) {
@@ -188,6 +246,16 @@ impl CountryCode {
     ///
     /// Returns [`IrError::InvalidCountryCode`] when the code is not two
     /// uppercase ASCII letters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_ir::{CountryCode, IrError};
+    ///
+    /// assert!(CountryCode::new("DE").is_ok());
+    /// assert!(matches!(CountryCode::new("de"), Err(IrError::InvalidCountryCode(_))));
+    /// assert!(matches!(CountryCode::new("DEU"), Err(IrError::InvalidCountryCode(_))));
+    /// ```
     pub fn new(value: impl Into<String>) -> Result<Self, IrError> {
         let value = value.into();
         if is_upper_ascii_code(&value, 2) {
@@ -727,6 +795,18 @@ impl CommercialDocument {
     /// # Errors
     ///
     /// Returns JSON decoding errors or validation errors.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_ir::{CommercialDocument, IrError};
+    /// use serde_json::json;
+    ///
+    /// // An empty object fails the {id, document_type, ...} shape check.
+    /// let result = CommercialDocument::try_from_value(json!({}));
+    /// assert!(result.is_err());
+    /// # Ok::<(), IrError>(())
+    /// ```
     pub fn try_from_value(value: Value) -> Result<Self, IrError> {
         let document: Self = serde_json::from_value(value)?;
         document.validate()?;
@@ -737,7 +817,9 @@ impl CommercialDocument {
     ///
     /// # Errors
     ///
-    /// Returns JSON serialization errors.
+    /// Returns JSON serialization errors. The round-trip
+    /// `to_value(...)` -> `try_from_value(...)` -> `to_value(...)`
+    /// is byte-stable.
     pub fn to_value(&self) -> Result<Value, IrError> {
         Ok(serde_json::to_value(self)?)
     }
@@ -902,6 +984,18 @@ impl LossinessLedger {
     /// # Errors
     ///
     /// Returns an [`IrError`] when an entry has a blank path or reason.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use invoicekit_ir::{IrError, LossinessLedger};
+    ///
+    /// let ledger = LossinessLedger::new(vec![], vec![])?;
+    /// assert!(ledger.preserved.is_empty());
+    /// assert!(ledger.lost.is_empty());
+    /// assert!(ledger.warnings.is_empty());
+    /// # Ok::<(), IrError>(())
+    /// ```
     pub fn new(preserved: Vec<LossinessEntry>, lost: Vec<LossinessEntry>) -> Result<Self, IrError> {
         let ledger = Self {
             preserved,
