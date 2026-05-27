@@ -15,9 +15,9 @@ use invoicekit_canonical::{canonicalize_xml, XmlCanonicalizeError};
 use invoicekit_ir::{
     Attachment, CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly,
     DecimalValue, DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference,
-    DocumentType, IrError, Iso4217Code, JurisdictionExtension, LocalizedString, MonetaryTotal,
-    MoneyAmount, Party, PartyTaxId, PaymentInstruction, PaymentInstructionKind, PaymentTerms,
-    PostalAddress, Quantity, SchemaVersion, TaxCategorySummary,
+    DocumentType, IrError, Iso4217Code, JurisdictionExtension, LocalizedString, LossinessLedger,
+    MonetaryTotal, MoneyAmount, Party, PartyTaxId, PaymentInstruction, PaymentInstructionKind,
+    PaymentTerms, PostalAddress, Quantity, SchemaVersion, TaxCategorySummary,
 };
 use quick_xml::events::{attributes::AttrError, BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
@@ -249,10 +249,19 @@ pub fn to_xml(document: &CommercialDocument) -> Result<String, UblError> {
 ///
 /// ```
 /// # let xml = r#"<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"><cbc:ID>INV-1</cbc:ID><cbc:UUID>doc-1</cbc:UUID><cbc:IssueDate>2026-05-26</cbc:IssueDate><cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode><cbc:BuyerReference>tenant</cbc:BuyerReference><cbc:AccountingCost>trace</cbc:AccountingCost><cac:AccountingSupplierParty><cac:Party><cac:PartyName><cbc:Name>Supplier</cbc:Name></cac:PartyName><cac:PostalAddress><cbc:StreetName>Main</cbc:StreetName><cbc:CityName>Berlin</cbc:CityName><cbc:PostalZone>10115</cbc:PostalZone><cac:Country><cbc:IdentificationCode>DE</cbc:IdentificationCode></cac:Country></cac:PostalAddress></cac:Party></cac:AccountingSupplierParty><cac:AccountingCustomerParty><cac:Party><cac:PartyName><cbc:Name>Customer</cbc:Name></cac:PartyName><cac:PostalAddress><cbc:StreetName>Main</cbc:StreetName><cbc:CityName>Berlin</cbc:CityName><cbc:PostalZone>10115</cbc:PostalZone><cac:Country><cbc:IdentificationCode>DE</cbc:IdentificationCode></cac:Country></cac:PostalAddress></cac:Party></cac:AccountingCustomerParty><cac:LegalMonetaryTotal><cbc:LineExtensionAmount currencyID="EUR">100.00</cbc:LineExtensionAmount><cbc:TaxExclusiveAmount currencyID="EUR">100.00</cbc:TaxExclusiveAmount><cbc:TaxInclusiveAmount currencyID="EUR">119.00</cbc:TaxInclusiveAmount><cbc:PayableAmount currencyID="EUR">119.00</cbc:PayableAmount></cac:LegalMonetaryTotal><cac:InvoiceLine><cbc:ID>1</cbc:ID><cbc:InvoicedQuantity unitCode="EA">1</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="EUR">100.00</cbc:LineExtensionAmount><cac:Item><cbc:Name>Service</cbc:Name></cac:Item><cac:Price><cbc:PriceAmount currencyID="EUR">100.00</cbc:PriceAmount></cac:Price></cac:InvoiceLine></Invoice>"#;
-/// let parsed = invoicekit_format_ubl::from_xml(xml).unwrap();
+/// let (parsed, ledger) = invoicekit_format_ubl::from_xml(xml).unwrap();
 /// assert_eq!(parsed.document_type, invoicekit_ir::DocumentType::Invoice);
+/// assert!(ledger.lost.is_empty());
 /// ```
-pub fn from_xml(input: &str) -> Result<CommercialDocument, UblError> {
+pub fn from_xml(input: &str) -> Result<(CommercialDocument, LossinessLedger), UblError> {
+    let document = parse_xml_document(input)?;
+    let serialized = to_xml(&document)?;
+    let reparsed = parse_xml_document(&serialized)?;
+    let ledger = LossinessLedger::from_roundtrip_comparison(&document, &reparsed, "format-ubl")?;
+    Ok((document, ledger))
+}
+
+fn parse_xml_document(input: &str) -> Result<CommercialDocument, UblError> {
     let mut reader = Reader::from_str(input);
     reader.config_mut().trim_text(false);
     let mut xml_version = XmlVersion::default();
@@ -2112,11 +2121,20 @@ mod tests {
         assert_eq!(crate_name(), "invoicekit-format-ubl");
     }
 
+    fn parse_document(xml: &str) -> CommercialDocument {
+        let (document, ledger) = from_xml(xml).unwrap();
+        assert!(
+            ledger.lost.is_empty(),
+            "successful UBL fixture parse should not report lost IR fields"
+        );
+        document
+    }
+
     #[test]
     fn invoice_round_trip_preserves_core_ir() {
         let document = fixture(DocumentType::Invoice, 1);
         let xml = to_xml(&document).unwrap();
-        let parsed = from_xml(&xml).unwrap();
+        let parsed = parse_document(&xml);
         assert_eq!(parsed, document);
     }
 
@@ -2124,7 +2142,7 @@ mod tests {
     fn credit_note_round_trip_preserves_core_ir() {
         let document = fixture(DocumentType::CreditNote, 2);
         let xml = to_xml(&document).unwrap();
-        let parsed = from_xml(&xml).unwrap();
+        let parsed = parse_document(&xml);
         assert_eq!(parsed, document);
     }
 
@@ -2191,7 +2209,7 @@ mod tests {
         assert!(!xml.contains("BuyerReference"));
         assert!(!xml.contains("AccountingCost"));
 
-        let parsed = from_xml(&xml).unwrap();
+        let parsed = parse_document(&xml);
         assert_eq!(parsed.meta, document.meta);
     }
 
@@ -2205,7 +2223,7 @@ mod tests {
             .unwrap()
             .replace("<cac:AccountingSupplierParty", &injected);
 
-        let parsed = from_xml(&xml).unwrap();
+        let parsed = parse_document(&xml);
         assert_eq!(parsed.meta.tenant_id, "tenant-7");
         assert_eq!(parsed.meta.trace_id, "trace-7");
 
@@ -2236,7 +2254,7 @@ mod tests {
         let xml = to_xml(&document).unwrap();
         assert!(xml.contains("AccountingCost"));
         assert!(xml.contains("BuyerReference"));
-        assert_eq!(from_xml(&xml).unwrap(), document);
+        assert_eq!(parse_document(&xml), document);
     }
 
     #[test]
@@ -2291,7 +2309,7 @@ mod tests {
                 1,
             );
 
-        let parsed = from_xml(&xml).unwrap();
+        let parsed = parse_document(&xml);
         let payload = parsed
             .extensions
             .iter()
@@ -2329,7 +2347,7 @@ mod tests {
         assert!(serialized.contains("TaxCurrencyCode"));
         assert!(serialized.contains(">USD<"));
         assert!(serialized.contains("OrderReference"));
-        assert_eq!(from_xml(&serialized).unwrap(), parsed);
+        assert_eq!(parse_document(&serialized), parsed);
 
         let schema_report = validate_oasis_ubl_2_1_schema(&serialized).unwrap();
         assert!(
@@ -2417,7 +2435,7 @@ mod tests {
             .unwrap()
             .replace(INVOICEKIT_METADATA_EXTENSION_URN, "urn:foreign:metadata");
 
-        let parsed = from_xml(&xml).unwrap();
+        let parsed = parse_document(&xml);
         assert_eq!(parsed.meta.tenant_id, "ubl-import");
         assert!(parsed.meta.trace_id.starts_with(BEAD_ID));
         assert_ne!(parsed.meta, document.meta);
@@ -2430,7 +2448,7 @@ mod tests {
             .unwrap()
             .replace(INVOICEKIT_EXTENSION_NAMESPACE_URI, "urn:foreign:invoicekit");
 
-        let parsed = from_xml(&xml).unwrap();
+        let parsed = parse_document(&xml);
         assert_eq!(parsed.meta.tenant_id, "ubl-import");
         assert!(parsed.meta.trace_id.starts_with(BEAD_ID));
         assert_ne!(parsed.meta, document.meta);
@@ -2446,7 +2464,7 @@ mod tests {
             .unwrap()
             .replacen("<cac:Party>", &fake_extension, 1);
 
-        let parsed = from_xml(&xml).unwrap();
+        let parsed = parse_document(&xml);
         assert_eq!(parsed.meta, document.meta);
     }
 
@@ -2462,7 +2480,7 @@ mod tests {
                 seed,
             );
             let xml = to_xml(&document).unwrap();
-            assert_eq!(from_xml(&xml).unwrap(), document);
+            assert_eq!(parse_document(&xml), document);
         }
     }
 
@@ -2564,8 +2582,8 @@ mod tests {
         fn parse_serialize_parse_is_stable(seed in 0_u32..128) {
             let document = fixture(DocumentType::Invoice, seed);
             let xml = to_xml(&document).unwrap();
-            let parsed = from_xml(&xml).unwrap();
-            let reparsed = from_xml(&to_xml(&parsed).unwrap()).unwrap();
+            let parsed = parse_document(&xml);
+            let reparsed = parse_document(&to_xml(&parsed).unwrap());
             prop_assert_eq!(parsed, reparsed);
         }
     }

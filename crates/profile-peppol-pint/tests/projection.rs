@@ -25,7 +25,7 @@ fn fixture_paths() -> Vec<PathBuf> {
 }
 
 #[test]
-fn projects_ten_plus_fixtures_across_five_pint_countries() {
+fn projects_ten_plus_fixtures_across_five_pint_countries() -> Result<(), String> {
     let fixtures = fixture_paths();
     assert!(
         fixtures.len() >= 10,
@@ -45,14 +45,14 @@ fn projects_ten_plus_fixtures_across_five_pint_countries() {
     // Project the first 10 fixtures, cycling through the 5
     // countries. 10 fixtures * 5 countries = 50 projections.
     for (i, path) in fixtures.iter().take(10).enumerate() {
-        let xml = fs::read_to_string(path).unwrap();
-        let document = from_xml(&xml)
-            .unwrap_or_else(|err| panic!("fixture {i} ({path:?}) failed to parse: {err}"));
+        let xml = fs::read_to_string(path)
+            .map_err(|err| format!("fixture {i} ({path:?}) could not be read: {err}"))?;
+        let (document, _) = from_xml(&xml)
+            .map_err(|err| format!("fixture {i} ({path:?}) failed to parse: {err}"))?;
 
         for country in countries {
-            let projected = to_peppol_pint_xml(&document, country).unwrap_or_else(|err| {
-                panic!("projection {i}/{country:?} ({path:?}) failed: {err}")
-            });
+            let projected = to_peppol_pint_xml(&document, country)
+                .map_err(|err| format!("projection {i}/{country:?} ({path:?}) failed: {err}"))?;
             assert!(
                 projected.contains(country.customization_id()),
                 "fixture {i} country {country:?}: projected XML must carry the PINT CustomizationID"
@@ -68,6 +68,7 @@ fn projects_ten_plus_fixtures_across_five_pint_countries() {
         total_projections >= 50,
         "expected >=50 projections; got {total_projections}"
     );
+    Ok(())
 }
 
 #[test]
@@ -76,7 +77,7 @@ fn projection_replaces_existing_customization_with_country_specific_urn() {
     // must NOT carry the Peppol BIS / XRechnung / EN 16931 URNs.
     let path = &fixture_paths()[0];
     let xml = fs::read_to_string(path).unwrap();
-    let document = from_xml(&xml).unwrap();
+    let (document, _) = from_xml(&xml).unwrap();
     let projected = to_peppol_pint_xml(&document, PintCountry::Singapore).unwrap();
 
     assert!(projected.contains("urn:peppol:pint:billing-1@sg-1"));

@@ -26,7 +26,7 @@ fn fixture_paths() -> Vec<PathBuf> {
 }
 
 #[test]
-fn projects_thirty_plus_fixtures_with_xrechnung_headers() {
+fn projects_thirty_plus_fixtures_with_xrechnung_headers() -> Result<(), String> {
     let fixtures = fixture_paths();
     assert!(
         fixtures.len() >= 30,
@@ -44,11 +44,12 @@ fn projects_thirty_plus_fixtures_with_xrechnung_headers() {
         leitweg_id: Some(leitweg_id.to_owned()),
     };
     for (i, path) in fixtures.iter().take(30).enumerate() {
-        let xml = fs::read_to_string(path).unwrap();
-        let document = from_xml(&xml)
-            .unwrap_or_else(|err| panic!("fixture {i} ({path:?}) failed to parse: {err}"));
+        let xml = fs::read_to_string(path)
+            .map_err(|err| format!("fixture {i} ({path:?}) could not be read: {err}"))?;
+        let (document, _) = from_xml(&xml)
+            .map_err(|err| format!("fixture {i} ({path:?}) failed to parse: {err}"))?;
         let projected = to_xrechnung_3_x_xml(&document, &options)
-            .unwrap_or_else(|err| panic!("projection {i} ({path:?}) failed: {err}"));
+            .map_err(|err| format!("projection {i} ({path:?}) failed: {err}"))?;
 
         assert!(
             projected.contains(XRECHNUNG_3_CUSTOMIZATION_ID),
@@ -64,6 +65,7 @@ fn projects_thirty_plus_fixtures_with_xrechnung_headers() {
             projected.chars().take(2000).collect::<String>()
         );
     }
+    Ok(())
 }
 
 #[test]
@@ -72,7 +74,7 @@ fn b2b_projection_omits_buyer_reference_override() {
     // CIUS-DE customization but leave BuyerReference to whatever
     // the upstream document carried.
     let xml = fs::read_to_string(&fixture_paths()[0]).unwrap();
-    let document = from_xml(&xml).unwrap();
+    let (document, _) = from_xml(&xml).unwrap();
     let projected = to_xrechnung_3_x_xml(&document, &XRechnungOptions::default()).unwrap();
 
     assert!(projected.contains(XRECHNUNG_3_CUSTOMIZATION_ID));

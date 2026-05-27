@@ -98,8 +98,8 @@ fn bench_ubl_parse(c: &mut Criterion) {
 
     c.bench_function("ubl-parse", |b| {
         b.iter(|| {
-            let parsed = from_xml(black_box(&input)).unwrap();
-            black_box(parsed);
+            let (parsed, ledger) = from_xml(black_box(&input)).unwrap();
+            black_box((parsed, ledger));
         });
     });
 }
