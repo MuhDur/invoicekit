@@ -14,5 +14,9 @@ publish = false
 name = "invoicekit-managed-api-server"
 path = "src/main.rs"
 
+[dependencies]
+invoicekit-managed-api = { path = "../../crates/managed-api", version = "0.0.0" }
+serde_json = "1"
+
 [lints]
 workspace = true
