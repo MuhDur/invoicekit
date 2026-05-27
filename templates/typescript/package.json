@@ -1,0 +1,14 @@
+{
+  "name": "@invoicekit/template-typst",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "verify": "bun run typecheck && bun test"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

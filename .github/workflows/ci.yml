@@ -171,6 +171,21 @@ jobs:
           AbiGoldenTest
       - run: dotnet run --project bindings/dotnet/InvoiceKit.AbiGolden/InvoiceKit.AbiGolden.csproj
 
+  typescript-templates:
+    name: TypeScript template language
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
+      - run: bun install --frozen-lockfile
+        working-directory: templates/typescript
+      - run: bun run verify
+        working-directory: templates/typescript
+      - run: bun audit
+        working-directory: templates/typescript
+
   ffi-miri:
     name: ffi miri
     runs-on: ubuntu-latest
