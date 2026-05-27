@@ -23,7 +23,10 @@ def _seed_full(tmp_path: Path) -> Path:
         workflows,
         "ci.yml",
         "jobs:\n  audit:\n    steps: [{run: 'cargo audit'}]\n"
-        "  deny:\n    steps: [{run: 'cargo deny check'}]\n",
+        "  deny:\n    steps: [{run: 'cargo deny check'}]\n"
+        "  cassette-pii-scan:\n"
+        "    steps: [{run: 'cargo test -p invoicekit-transmit-mock "
+        "cassette_corpus_has_no_unscrubbed_pii --locked'}]\n",
     )
     _write_workflow(
         workflows,
@@ -61,6 +64,18 @@ def test_missing_cargo_deny_fails(tmp_path: Path) -> None:
     workflows = _seed_full(tmp_path)
     ci = (workflows / "ci.yml").read_text()
     (workflows / "ci.yml").write_text(ci.replace("cargo deny check", "cargo other"))
+    exit_code = guard.main(
+        ["--workflows-dir", str(workflows), "--skip-advisory-waiver-scope-check"]
+    )
+    assert exit_code == 1
+
+
+def test_missing_cassette_pii_scan_fails(tmp_path: Path) -> None:
+    workflows = _seed_full(tmp_path)
+    ci = (workflows / "ci.yml").read_text()
+    (workflows / "ci.yml").write_text(
+        ci.replace("cassette_corpus_has_no_unscrubbed_pii", "cassette_scan_missing")
+    )
     exit_code = guard.main(
         ["--workflows-dir", str(workflows), "--skip-advisory-waiver-scope-check"]
     )

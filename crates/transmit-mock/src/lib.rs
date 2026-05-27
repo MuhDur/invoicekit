@@ -1068,11 +1068,14 @@ pub const fn crate_name() -> &'static str {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::fs;
+    use std::path::Path;
 
     use super::{
         assert_no_unscrubbed_pii_patterns, body_fingerprint, count_unscrubbed_pii_patterns,
-        crate_name, scenario_metadata_schema, CassetteMatcher, CassetteRecorder, RecordedRequest,
-        RecordedResponse, ScenarioMetadata, ScenarioSource, ScrubRule, ScrubScope, Scrubber,
+        crate_name, scenario_metadata_schema, Cassette, CassetteMatcher, CassetteRecorder,
+        RecordedRequest, RecordedResponse, ScenarioMetadata, ScenarioSource, ScrubRule, ScrubScope,
+        Scrubber,
     };
 
     #[test]
@@ -1229,6 +1232,18 @@ mod tests {
         assert!(err.to_string().contains("country"));
     }
 
+    #[test]
+    fn cassette_corpus_has_no_unscrubbed_pii() {
+        let repo = repo_root();
+        let cassette_root = repo.join("conformance-corpus").join("cassettes");
+        if !cassette_root.is_dir() {
+            return;
+        }
+
+        let mut checked = 0;
+        scan_cassette_dir(&cassette_root, &mut checked);
+    }
+
     fn sample_cassette_bytes() -> Vec<u8> {
         sample_cassette().to_vcr_bytes().unwrap()
     }
@@ -1239,6 +1254,64 @@ mod tests {
 
     fn first_interaction_mut(cassette: &mut super::Cassette) -> &mut super::CassetteInteraction {
         cassette.interactions.first_mut().unwrap()
+    }
+
+    fn repo_root() -> &'static Path {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .unwrap()
+    }
+
+    fn scan_cassette_dir(dir: &Path, checked: &mut usize) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                scan_cassette_dir(&path, checked);
+            } else if is_vcr_path(&path) {
+                assert_vcr_file_is_scrubbed(&path);
+                *checked += 1;
+            }
+        }
+    }
+
+    fn is_vcr_path(path: &Path) -> bool {
+        if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("vcr"))
+        {
+            return true;
+        }
+
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+            && path
+                .file_stem()
+                .and_then(|stem| Path::new(stem).extension())
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("vcr"))
+    }
+
+    fn assert_vcr_file_is_scrubbed(path: &Path) {
+        let bytes = fs::read(path).unwrap();
+        let cassette = Cassette::from_vcr_bytes(&bytes);
+        assert!(
+            cassette.is_ok(),
+            "{}: invalid cassette JSON: {}",
+            path.display(),
+            cassette.unwrap_err()
+        );
+        let cassette = Cassette::from_vcr_bytes(&bytes).unwrap();
+        let scan_result = assert_no_unscrubbed_pii_patterns(&cassette);
+        assert!(
+            scan_result.is_ok(),
+            "{}: {}",
+            path.display(),
+            scan_result.unwrap_err()
+        );
     }
 
     fn sample_cassette() -> super::Cassette {
