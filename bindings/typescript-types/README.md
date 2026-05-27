@@ -21,14 +21,16 @@ import { CommercialDocument, ValidationResult } from "@invoicekit/types";
 
 ```bash
 cd bindings/typescript-types
-npm install
-npm run generate
-npm run check         # tsc --noEmit
-npm test              # round-trip + drift checks
+bun install
+bun run generate
+bun run check         # tsc --noEmit
+bun test              # round-trip + drift checks
 git add src/generated src/index.ts
 ```
 
-CI runs `node scripts/generate.mjs --check` and fails when the committed files differ from a fresh generation — i.e. you cannot land a Rust IR change without also re-running the generator and committing the diff.
+CI runs `bun run scripts/generate.mjs --check` and fails when the committed files differ from a fresh generation — i.e. you cannot land a Rust IR change without also re-running the generator and committing the diff.
+
+The toolchain is **bun-only** per [`AGENTS.md`](../../AGENTS.md). The only committed lockfile is `bun.lock`; do not introduce `package-lock.json`, `pnpm-lock.yaml`, or `yarn.lock`.
 
 ## Why types live in this repo
 
