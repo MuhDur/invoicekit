@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+[package]
+name = "invoicekit-transmit-peppol-native-as4"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Native Rust AS4 sender GatewayAdapter (scaffold). XMLDSig signing + HTTP transport are injectable traits; xmlsec / reqwest impls land behind cargo features."
+publish = false
+
+[lib]
+name = "invoicekit_transmit_peppol_native_as4"
+path = "src/lib.rs"
+
+[dependencies]
+invoicekit-format-ubl = { path = "../format-ubl", version = "0.0.0" }
+invoicekit-ir = { path = "../ir", version = "0.0.0" }
+invoicekit-reconcile = { path = "../reconcile", version = "0.0.0" }
+serde = { version = "1", features = ["derive"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+pollster = "0.4"
+
+[lints]
+workspace = true
