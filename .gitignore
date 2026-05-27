@@ -24,6 +24,9 @@ yarn-error.log*
 dist/
 build/
 **/bin/
+# Exception: cargo binary entry points live under crates/*/src/bin/.
+!crates/**/src/bin/
+!crates/**/src/bin/**
 **/obj/
 *.pyc
 __pycache__/

@@ -1,0 +1,126 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-785 country feasibility manifest: Japan.
+#
+# Japan introduced the Qualified Invoice System (Tekikaku Seikyusho-
+# tou Hozon Houshiki) on 2023-10-01, requiring registered taxpayers
+# to issue qualified invoices with a registration number for buyers
+# to claim input consumption tax credit. The NTA (National Tax
+# Agency) also runs an optional Peppol PINT-JP rail for B2B
+# e-invoicing; full mandate is not yet announced.
+
+schema_version = "1.0"
+country = "JP"
+country_name = "Japan"
+program = "Qualified Invoice System + Peppol PINT-JP (NTA / Digital Agency)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-785-manifest-japan-yhj"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "NTA — Qualified Invoice System portal"
+url = "https://www.nta.go.jp/taxes/shiraberu/zeimokubetsu/shohi/keigenzeiritsu/invoice.htm"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Digital Agency — JP PINT specification"
+url = "https://www.digital.go.jp/policies/electronic_invoice"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "OpenPeppol — JP PINT specification (PINT Japan)"
+url = "https://docs.peppol.eu/poac/jp/pint-jp/"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Consumption Tax Act (Shouhi Zei Hou) Article 30"
+url = "https://elaws.e-gov.go.jp/document?lawid=363AC0000000108"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "partner_gated"
+notes = """
+Peppol PINT-JP operates through accredited Japanese Service
+Providers; OpenPeppol's Japanese authority (Digital Agency) lists
+the active providers. There is no public NTA sandbox for the
+Qualified Invoice System itself — the qualified invoice is a
+paper-or-electronic document the seller hands to the buyer,
+without a clearance gate. Sandboxing applies only to the PINT-JP
+four-corner rail, which is currently in voluntary rollout.
+"""
+endpoint = "https://test.peppol-jp.invoicekit.example/v1/"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_JP_ASP_TOKEN"
+
+[production]
+endpoint = "https://peppol-jp.invoicekit.example/v1/"
+production_credentials_env_var = "INVOICEKIT_PROD_JP_ASP_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_optional"
+qualified_seal_notes = """
+Qualified invoices do not require a digital signature; they are
+identified by the issuer's NTA-assigned registration number (T
+followed by a 13-digit corporate number). Peppol PINT-JP
+envelopes carried over the four-corner network are signed by
+the access point's certificate (issued by a JIPDEC-licensed
+trust service provider) rather than the issuer directly.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "required_for_asp_signing_keys"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses providing taxable services to Japanese
+customers must register with the NTA (Tokurei Yunyu Jigyousha
+or Tokutei Shaha registration) or appoint a Japanese tax agent
+(Nouzei Kanrijin). The registered taxpayer issues qualified
+invoices under the foreign seller's registration number. Most
+B2B import flow continues under the buyer-side Reverse Charge
+Mechanism (RCM), which removes the qualified-invoice obligation
+from the foreign seller.
+"""
+
+[validator]
+backend = "rust_native"
+backend_notes = """
+PINT-JP is a UBL 2.1 profile aligned with Peppol BIS Billing 3.0
+plus Japan-specific extensions for the registration number,
+consumption tax bands (10% standard, 8% reduced), and reduced-
+tax-rate eligibility markers. Structural XSD validation runs in
+the shared rust-native UBL validator; the PINT-JP business
+rules (BR-JP-*) live in the rulepack runtime once T-024's
+Schematron-to-rulepack converter handles the PINT extensions.
+"""
+
+[interop]
+formats = ["PINT-JP (UBL 2.1)"]
+peppol_bis_accepted = true
+peppol_pint_accepted = true
+notes = """
+Japan is one of the early non-EU Peppol-CTC adopters via PINT-JP.
+The Digital Agency is the authority. There is no national-format
+clearance gate, so cross-border senders can deliver Peppol BIS
+Billing 3.0 envelopes that the destination ASP transforms into
+PINT-JP automatically.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/japan"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/japan"
+
+[follow_ups]
+items = [
+    "Track NTA + Digital Agency announcements on a mandatory PINT-JP rollout date (currently voluntary)",
+    "Select two Japanese ASP partners (primary + fallback) and document partner pricing",
+    "Pin the JP PINT specification version once Digital Agency publishes a v2 (currently 1.0.x)",
+]

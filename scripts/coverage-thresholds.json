@@ -1,0 +1,14 @@
+{
+  "_about": "Per-crate line-coverage floor in percent, keyed by the directory name under crates/, bindings/, or services/. CI fails when a listed crate drops below its floor. Crates absent from this file are reported but not gated. PLAN.md sets the universal 90% gate as a later milestone; see plans/COVERAGE.md for the ramp.",
+  "crates": {
+    "ir": 60.0,
+    "money": 60.0,
+    "codelists": 60.0,
+    "canonical": 60.0,
+    "tax-calculation": 50.0,
+    "rulepack": 40.0,
+    "format-ubl": 40.0,
+    "validate": 40.0
+  },
+  "overall_workspace_floor": 30.0
+}

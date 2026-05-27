@@ -1,0 +1,73 @@
+name: Status page
+
+# T-138: build the InvoiceKit public status page on every push to
+# `tools/status-page/` and deploy to GitHub Pages. The build job
+# runs on every PR so reviewers can preview the rendered output as
+# an artefact before merging; the deploy job only runs on main.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/status-page/**"
+      - ".github/workflows/status-page.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/status-page/**"
+      - ".github/workflows/status-page.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: status-page-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: render status page
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build status page
+        run: |
+          mkdir -p target/status-page
+          python3 tools/status-page/build_status_page.py \
+            --config tools/status-page/status.toml \
+            --incidents-dir tools/status-page/incidents \
+            --out target/status-page/index.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: status-page
+          path: target/status-page/
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: target/status-page/
+
+  deploy:
+    # T-138 operator note: this job only runs on main, only when
+    # Settings -> Pages is configured to deploy from GitHub Actions,
+    # and only when the `github-pages` environment exists in
+    # Settings -> Environments. Operator runbook in
+    # docs/operators/STATUS-PAGE.md walks through the one-time
+    # setup.
+    name: deploy to GitHub Pages
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

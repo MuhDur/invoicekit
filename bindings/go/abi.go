@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The InvoiceKit Authors
 
+//go:build cgo
+
 package invoicekit
 
 /*
@@ -15,6 +17,12 @@ import (
 	"unsafe"
 )
 
+// processEngineABI runs an Engine ABI JSON request through the
+// native cgo bridge to the InvoiceKit Rust engine.
+//
+// This file compiles only when cgo is enabled. The pure-Go REST
+// fallback lives in abi_nocgo.go and is selected automatically
+// when CGO_ENABLED=0. See client.go for the higher-level API.
 func processEngineABI(request []byte) ([]byte, uint32, error) {
 	var requestPtr *C.uchar
 	if len(request) > 0 {
@@ -38,3 +46,8 @@ func processEngineABI(request []byte) ([]byte, uint32, error) {
 	actual := C.GoBytes(unsafe.Pointer(responsePtr), C.int(responseLen))
 	return actual, status, nil
 }
+
+// transportMode reports how the package was compiled. Consumers
+// can check this at runtime to decide whether to require a REST
+// endpoint configuration.
+func transportMode() string { return "cgo" }

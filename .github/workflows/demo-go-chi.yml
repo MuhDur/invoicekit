@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+# T-1407 reference Go (chi) demo: CI gate.
+#
+# Builds the cdylib then runs go test under cgo against the
+# bindings/go SDK and the httptest-based smoke suite.
+
+name: demo-go-chi
+
+on:
+  push:
+    paths:
+      - "examples/go-chi/**"
+      - "bindings/go/**"
+      - "crates/invoicekit-ffi/**"
+      - "crates/invoicekit-engine/**"
+      - ".github/workflows/demo-go-chi.yml"
+  pull_request:
+    paths:
+      - "examples/go-chi/**"
+      - "bindings/go/**"
+      - "crates/invoicekit-ffi/**"
+      - "crates/invoicekit-engine/**"
+      - ".github/workflows/demo-go-chi.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: demo smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build invoicekit-ffi cdylib
+        run: cargo build -p invoicekit-ffi --locked
+
+      - name: Export FFI library path
+        shell: bash
+        run: |
+          echo "INVOICEKIT_FFI_LIB=${GITHUB_WORKSPACE}/target/debug/libinvoicekit_ffi.so" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=${GITHUB_WORKSPACE}/target/debug" >> "$GITHUB_ENV"
+          echo "CGO_LDFLAGS=-L${GITHUB_WORKSPACE}/target/debug -linvoicekit_ffi" >> "$GITHUB_ENV"
+
+      - name: go vet
+        env:
+          CGO_ENABLED: 1
+        run: go vet ./...
+        working-directory: examples/go-chi
+
+      - name: go test (6 httptest rows)
+        env:
+          CGO_ENABLED: 1
+        run: go test -v -count=1 ./...
+        working-directory: examples/go-chi

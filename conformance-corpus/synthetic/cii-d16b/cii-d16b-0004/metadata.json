@@ -1,0 +1,105 @@
+{
+  "schema_version": "1.0",
+  "fixture_id": "ik-synthetic-cii-d16b-legacy-0004",
+  "corpus_partition": "synthetic",
+  "publication": "public",
+  "status": "retired",
+  "title": "Retired synthetic CII D16B legacy fixture 0004",
+  "description": "Retired pre-profile-context CII D16B parser-regression fixture retained for historical parser coverage; not active profile-conformance coverage.",
+  "artifact": {
+    "path": "fixture.xml",
+    "media_type": "application/xml",
+    "sha256": "51a2fc9682d5878afb629a5d1169746860befa060f1983d7d32e08951f6dee3b",
+    "size_bytes": 10634,
+    "format_family": "cii",
+    "document_type": "credit_note"
+  },
+  "jurisdiction": {
+    "countries": [
+      "ES",
+      "IT"
+    ],
+    "profile": "Retired CII D16B legacy parser regression",
+    "syntax": "UN/CEFACT CII D16B CrossIndustryInvoice",
+    "version": "D16B-100"
+  },
+  "license": {
+    "license_id": "CC0-1.0",
+    "copyright_holder": "InvoiceKit Authors",
+    "redistribution": "public-ok"
+  },
+  "provenance": {
+    "source_kind": "generated",
+    "source_name": "InvoiceKit invoices-h4b3 retired legacy CII corpus",
+    "source_url": "urn:invoicekit:conformance:cii-d16b:synthetic",
+    "generated_by": "crates/format-cii/examples/generate_cii_corpus.rs",
+    "generator_version": "invoices-h4b3-v1-retired",
+    "created_at": "2026-05-27T10:00:00Z"
+  },
+  "pii": {
+    "classification": "synthetic",
+    "redaction_status": "not-required",
+    "contains_personal_data": false,
+    "notes": "All parties, identifiers, references, and addresses are fictional."
+  },
+  "coverage": {
+    "capabilities": [
+      "parse",
+      "serialize",
+      "validate"
+    ],
+    "scenarios": [
+      "business-process-context",
+      "buyer-reference",
+      "byte-stable-serializer-output",
+      "cii-d16b-cross-industry-invoice",
+      "credit-note-type-code-381",
+      "delivery-event",
+      "format-cii-round-trip",
+      "header-charge-total",
+      "included-notes",
+      "legacy-profile-context-overload",
+      "multi-line-document",
+      "party-contact",
+      "party-tax-registration",
+      "payment-means-iban",
+      "payment-reference",
+      "payment-terms",
+      "vat-category-exempt"
+    ],
+    "negative_case": false
+  },
+  "validation": {
+    "expected_outcome": "valid",
+    "validators": [
+      {
+        "name": "invoicekit-format-cii parse-serialize-parse",
+        "version": "0.0.0",
+        "result": "pass"
+      },
+      {
+        "name": "invoicekit-format-cii byte-stability",
+        "version": "0.0.0",
+        "result": "pass"
+      }
+    ],
+    "known_gaps": [
+      "Synthetic corpus targets current InvoiceKit CII IR coverage; full D16B schema element coverage is tracked by the CII coverage matrix.",
+      "Retired legacy corpus may carry historical profile URNs in business-process context; active profile-conformance fixtures live in cii-d16b-profiled."
+    ]
+  },
+  "maintenance": {
+    "owner": "InvoiceKit maintainers",
+    "created_at": "2026-05-27",
+    "reviewed_at": "2026-05-27",
+    "review_due": "2027-05-27",
+    "labels": [
+      "cii",
+      "d16b",
+      "legacy",
+      "retired",
+      "roundtrip",
+      "synthetic"
+    ]
+  }
+}

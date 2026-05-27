@@ -5,7 +5,9 @@
 //!
 //! This crate maps the CII D16B `CrossIndustryInvoice` syntax used by
 //! Factur-X/ZUGFeRD into the core [`invoicekit_ir::CommercialDocument`] fields
-//! that exist today. The serializer emits deterministic CII XML and then
+//! that exist today. CII standard fields without core IR homes are preserved as
+//! CII document-field extensions instead of being overloaded as InvoiceKit
+//! operational metadata. The serializer emits deterministic CII XML and then
 //! canonicalizes it with [`invoicekit_canonical::canonicalize_xml`].
 
 use std::str::FromStr as _;
@@ -21,8 +23,11 @@ use invoicekit_ir::{
 use quick_xml::events::{attributes::AttrError, BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
 use rust_decimal::Decimal;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use thiserror::Error;
+
+pub mod mapping;
 
 const BEAD_ID: &str = "invoices-t-041-cii-parser-serializer-gyl";
 const CII_RSM_NAMESPACE_URI: &str = "urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100";
@@ -32,6 +37,10 @@ const CII_UDT_NAMESPACE_URI: &str = "urn:un:unece:uncefact:data:standard:Unquali
 const CII_QDT_NAMESPACE_URI: &str = "urn:un:unece:uncefact:data:standard:QualifiedDataType:100";
 const CORE_GUIDELINE_ID: &str = "urn:cen.eu:en16931:2017";
 const DEFAULT_LANGUAGE: &str = "und";
+const CII_PRESERVED_XML_KEY: &str = "preserved_xml";
+const CII_PRESERVED_CONTAINER_KEY: &str = "container";
+const CII_PRESERVED_ELEMENT_KEY: &str = "element";
+const CII_PRESERVED_XML_FRAGMENT_KEY: &str = "xml";
 
 /// Errors returned by [`to_xml`] and [`from_xml`].
 #[derive(Debug, Error)]
@@ -55,6 +64,18 @@ pub enum CiiError {
     /// The root element is not CII `CrossIndustryInvoice`.
     #[error("unsupported CII root `{0}`; hint: use rsm:CrossIndustryInvoice")]
     UnsupportedRoot(String),
+    /// A CII element used the wrong namespace URI for its local name.
+    #[error(
+        "invalid CII namespace for `{element}`: expected `{expected}`, got `{actual}`; hint: use the UN/CEFACT CII D16B rsm/ram/udt namespaces"
+    )]
+    InvalidNamespace {
+        /// CII local element name.
+        element: String,
+        /// Expected namespace URI.
+        expected: &'static str,
+        /// Resolved namespace diagnostic.
+        actual: String,
+    },
     /// The CII type code is not mapped to the current InvoiceKit IR.
     #[error("unsupported CII document type code `{0}`; hint: use 380 for invoice or 381 for credit note")]
     UnsupportedTypeCode(String),
@@ -83,12 +104,24 @@ pub enum CiiError {
     /// IR validation failed after parsing.
     #[error("parsed CII did not satisfy InvoiceKit IR validation: {0}")]
     InvalidIr(#[from] IrError),
-    /// JSON conversion failed while reading opaque IR newtypes.
-    #[error("could not serialize InvoiceKit IR helper value: {0}")]
+    /// JSON conversion failed while reading opaque IR newtypes or metadata.
+    #[error("could not convert InvoiceKit IR helper value: {0}")]
     InvalidIrJson(#[from] serde_json::Error),
     /// Canonical XML output could not be produced.
     #[error("could not canonicalize CII XML output: {0}")]
     Canonicalize(#[from] XmlCanonicalizeError),
+    /// A preserved CII fragment in an extension payload is not safe to replay.
+    #[error(
+        "invalid preserved CII fragment for `{element}` in `{container}`: {message}; hint: preserve fragments produced by from_xml or remove the invalid CII document-fields payload"
+    )]
+    InvalidPreservedXml {
+        /// Expected CII container path.
+        container: String,
+        /// Expected CII element name.
+        element: String,
+        /// Validation diagnostic.
+        message: String,
+    },
 }
 
 /// Serialize an InvoiceKit commercial document into deterministic CII XML.
@@ -186,8 +219,9 @@ pub fn to_xml(document: &CommercialDocument) -> Result<String, CiiError> {
 /// Parse a CII D16B `CrossIndustryInvoice` document into InvoiceKit IR.
 ///
 /// The parser extracts the current core IR surface. CII elements that do not
-/// have an IR field yet are accepted by the XML reader but are not represented
-/// semantically in the returned [`CommercialDocument`].
+/// have an IR field yet are preserved as canonical raw XML fragments in the CII
+/// document-fields extension so parse/serialize operations do not silently
+/// discard standard CII document data.
 ///
 /// # Errors
 ///
@@ -209,31 +243,110 @@ pub fn from_xml(input: &str) -> Result<CommercialDocument, CiiError> {
     let mut xml_version = XmlVersion::default();
     let mut stack = Vec::<String>::new();
     let mut text_stack = Vec::<String>::new();
+    let mut namespace_stack = Vec::<Vec<XmlNamespaceBinding>>::new();
+    let mut raw_capture = None::<RawXmlCapture>;
     let mut state = ParseState::default();
 
     loop {
-        match reader.read_event()? {
+        let event_start = reader_position(reader.buffer_position())?;
+        let event = reader.read_event()?;
+        let event_end = reader_position(reader.buffer_position())?;
+
+        if let Some(capture) = raw_capture.as_mut() {
+            match &event {
+                Event::Start(_) => {
+                    capture.depth += 1;
+                }
+                Event::Empty(_)
+                | Event::Text(_)
+                | Event::CData(_)
+                | Event::GeneralRef(_)
+                | Event::Decl(_)
+                | Event::DocType(_)
+                | Event::PI(_)
+                | Event::Comment(_) => {}
+                Event::End(_) => {
+                    capture.depth = capture.depth.checked_sub(1).ok_or_else(|| {
+                        CiiError::UnsupportedRoot(format!("preserved:{}", capture.element))
+                    })?;
+                    if capture.depth == 0 {
+                        let capture = raw_capture
+                            .take()
+                            .ok_or_else(|| CiiError::UnsupportedRoot("preserved".to_owned()))?;
+                        let start = capture.start;
+                        state.push_preserved_xml(capture, input_slice(input, start, event_end)?)?;
+                    }
+                }
+                Event::Eof => return Err(CiiError::UnsupportedRoot("preserved:Eof".to_owned())),
+            }
+            continue;
+        }
+
+        match event {
             Event::Start(start) => {
                 let name = decode_local_name(start.name().as_ref())?;
+                let namespace_declarations =
+                    namespace_declarations_for_start(&reader, &start, xml_version)?;
+                let namespace = resolve_element_namespace(
+                    start.name().as_ref(),
+                    &namespace_stack,
+                    Some(&namespace_declarations),
+                )?;
+                validate_cii_namespace(&namespace, &stack, &name)?;
                 let attrs = read_attrs(&reader, &start, xml_version)?;
+                if should_preserve_raw_xml(&stack, &name) {
+                    raw_capture = Some(RawXmlCapture::new(
+                        &stack,
+                        name,
+                        event_start,
+                        state.active_line_id(),
+                        effective_namespace_bindings(&namespace_stack, &namespace_declarations),
+                    ));
+                    continue;
+                }
                 state.start_element(&stack, &name, &attrs)?;
                 stack.push(name);
                 text_stack.push(String::new());
+                namespace_stack.push(namespace_declarations);
             }
             Event::Empty(start) => {
                 let name = decode_local_name(start.name().as_ref())?;
+                let namespace_declarations =
+                    namespace_declarations_for_start(&reader, &start, xml_version)?;
+                let namespace = resolve_element_namespace(
+                    start.name().as_ref(),
+                    &namespace_stack,
+                    Some(&namespace_declarations),
+                )?;
+                validate_cii_namespace(&namespace, &stack, &name)?;
                 let attrs = read_attrs(&reader, &start, xml_version)?;
+                if should_preserve_raw_xml(&stack, &name) {
+                    state.push_preserved_xml(
+                        RawXmlCapture::new(
+                            &stack,
+                            name,
+                            event_start,
+                            state.active_line_id(),
+                            effective_namespace_bindings(&namespace_stack, &namespace_declarations),
+                        ),
+                        input_slice(input, event_start, event_end)?,
+                    )?;
+                    continue;
+                }
                 state.start_element(&stack, &name, &attrs)?;
                 state.end_element(&name)?;
             }
             Event::End(end) => {
                 let name = decode_local_name(end.name().as_ref())?;
-                let Some(opened) = stack.last() else {
+                let Some((opened, parent_stack)) = stack.split_last() else {
                     return Err(CiiError::UnsupportedRoot(name));
                 };
                 if opened != &name {
                     return Err(CiiError::UnsupportedRoot(format!("{opened}/{name}")));
                 }
+                let namespace =
+                    resolve_element_namespace(end.name().as_ref(), &namespace_stack, None)?;
+                validate_cii_namespace(&namespace, parent_stack, &name)?;
                 let text = text_stack
                     .pop()
                     .ok_or_else(|| CiiError::UnsupportedRoot(format!("{name}:text")))?;
@@ -242,6 +355,7 @@ pub fn from_xml(input: &str) -> Result<CommercialDocument, CiiError> {
                 }
                 state.end_element(&name)?;
                 stack.pop();
+                namespace_stack.pop();
             }
             Event::Text(text) => {
                 let text = text.xml_content(xml_version)?;
@@ -302,8 +416,16 @@ struct ParseState {
     tax_point_date: Option<String>,
     due_date: Option<String>,
     currency: Option<String>,
-    tenant_id: Option<String>,
-    trace_id: Option<String>,
+    metadata_tenant_id: Option<String>,
+    metadata_trace_id: Option<String>,
+    metadata_source_system: Option<String>,
+    cii_buyer_reference: Option<String>,
+    cii_business_process_context_ids: Vec<String>,
+    cii_guideline_context_ids: Vec<String>,
+    cii_transaction_ids: Vec<String>,
+    cii_test_indicators: Vec<String>,
+    cii_application_contexts: Vec<CiiApplicationContext>,
+    current_context_parameter: Option<DocumentContextParameterBuilder>,
     supplier: PartyBuilder,
     customer: PartyBuilder,
     payee: PartyBuilder,
@@ -318,6 +440,8 @@ struct ParseState {
     current_tax: Option<TaxSummaryBuilder>,
     monetary_total: MonetaryTotalBuilder,
     notes: Vec<LocalizedString>,
+    preserved_xml: Vec<CiiPreservedXml>,
+    current_line_preserved_start: Option<usize>,
 }
 
 impl ParseState {
@@ -330,8 +454,12 @@ impl ParseState {
         if stack.is_empty() && name != "CrossIndustryInvoice" {
             return Err(CiiError::UnsupportedRoot(name.to_owned()));
         }
+        if let Some(kind) = DocumentContextKind::from_element(name) {
+            self.current_context_parameter = Some(DocumentContextParameterBuilder::new(kind));
+        }
         if name == "IncludedSupplyChainTradeLineItem" {
             self.current_line = Some(LineBuilder::default());
+            self.current_line_preserved_start = Some(self.preserved_xml.len());
         }
         if name == "ApplicableTradeTax"
             && self.current_line.is_none()
@@ -351,12 +479,24 @@ impl ParseState {
     }
 
     fn end_element(&mut self, name: &str) -> Result<(), CiiError> {
+        if self
+            .current_context_parameter
+            .as_ref()
+            .is_some_and(|parameter| parameter.kind.element_name() == name)
+        {
+            let parameter = self
+                .current_context_parameter
+                .take()
+                .ok_or(CiiError::MissingElement("ram:DocumentContextParameter"))?;
+            self.apply_context_parameter(parameter)?;
+        }
         if name == "IncludedSupplyChainTradeLineItem" {
             let line = self
                 .current_line
                 .take()
                 .ok_or(CiiError::MissingElement("IncludedSupplyChainTradeLineItem"))?
                 .build()?;
+            self.assign_current_line_preserved_xml(&line.id);
             self.lines.push(line);
         }
         if name == "ApplicableTradeTax" {
@@ -376,6 +516,30 @@ impl ParseState {
     fn text(&mut self, stack: &[String], raw: &str) -> Result<(), CiiError> {
         let value = raw.trim();
         if value.is_empty() {
+            return Ok(());
+        }
+
+        if let Some(parameter) = self.current_context_parameter.as_mut() {
+            let container = parameter.kind.element_name();
+            if path_ends(stack, &[container, "ID"]) {
+                parameter.id = Some(value.to_owned());
+                return Ok(());
+            }
+            if path_ends(stack, &[container, "Value"]) {
+                parameter.value = Some(value.to_owned());
+                return Ok(());
+            }
+        }
+
+        if path_ends(
+            stack,
+            &["ExchangedDocumentContext", "SpecifiedTransactionID"],
+        ) {
+            self.cii_transaction_ids.push(value.to_owned());
+            return Ok(());
+        }
+        if path_ends(stack, &["ExchangedDocumentContext", "TestIndicator"]) {
+            self.cii_test_indicators.push(value.to_owned());
             return Ok(());
         }
 
@@ -440,12 +604,7 @@ impl ParseState {
 
         if let Some(role) = party_role(stack) {
             let party = self.party_mut(role);
-            if path_ends(stack, &["SpecifiedLegalOrganization", "ID"])
-                || path_ends(stack, &["GlobalID"])
-                || path_ends(stack, &["SellerTradeParty", "ID"])
-                || path_ends(stack, &["BuyerTradeParty", "ID"])
-                || path_ends(stack, &["PayeeTradeParty", "ID"])
-            {
+            if path_ends(stack, &["SpecifiedLegalOrganization", "ID"]) {
                 if party.id.is_none() {
                     party.id = Some(value.to_owned());
                 }
@@ -597,12 +756,7 @@ impl ParseState {
         ) {
             self.currency = Some(value.to_owned());
         } else if path_ends(stack, &["ApplicableHeaderTradeAgreement", "BuyerReference"]) {
-            self.tenant_id = Some(value.to_owned());
-        } else if path_ends(
-            stack,
-            &["BusinessProcessSpecifiedDocumentContextParameter", "ID"],
-        ) {
-            self.trace_id = Some(value.to_owned());
+            self.cii_buyer_reference = Some(value.to_owned());
         } else if path_ends(stack, &["ExchangedDocument", "IncludedNote", "Content"]) {
             self.notes.push(LocalizedString {
                 language: DEFAULT_LANGUAGE.to_owned(),
@@ -620,6 +774,41 @@ impl ParseState {
         Ok(())
     }
 
+    fn apply_context_parameter(
+        &mut self,
+        parameter: DocumentContextParameterBuilder,
+    ) -> Result<(), CiiError> {
+        match parameter.kind {
+            DocumentContextKind::BusinessProcess => {
+                if let Some(id) = parameter.id {
+                    self.cii_business_process_context_ids.push(id);
+                }
+            }
+            DocumentContextKind::Guideline => {
+                if let Some(id) = parameter.id.filter(|id| id != CORE_GUIDELINE_ID) {
+                    self.cii_guideline_context_ids.push(id);
+                }
+            }
+            DocumentContextKind::Application => {
+                if parameter.id.as_deref() == Some(mapping::INVOICEKIT_CII_METADATA_EXTENSION_URN) {
+                    if let Some(value) = parameter.value {
+                        let metadata: CiiMetadataPayload = serde_json::from_str(&value)?;
+                        self.metadata_tenant_id = Some(metadata.tenant_id);
+                        self.metadata_trace_id = Some(metadata.trace_id);
+                        self.metadata_source_system = metadata.source_system;
+                    }
+                } else if let Some(id) = parameter.id {
+                    self.cii_application_contexts.push(CiiApplicationContext {
+                        id,
+                        value: parameter.value,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_lines)]
     fn finish(self) -> Result<CommercialDocument, CiiError> {
         let document_type = self
             .document_type
@@ -633,10 +822,78 @@ impl ParseState {
         let currency = self
             .currency
             .ok_or(CiiError::MissingElement("ram:InvoiceCurrencyCode"))?;
-        let tenant_id = self.tenant_id.unwrap_or_else(|| "cii-import".to_owned());
+        let tenant_id = self
+            .metadata_tenant_id
+            .unwrap_or_else(|| "cii-import".to_owned());
         let trace_id = self
-            .trace_id
+            .metadata_trace_id
             .unwrap_or_else(|| format!("{BEAD_ID}:{document_number}"));
+        let mut extensions = Vec::<JurisdictionExtension>::new();
+        let mut cii_document_fields = Map::new();
+        if let Some(value) = self.cii_buyer_reference {
+            cii_document_fields.insert("buyer_reference".to_owned(), Value::String(value));
+        }
+        if !self.cii_business_process_context_ids.is_empty() {
+            cii_document_fields.insert(
+                "business_process_context_ids".to_owned(),
+                Value::Array(
+                    self.cii_business_process_context_ids
+                        .into_iter()
+                        .map(Value::String)
+                        .collect(),
+                ),
+            );
+        }
+        if !self.preserved_xml.is_empty() {
+            cii_document_fields.insert(
+                CII_PRESERVED_XML_KEY.to_owned(),
+                Value::Array(
+                    self.preserved_xml
+                        .into_iter()
+                        .map(CiiPreservedXml::into_value)
+                        .collect(),
+                ),
+            );
+        }
+        if !cii_document_fields.is_empty() {
+            extensions.push(JurisdictionExtension::new(
+                mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN,
+                Value::Object(cii_document_fields),
+            )?);
+        }
+        let mut cii_profile_context = Map::new();
+        insert_string_array(
+            &mut cii_profile_context,
+            "guideline_context_ids",
+            self.cii_guideline_context_ids,
+        );
+        insert_string_array(
+            &mut cii_profile_context,
+            "transaction_ids",
+            self.cii_transaction_ids,
+        );
+        insert_string_array(
+            &mut cii_profile_context,
+            "test_indicators",
+            self.cii_test_indicators,
+        );
+        if !self.cii_application_contexts.is_empty() {
+            cii_profile_context.insert(
+                "application_contexts".to_owned(),
+                Value::Array(
+                    self.cii_application_contexts
+                        .into_iter()
+                        .map(CiiApplicationContext::into_value)
+                        .collect(),
+                ),
+            );
+        }
+        if !cii_profile_context.is_empty() {
+            extensions.push(JurisdictionExtension::new(
+                mapping::CII_PROFILE_CONTEXT_EXTENSION_URN,
+                Value::Object(cii_profile_context),
+            )?);
+        }
         let due_date = self.due_date.map(DateOnly::new).transpose()?;
         let payment_terms = self
             .payment_terms_description
@@ -683,11 +940,11 @@ impl ParseState {
             attachments: Vec::<Attachment>::new(),
             references: Vec::<DocumentReference>::new(),
             notes: self.notes,
-            extensions: Vec::<JurisdictionExtension>::new(),
+            extensions,
             meta: DocumentMeta {
                 tenant_id,
                 trace_id,
-                source_system: None,
+                source_system: self.metadata_source_system,
             },
         })?;
         Ok(document)
@@ -702,6 +959,135 @@ impl ParseState {
                 &mut self.payee
             }
         }
+    }
+
+    fn active_line_id(&self) -> Option<String> {
+        self.current_line
+            .as_ref()
+            .and_then(|line| line.id.as_ref())
+            .cloned()
+    }
+
+    fn push_preserved_xml(&mut self, capture: RawXmlCapture, xml: &str) -> Result<(), CiiError> {
+        let preserved = CiiPreservedXml {
+            container: capture.container,
+            element: capture.element,
+            xml: canonicalize_preserved_xml_fragment(xml, &capture.namespaces)?,
+            line_id: capture.line_id,
+        };
+        validate_preserved_xml_fragment(&preserved)?;
+        self.preserved_xml.push(preserved);
+        Ok(())
+    }
+
+    fn assign_current_line_preserved_xml(&mut self, line_id: &str) {
+        let start = self.current_line_preserved_start.take().unwrap_or(0);
+        for preserved in self.preserved_xml.iter_mut().skip(start) {
+            if preserved.line_id.is_none() && is_line_scoped_container_path(&preserved.container) {
+                preserved.line_id = Some(line_id.to_owned());
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DocumentContextKind {
+    BusinessProcess,
+    Guideline,
+    Application,
+}
+
+impl DocumentContextKind {
+    fn from_element(name: &str) -> Option<Self> {
+        match name {
+            "BusinessProcessSpecifiedDocumentContextParameter" => Some(Self::BusinessProcess),
+            "GuidelineSpecifiedDocumentContextParameter" => Some(Self::Guideline),
+            "ApplicationSpecifiedDocumentContextParameter" => Some(Self::Application),
+            _ => None,
+        }
+    }
+
+    const fn element_name(self) -> &'static str {
+        match self {
+            Self::BusinessProcess => "BusinessProcessSpecifiedDocumentContextParameter",
+            Self::Guideline => "GuidelineSpecifiedDocumentContextParameter",
+            Self::Application => "ApplicationSpecifiedDocumentContextParameter",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct DocumentContextParameterBuilder {
+    kind: DocumentContextKind,
+    id: Option<String>,
+    value: Option<String>,
+}
+
+impl DocumentContextParameterBuilder {
+    const fn new(kind: DocumentContextKind) -> Self {
+        Self {
+            kind,
+            id: None,
+            value: None,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct CiiMetadataPayload {
+    tenant_id: String,
+    trace_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_system: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CiiApplicationContext {
+    id: String,
+    value: Option<String>,
+}
+
+impl CiiApplicationContext {
+    fn into_value(self) -> Value {
+        let mut payload = Map::new();
+        payload.insert("id".to_owned(), Value::String(self.id));
+        if let Some(value) = self.value {
+            payload.insert("value".to_owned(), Value::String(value));
+        }
+        Value::Object(payload)
+    }
+
+    fn from_value(value: &Value) -> Result<Self, CiiError> {
+        let Some(payload) = value.as_object() else {
+            return Err(CiiError::InvalidPreservedXml {
+                container: "ExchangedDocumentContext".to_owned(),
+                element: "ApplicationSpecifiedDocumentContextParameter".to_owned(),
+                message: "application context payload must be an object".to_owned(),
+            });
+        };
+        let id = payload
+            .get("id")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .ok_or_else(|| CiiError::InvalidPreservedXml {
+                container: "ExchangedDocumentContext".to_owned(),
+                element: "ApplicationSpecifiedDocumentContextParameter".to_owned(),
+                message: "application context id must be a string".to_owned(),
+            })?;
+        let value = payload
+            .get("value")
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(ToOwned::to_owned)
+                    .ok_or_else(|| CiiError::InvalidPreservedXml {
+                        container: "ExchangedDocumentContext".to_owned(),
+                        element: "ApplicationSpecifiedDocumentContextParameter".to_owned(),
+                        message: "application context value must be a string".to_owned(),
+                    })
+            })
+            .transpose()?;
+        Ok(Self { id, value })
     }
 }
 
@@ -878,6 +1264,104 @@ struct XmlAttribute {
     value: String,
 }
 
+#[derive(Debug)]
+struct RawXmlCapture {
+    container: String,
+    element: String,
+    start: usize,
+    depth: usize,
+    line_id: Option<String>,
+    namespaces: Vec<XmlNamespaceBinding>,
+}
+
+impl RawXmlCapture {
+    fn new(
+        stack: &[String],
+        element: String,
+        start: usize,
+        line_id: Option<String>,
+        namespaces: Vec<XmlNamespaceBinding>,
+    ) -> Self {
+        Self {
+            container: stack.join("/"),
+            element,
+            start,
+            depth: 1,
+            line_id,
+            namespaces,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct XmlNamespaceBinding {
+    prefix: Option<String>,
+    uri: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CiiPreservedXml {
+    container: String,
+    element: String,
+    xml: String,
+    line_id: Option<String>,
+}
+
+impl CiiPreservedXml {
+    fn into_value(self) -> Value {
+        let mut payload = Map::new();
+        payload.insert(
+            CII_PRESERVED_CONTAINER_KEY.to_owned(),
+            Value::String(self.container),
+        );
+        payload.insert(
+            CII_PRESERVED_ELEMENT_KEY.to_owned(),
+            Value::String(self.element),
+        );
+        payload.insert(
+            CII_PRESERVED_XML_FRAGMENT_KEY.to_owned(),
+            Value::String(self.xml),
+        );
+        if let Some(line_id) = self.line_id {
+            payload.insert("line_id".to_owned(), Value::String(line_id));
+        }
+        Value::Object(payload)
+    }
+
+    fn from_value(value: &Value) -> Result<Self, CiiError> {
+        let Some(payload) = value.as_object() else {
+            return Err(CiiError::InvalidPreservedXml {
+                container: String::new(),
+                element: String::new(),
+                message: "payload item must be an object".to_owned(),
+            });
+        };
+        let container = preserved_string_field(payload, CII_PRESERVED_CONTAINER_KEY)?;
+        let element = preserved_string_field(payload, CII_PRESERVED_ELEMENT_KEY)?;
+        let xml = preserved_string_field(payload, CII_PRESERVED_XML_FRAGMENT_KEY)?;
+        let line_id = payload
+            .get("line_id")
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(ToOwned::to_owned)
+                    .ok_or_else(|| CiiError::InvalidPreservedXml {
+                        container: container.clone(),
+                        element: element.clone(),
+                        message: "line_id must be a string".to_owned(),
+                    })
+            })
+            .transpose()?;
+        Ok(Self {
+            container,
+            element,
+            xml,
+            line_id,
+        })
+    }
+}
+
+#[allow(clippy::too_many_lines)]
 fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError> {
     let currency = string_value(&document.currency)?;
     let mut xml = String::new();
@@ -890,52 +1374,188 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
     xml.push_str(r#"" xmlns:ram=""#);
     write_xml_attr(CII_RAM_NAMESPACE_URI, &mut xml);
     xml.push_str(r#"">"#);
-    xml.push_str("<rsm:ExchangedDocumentContext>");
-    xml.push_str("<ram:BusinessProcessSpecifiedDocumentContextParameter>");
-    write_text_element(&mut xml, "ram:ID", &document.meta.trace_id);
-    xml.push_str("</ram:BusinessProcessSpecifiedDocumentContextParameter>");
-    xml.push_str("<ram:GuidelineSpecifiedDocumentContextParameter>");
-    write_text_element(&mut xml, "ram:ID", CORE_GUIDELINE_ID);
-    xml.push_str("</ram:GuidelineSpecifiedDocumentContextParameter>");
-    xml.push_str("</rsm:ExchangedDocumentContext>");
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice",
+        None,
+        "ExchangedDocumentContext",
+    )?;
+    write_document_context(&mut xml, document)?;
 
     xml.push_str("<rsm:ExchangedDocument>");
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/ExchangedDocument",
+        None,
+        "ID",
+    )?;
     write_text_element(
         &mut xml,
         "ram:ID",
         &string_value(&document.document_number)?,
     );
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/ExchangedDocument",
+        None,
+        "TypeCode",
+    )?;
     write_text_element(&mut xml, "ram:TypeCode", document_type_code(document)?);
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/ExchangedDocument",
+        None,
+        "IssueDateTime",
+    )?;
     xml.push_str("<ram:IssueDateTime>");
     write_date_time(&mut xml, &document.issue_date)?;
     xml.push_str("</ram:IssueDateTime>");
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/ExchangedDocument",
+        None,
+        "IncludedNote",
+    )?;
     for note in &document.notes {
-        write_note(&mut xml, note);
+        write_note(&mut xml, note, document)?;
     }
+    write_preserved_xml_after_all(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/ExchangedDocument",
+        None,
+    )?;
     xml.push_str("</rsm:ExchangedDocument>");
 
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice",
+        None,
+        "SupplyChainTradeTransaction",
+    )?;
     xml.push_str("<rsm:SupplyChainTradeTransaction>");
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction",
+        None,
+        "IncludedSupplyChainTradeLineItem",
+    )?;
     for line in &document.lines {
-        write_line(&mut xml, line, &currency);
+        write_line(&mut xml, line, &currency, document)?;
     }
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction",
+        None,
+        "ApplicableHeaderTradeAgreement",
+    )?;
     xml.push_str("<ram:ApplicableHeaderTradeAgreement>");
-    write_text_element(&mut xml, "ram:BuyerReference", &document.meta.tenant_id);
-    write_party(&mut xml, "ram:SellerTradeParty", &document.supplier)?;
-    write_party(&mut xml, "ram:BuyerTradeParty", &document.customer)?;
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement",
+        None,
+        "BuyerReference",
+    )?;
+    if let Some(value) = cii_document_field_value(document, "buyer_reference") {
+        write_text_element(&mut xml, "ram:BuyerReference", value);
+    }
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement",
+        None,
+        "SellerTradeParty",
+    )?;
+    write_party(
+        &mut xml,
+        "ram:SellerTradeParty",
+        &document.supplier,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/SellerTradeParty",
+    )?;
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement",
+        None,
+        "BuyerTradeParty",
+    )?;
+    write_party(
+        &mut xml,
+        "ram:BuyerTradeParty",
+        &document.customer,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/BuyerTradeParty",
+    )?;
+    write_preserved_xml_after_all(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement",
+        None,
+    )?;
     xml.push_str("</ram:ApplicableHeaderTradeAgreement>");
 
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction",
+        None,
+        "ApplicableHeaderTradeDelivery",
+    )?;
     xml.push_str("<ram:ApplicableHeaderTradeDelivery>");
     if let Some(date) = &document.tax_point_date {
         xml.push_str("<ram:ActualDeliverySupplyChainEvent><ram:OccurrenceDateTime>");
         write_date_time(&mut xml, date)?;
         xml.push_str("</ram:OccurrenceDateTime></ram:ActualDeliverySupplyChainEvent>");
     }
+    write_preserved_xml_after_all(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeDelivery",
+        None,
+    )?;
     xml.push_str("</ram:ApplicableHeaderTradeDelivery>");
 
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction",
+        None,
+        "ApplicableHeaderTradeSettlement",
+    )?;
     xml.push_str("<ram:ApplicableHeaderTradeSettlement>");
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement",
+        None,
+        "PayeeTradeParty",
+    )?;
     if let Some(payee) = &document.payee {
-        write_party(&mut xml, "ram:PayeeTradeParty", payee)?;
+        write_party(
+            &mut xml,
+            "ram:PayeeTradeParty",
+            payee,
+            document,
+            "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement/PayeeTradeParty",
+        )?;
     }
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement",
+        None,
+        "PaymentReference",
+    )?;
     if let Some(first) = document
         .payment_instructions
         .iter()
@@ -944,13 +1564,41 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
     {
         write_text_element(&mut xml, "ram:PaymentReference", first);
     }
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement",
+        None,
+        "InvoiceCurrencyCode",
+    )?;
     write_text_element(&mut xml, "ram:InvoiceCurrencyCode", &currency);
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement",
+        None,
+        "SpecifiedTradeSettlementPaymentMeans",
+    )?;
     for instruction in &document.payment_instructions {
-        write_payment_instruction(&mut xml, instruction);
+        write_payment_instruction(&mut xml, instruction, document)?;
     }
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement",
+        None,
+        "ApplicableTradeTax",
+    )?;
     for summary in &document.tax_summary {
-        write_tax_summary(&mut xml, summary);
+        write_tax_summary(&mut xml, summary, document)?;
     }
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement",
+        None,
+        "SpecifiedTradePaymentTerms",
+    )?;
     if let Some(terms) = &document.payment_terms {
         xml.push_str("<ram:SpecifiedTradePaymentTerms>");
         write_text_element(&mut xml, "ram:Description", &terms.description);
@@ -965,46 +1613,468 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
         write_date_time(&mut xml, date)?;
         xml.push_str("</ram:DueDateDateTime></ram:SpecifiedTradePaymentTerms>");
     }
-    write_monetary_total(&mut xml, &document.monetary_total, &currency);
+    write_preserved_xml_before(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement",
+        None,
+        "SpecifiedTradeSettlementHeaderMonetarySummation",
+    )?;
+    write_monetary_total(&mut xml, &document.monetary_total, &currency, document)?;
+    write_preserved_xml_after_all(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement",
+        None,
+    )?;
     xml.push_str("</ram:ApplicableHeaderTradeSettlement>");
+    write_preserved_xml_after_all(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction",
+        None,
+    )?;
     xml.push_str("</rsm:SupplyChainTradeTransaction>");
+    write_preserved_xml_after_all(&mut xml, document, "CrossIndustryInvoice", None)?;
     xml.push_str("</rsm:CrossIndustryInvoice>");
     Ok(xml)
 }
 
-fn write_party(xml: &mut String, container: &str, party: &Party) -> Result<(), CiiError> {
+fn write_document_context(xml: &mut String, document: &CommercialDocument) -> Result<(), CiiError> {
+    xml.push_str("<rsm:ExchangedDocumentContext>");
+    write_preserved_xml_before(
+        xml,
+        document,
+        "CrossIndustryInvoice/ExchangedDocumentContext",
+        None,
+        "SpecifiedTransactionID",
+    )?;
+    for value in profile_context_values(document, "transaction_ids") {
+        write_text_element(xml, "ram:SpecifiedTransactionID", value);
+    }
+    write_preserved_xml_before(
+        xml,
+        document,
+        "CrossIndustryInvoice/ExchangedDocumentContext",
+        None,
+        "TestIndicator",
+    )?;
+    for value in profile_context_values(document, "test_indicators") {
+        write_text_element(xml, "ram:TestIndicator", value);
+    }
+    write_preserved_xml_before(
+        xml,
+        document,
+        "CrossIndustryInvoice/ExchangedDocumentContext",
+        None,
+        "BusinessProcessSpecifiedDocumentContextParameter",
+    )?;
+    for value in cii_document_field_values(document, "business_process_context_ids") {
+        write_context_parameter(
+            xml,
+            "ram:BusinessProcessSpecifiedDocumentContextParameter",
+            value,
+            None,
+        );
+    }
+    write_preserved_xml_before(
+        xml,
+        document,
+        "CrossIndustryInvoice/ExchangedDocumentContext",
+        None,
+        "ApplicationSpecifiedDocumentContextParameter",
+    )?;
+    for context in profile_application_context_values(document)? {
+        write_context_parameter(
+            xml,
+            "ram:ApplicationSpecifiedDocumentContextParameter",
+            &context.id,
+            context.value.as_deref(),
+        );
+    }
+    write_invoicekit_metadata_context_parameter(xml, &document.meta)?;
+    write_preserved_xml_before(
+        xml,
+        document,
+        "CrossIndustryInvoice/ExchangedDocumentContext",
+        None,
+        "GuidelineSpecifiedDocumentContextParameter",
+    )?;
+    let guideline_context_ids = profile_context_values(document, "guideline_context_ids");
+    if guideline_context_ids.is_empty() {
+        write_context_parameter(
+            xml,
+            "ram:GuidelineSpecifiedDocumentContextParameter",
+            CORE_GUIDELINE_ID,
+            None,
+        );
+    } else {
+        for value in guideline_context_ids {
+            write_context_parameter(
+                xml,
+                "ram:GuidelineSpecifiedDocumentContextParameter",
+                value,
+                None,
+            );
+        }
+    }
+    write_preserved_xml_after_all(
+        xml,
+        document,
+        "CrossIndustryInvoice/ExchangedDocumentContext",
+        None,
+    )?;
+    xml.push_str("</rsm:ExchangedDocumentContext>");
+    Ok(())
+}
+
+fn write_context_parameter(xml: &mut String, container: &str, id: &str, value: Option<&str>) {
     xml.push('<');
     xml.push_str(container);
     xml.push('>');
-    if let Some(id) = &party.id {
-        write_text_element(xml, "ram:ID", id);
+    write_text_element(xml, "ram:ID", id);
+    if let Some(value) = value {
+        write_text_element(xml, "ram:Value", value);
     }
-    write_text_element(xml, "ram:Name", &party.name);
-    if let Some(id) = &party.id {
-        xml.push_str("<ram:SpecifiedLegalOrganization>");
-        write_text_element(xml, "ram:ID", id);
-        xml.push_str("</ram:SpecifiedLegalOrganization>");
+    xml.push_str("</");
+    xml.push_str(container);
+    xml.push('>');
+}
+
+fn write_invoicekit_metadata_context_parameter(
+    xml: &mut String,
+    meta: &DocumentMeta,
+) -> Result<(), CiiError> {
+    let payload = CiiMetadataPayload {
+        tenant_id: meta.tenant_id.clone(),
+        trace_id: meta.trace_id.clone(),
+        source_system: meta.source_system.clone(),
+    };
+    let value = serde_json::to_string(&payload)?;
+    write_context_parameter(
+        xml,
+        "ram:ApplicationSpecifiedDocumentContextParameter",
+        mapping::INVOICEKIT_CII_METADATA_EXTENSION_URN,
+        Some(&value),
+    );
+    Ok(())
+}
+
+fn cii_document_field_value<'a>(document: &'a CommercialDocument, key: &str) -> Option<&'a str> {
+    document
+        .extensions
+        .iter()
+        .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
+        .and_then(|extension| extension.payload.get(key))
+        .and_then(Value::as_str)
+}
+
+fn cii_document_field_values<'a>(document: &'a CommercialDocument, key: &str) -> Vec<&'a str> {
+    document
+        .extensions
+        .iter()
+        .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
+        .and_then(|extension| extension.payload.get(key))
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default()
+}
+
+fn profile_context_values<'a>(document: &'a CommercialDocument, key: &str) -> Vec<&'a str> {
+    document
+        .extensions
+        .iter()
+        .find(|extension| extension.urn == mapping::CII_PROFILE_CONTEXT_EXTENSION_URN)
+        .and_then(|extension| extension.payload.get(key))
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default()
+}
+
+fn profile_application_context_values(
+    document: &CommercialDocument,
+) -> Result<Vec<CiiApplicationContext>, CiiError> {
+    let Some(values) = document
+        .extensions
+        .iter()
+        .find(|extension| extension.urn == mapping::CII_PROFILE_CONTEXT_EXTENSION_URN)
+        .and_then(|extension| extension.payload.get("application_contexts"))
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(items) = values.as_array() else {
+        return Err(CiiError::InvalidPreservedXml {
+            container: "ExchangedDocumentContext".to_owned(),
+            element: "ApplicationSpecifiedDocumentContextParameter".to_owned(),
+            message: "application_contexts must be an array".to_owned(),
+        });
+    };
+    items
+        .iter()
+        .map(CiiApplicationContext::from_value)
+        .collect()
+}
+
+fn insert_string_array(payload: &mut Map<String, Value>, key: &str, values: Vec<String>) {
+    if values.is_empty() {
+        return;
     }
-    if let Some(contact) = &party.contact {
-        if contact.name.is_some() || contact.email.is_some() || contact.phone.is_some() {
-            xml.push_str("<ram:DefinedTradeContact>");
-            if let Some(name) = &contact.name {
-                write_text_element(xml, "ram:PersonName", name);
+    payload.insert(
+        key.to_owned(),
+        Value::Array(values.into_iter().map(Value::String).collect()),
+    );
+}
+
+fn write_preserved_xml(
+    xml: &mut String,
+    document: &CommercialDocument,
+    container: &str,
+    line_id: Option<&str>,
+    lower_bound: Option<u16>,
+    upper_bound: Option<u16>,
+) -> Result<(), CiiError> {
+    let parent = container_name(container);
+    let mut values = cii_preserved_xml_values(document, container, line_id)?
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, preserved)| {
+            let order = cii_child_order(parent, &preserved.element)?;
+            if lower_bound.is_none_or(|lower| order > lower)
+                && upper_bound.is_none_or(|upper| order < upper)
+            {
+                Some((order, index, preserved))
+            } else {
+                None
             }
-            if let Some(phone) = &contact.phone {
-                xml.push_str("<ram:TelephoneUniversalCommunication>");
-                write_text_element(xml, "ram:CompleteNumber", phone);
-                xml.push_str("</ram:TelephoneUniversalCommunication>");
-            }
-            if let Some(email) = &contact.email {
-                xml.push_str("<ram:EmailURIUniversalCommunication>");
-                write_text_element(xml, "ram:URIID", email);
-                xml.push_str("</ram:EmailURIUniversalCommunication>");
-            }
-            xml.push_str("</ram:DefinedTradeContact>");
+        })
+        .collect::<Vec<_>>();
+    values.sort_by_key(|(order, index, _)| (*order, *index));
+    for (_, _, preserved) in values {
+        xml.push_str(&preserved.xml);
+    }
+    Ok(())
+}
+
+fn write_preserved_xml_before(
+    xml: &mut String,
+    document: &CommercialDocument,
+    container: &str,
+    line_id: Option<&str>,
+    before_child: &str,
+) -> Result<(), CiiError> {
+    let parent = container_name(container);
+    write_preserved_xml(
+        xml,
+        document,
+        container,
+        line_id,
+        previous_known_child_order(parent, before_child),
+        cii_child_order(parent, before_child),
+    )
+}
+
+fn write_preserved_xml_after_all(
+    xml: &mut String,
+    document: &CommercialDocument,
+    container: &str,
+    line_id: Option<&str>,
+) -> Result<(), CiiError> {
+    let parent = container_name(container);
+    write_preserved_xml(
+        xml,
+        document,
+        container,
+        line_id,
+        known_cii_children(parent).and_then(|children| {
+            children
+                .iter()
+                .filter_map(|child| cii_child_order(parent, child))
+                .max()
+        }),
+        None,
+    )
+}
+
+fn cii_preserved_xml_values(
+    document: &CommercialDocument,
+    container: &str,
+    line_id: Option<&str>,
+) -> Result<Vec<CiiPreservedXml>, CiiError> {
+    let Some(values) = document
+        .extensions
+        .iter()
+        .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
+        .and_then(|extension| extension.payload.get(CII_PRESERVED_XML_KEY))
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(items) = values.as_array() else {
+        return Err(CiiError::InvalidPreservedXml {
+            container: container.to_owned(),
+            element: CII_PRESERVED_XML_KEY.to_owned(),
+            message: "preserved_xml must be an array".to_owned(),
+        });
+    };
+
+    let mut matching = Vec::new();
+    for item in items {
+        let preserved = CiiPreservedXml::from_value(item)?;
+        validate_preserved_xml_entry(document, &preserved)?;
+        if preserved.container == container && preserved.line_id.as_deref() == line_id {
+            matching.push(preserved);
         }
     }
-    write_address(xml, &party.address)?;
+    Ok(matching)
+}
+
+fn has_preserved_xml(
+    document: &CommercialDocument,
+    container: &str,
+    line_id: Option<&str>,
+) -> Result<bool, CiiError> {
+    Ok(!cii_preserved_xml_values(document, container, line_id)?.is_empty())
+}
+
+fn has_preserved_xml_at_or_below(
+    document: &CommercialDocument,
+    container: &str,
+    line_id: Option<&str>,
+) -> Result<bool, CiiError> {
+    let Some(values) = document
+        .extensions
+        .iter()
+        .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
+        .and_then(|extension| extension.payload.get(CII_PRESERVED_XML_KEY))
+    else {
+        return Ok(false);
+    };
+    let Some(items) = values.as_array() else {
+        return Err(CiiError::InvalidPreservedXml {
+            container: container.to_owned(),
+            element: CII_PRESERVED_XML_KEY.to_owned(),
+            message: "preserved_xml must be an array".to_owned(),
+        });
+    };
+
+    for item in items {
+        let preserved = CiiPreservedXml::from_value(item)?;
+        validate_preserved_xml_entry(document, &preserved)?;
+        let in_subtree = preserved.container == container
+            || preserved
+                .container
+                .strip_prefix(container)
+                .is_some_and(|suffix| suffix.starts_with('/'));
+        if in_subtree && preserved.line_id.as_deref() == line_id {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+#[allow(clippy::too_many_lines)]
+fn write_party(
+    xml: &mut String,
+    container: &str,
+    party: &Party,
+    document: &CommercialDocument,
+    container_path: &str,
+) -> Result<(), CiiError> {
+    xml.push('<');
+    xml.push_str(container);
+    xml.push('>');
+    write_preserved_xml_before(xml, document, container_path, None, "Name")?;
+    write_text_element(xml, "ram:Name", &party.name);
+    write_preserved_xml_before(
+        xml,
+        document,
+        container_path,
+        None,
+        "SpecifiedLegalOrganization",
+    )?;
+    let legal_organization_path = format!("{container_path}/SpecifiedLegalOrganization");
+    if party.id.is_some() || has_preserved_xml(document, &legal_organization_path, None)? {
+        xml.push_str("<ram:SpecifiedLegalOrganization>");
+        write_preserved_xml_before(xml, document, &legal_organization_path, None, "ID")?;
+        if let Some(id) = &party.id {
+            write_text_element(xml, "ram:ID", id);
+        }
+        write_preserved_xml_after_all(xml, document, &legal_organization_path, None)?;
+        xml.push_str("</ram:SpecifiedLegalOrganization>");
+    }
+    write_preserved_xml_before(xml, document, container_path, None, "DefinedTradeContact")?;
+    let contact_path = format!("{container_path}/DefinedTradeContact");
+    let contact = party.contact.as_ref();
+    let contact_has_known_fields = contact.is_some_and(|contact| {
+        contact.name.is_some() || contact.email.is_some() || contact.phone.is_some()
+    });
+    let contact_has_preserved_xml = has_preserved_xml_at_or_below(document, &contact_path, None)?;
+    if contact_has_known_fields || contact_has_preserved_xml {
+        xml.push_str("<ram:DefinedTradeContact>");
+        write_preserved_xml_before(xml, document, &contact_path, None, "PersonName")?;
+        if let Some(name) = contact.and_then(|contact| contact.name.as_ref()) {
+            write_text_element(xml, "ram:PersonName", name);
+        }
+        write_preserved_xml_before(
+            xml,
+            document,
+            &contact_path,
+            None,
+            "TelephoneUniversalCommunication",
+        )?;
+        let telephone_path = format!("{contact_path}/TelephoneUniversalCommunication");
+        if contact.and_then(|contact| contact.phone.as_ref()).is_some()
+            || has_preserved_xml(document, &telephone_path, None)?
+        {
+            xml.push_str("<ram:TelephoneUniversalCommunication>");
+            let phone = contact.and_then(|contact| contact.phone.as_ref());
+            if let Some(phone) = phone {
+                write_preserved_xml_before(xml, document, &telephone_path, None, "CompleteNumber")?;
+                write_text_element(xml, "ram:CompleteNumber", phone);
+                write_preserved_xml_after_all(xml, document, &telephone_path, None)?;
+            } else {
+                write_preserved_xml(xml, document, &telephone_path, None, None, None)?;
+            }
+            xml.push_str("</ram:TelephoneUniversalCommunication>");
+        }
+        write_preserved_xml_before(
+            xml,
+            document,
+            &contact_path,
+            None,
+            "EmailURIUniversalCommunication",
+        )?;
+        let email_path = format!("{contact_path}/EmailURIUniversalCommunication");
+        if contact.and_then(|contact| contact.email.as_ref()).is_some()
+            || has_preserved_xml(document, &email_path, None)?
+        {
+            xml.push_str("<ram:EmailURIUniversalCommunication>");
+            let email = contact.and_then(|contact| contact.email.as_ref());
+            if let Some(email) = email {
+                write_preserved_xml_before(xml, document, &email_path, None, "URIID")?;
+                write_text_element(xml, "ram:URIID", email);
+                write_preserved_xml_after_all(xml, document, &email_path, None)?;
+            } else {
+                write_preserved_xml(xml, document, &email_path, None, None, None)?;
+            }
+            xml.push_str("</ram:EmailURIUniversalCommunication>");
+        }
+        write_preserved_xml_after_all(xml, document, &contact_path, None)?;
+        xml.push_str("</ram:DefinedTradeContact>");
+    }
+    write_preserved_xml_before(xml, document, container_path, None, "PostalTradeAddress")?;
+    write_address(
+        xml,
+        &party.address,
+        document,
+        &format!("{container_path}/PostalTradeAddress"),
+    )?;
+    write_preserved_xml_before(
+        xml,
+        document,
+        container_path,
+        None,
+        "SpecifiedTaxRegistration",
+    )?;
     for tax_id in &party.tax_ids {
         xml.push_str("<ram:SpecifiedTaxRegistration>");
         xml.push_str(r#"<ram:ID schemeID=""#);
@@ -1016,37 +2086,71 @@ fn write_party(xml: &mut String, container: &str, party: &Party) -> Result<(), C
         write_xml_attr(scheme, xml);
         xml.push_str(r#"">"#);
         write_xml_text(&tax_id.value, xml);
-        xml.push_str("</ram:ID></ram:SpecifiedTaxRegistration>");
+        xml.push_str("</ram:ID>");
+        write_preserved_xml_after_all(
+            xml,
+            document,
+            &format!("{container_path}/SpecifiedTaxRegistration"),
+            None,
+        )?;
+        xml.push_str("</ram:SpecifiedTaxRegistration>");
     }
+    write_preserved_xml_after_all(xml, document, container_path, None)?;
     xml.push_str("</");
     xml.push_str(container);
     xml.push('>');
     Ok(())
 }
 
-fn write_address(xml: &mut String, address: &PostalAddress) -> Result<(), CiiError> {
+fn write_address(
+    xml: &mut String,
+    address: &PostalAddress,
+    document: &CommercialDocument,
+    container_path: &str,
+) -> Result<(), CiiError> {
     xml.push_str("<ram:PostalTradeAddress>");
+    write_preserved_xml_before(xml, document, container_path, None, "PostcodeCode")?;
     write_text_element(xml, "ram:PostcodeCode", &address.postal_code);
+    write_preserved_xml_before(xml, document, container_path, None, "LineOne")?;
     if let Some(first) = address.lines.first() {
         write_text_element(xml, "ram:LineOne", first);
     }
+    write_preserved_xml_before(xml, document, container_path, None, "LineTwo")?;
     if let Some(second) = address.lines.get(1) {
         write_text_element(xml, "ram:LineTwo", second);
     }
+    write_preserved_xml_before(xml, document, container_path, None, "LineThree")?;
     if let Some(extra_lines) = address.lines.get(2..) {
         write_text_element(xml, "ram:LineThree", &extra_lines.join(" "));
     }
+    write_preserved_xml_before(xml, document, container_path, None, "CityName")?;
     write_text_element(xml, "ram:CityName", &address.city);
+    write_preserved_xml_before(
+        xml,
+        document,
+        container_path,
+        None,
+        "CountrySubDivisionName",
+    )?;
     if let Some(subdivision) = &address.subdivision {
         write_text_element(xml, "ram:CountrySubDivisionName", subdivision);
     }
+    write_preserved_xml_before(xml, document, container_path, None, "CountryID")?;
     write_text_element(xml, "ram:CountryID", &string_value(&address.country)?);
+    write_preserved_xml_after_all(xml, document, container_path, None)?;
     xml.push_str("</ram:PostalTradeAddress>");
     Ok(())
 }
 
-fn write_payment_instruction(xml: &mut String, instruction: &PaymentInstruction) {
+fn write_payment_instruction(
+    xml: &mut String,
+    instruction: &PaymentInstruction,
+    document: &CommercialDocument,
+) -> Result<(), CiiError> {
+    let container_path =
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement/SpecifiedTradeSettlementPaymentMeans";
     xml.push_str("<ram:SpecifiedTradeSettlementPaymentMeans>");
+    write_preserved_xml_before(xml, document, container_path, None, "TypeCode")?;
     let code = match instruction.kind {
         PaymentInstructionKind::Sepa | PaymentInstructionKind::IbanBic => "30",
         PaymentInstructionKind::SwissQr
@@ -1055,73 +2159,170 @@ fn write_payment_instruction(xml: &mut String, instruction: &PaymentInstruction)
         | PaymentInstructionKind::Other => "1",
     };
     write_text_element(xml, "ram:TypeCode", code);
+    write_preserved_xml_before(
+        xml,
+        document,
+        container_path,
+        None,
+        "PayeePartyCreditorFinancialAccount",
+    )?;
     if let Some(account) = &instruction.account {
         xml.push_str("<ram:PayeePartyCreditorFinancialAccount>");
         write_text_element(xml, "ram:IBANID", account);
+        write_preserved_xml_after_all(
+            xml,
+            document,
+            &format!("{container_path}/PayeePartyCreditorFinancialAccount"),
+            None,
+        )?;
         xml.push_str("</ram:PayeePartyCreditorFinancialAccount>");
     }
+    write_preserved_xml_after_all(xml, document, container_path, None)?;
     xml.push_str("</ram:SpecifiedTradeSettlementPaymentMeans>");
+    Ok(())
 }
 
-fn write_tax_summary(xml: &mut String, summary: &TaxCategorySummary) {
+fn write_tax_summary(
+    xml: &mut String,
+    summary: &TaxCategorySummary,
+    document: &CommercialDocument,
+) -> Result<(), CiiError> {
+    let container_path =
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement/ApplicableTradeTax";
     xml.push_str("<ram:ApplicableTradeTax>");
+    write_preserved_xml_before(xml, document, container_path, None, "CalculatedAmount")?;
     write_amount_text_element(xml, "ram:CalculatedAmount", summary.tax_amount.inner());
+    write_preserved_xml_before(xml, document, container_path, None, "TypeCode")?;
     write_text_element(xml, "ram:TypeCode", "VAT");
+    write_preserved_xml_before(xml, document, container_path, None, "BasisAmount")?;
     write_amount_text_element(xml, "ram:BasisAmount", summary.taxable_amount.inner());
+    write_preserved_xml_before(xml, document, container_path, None, "CategoryCode")?;
     write_text_element(xml, "ram:CategoryCode", &summary.category_code);
+    write_preserved_xml_before(xml, document, container_path, None, "RateApplicablePercent")?;
     if let Some(rate) = &summary.tax_rate {
         write_text_element(xml, "ram:RateApplicablePercent", &rate.inner().to_string());
     }
+    write_preserved_xml_after_all(xml, document, container_path, None)?;
     xml.push_str("</ram:ApplicableTradeTax>");
+    Ok(())
 }
 
-fn write_monetary_total(xml: &mut String, total: &MonetaryTotal, currency: &str) {
+fn write_monetary_total(
+    xml: &mut String,
+    total: &MonetaryTotal,
+    currency: &str,
+    document: &CommercialDocument,
+) -> Result<(), CiiError> {
+    let container_path = "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement/SpecifiedTradeSettlementHeaderMonetarySummation";
     xml.push_str("<ram:SpecifiedTradeSettlementHeaderMonetarySummation>");
+    write_preserved_xml_before(xml, document, container_path, None, "LineTotalAmount")?;
     write_amount_text_element(
         xml,
         "ram:LineTotalAmount",
         total.line_extension_amount.inner(),
     );
+    write_preserved_xml_before(xml, document, container_path, None, "AllowanceTotalAmount")?;
     if let Some(value) = &total.allowance_total_amount {
         write_amount_text_element(xml, "ram:AllowanceTotalAmount", value.inner());
     }
+    write_preserved_xml_before(xml, document, container_path, None, "ChargeTotalAmount")?;
     if let Some(value) = &total.charge_total_amount {
         write_amount_text_element(xml, "ram:ChargeTotalAmount", value.inner());
     }
+    write_preserved_xml_before(xml, document, container_path, None, "TaxBasisTotalAmount")?;
     write_amount_text_element(
         xml,
         "ram:TaxBasisTotalAmount",
         total.tax_exclusive_amount.inner(),
     );
+    write_preserved_xml_before(xml, document, container_path, None, "TaxTotalAmount")?;
     xml.push_str(r#"<ram:TaxTotalAmount currencyID=""#);
     write_xml_attr(currency, xml);
     xml.push_str(r#"">"#);
     let tax_total = total.tax_inclusive_amount.inner() - total.tax_exclusive_amount.inner();
     write_xml_text(&tax_total.to_string(), xml);
     xml.push_str("</ram:TaxTotalAmount>");
+    write_preserved_xml_before(xml, document, container_path, None, "GrandTotalAmount")?;
     write_amount_text_element(
         xml,
         "ram:GrandTotalAmount",
         total.tax_inclusive_amount.inner(),
     );
+    write_preserved_xml_before(xml, document, container_path, None, "TotalPrepaidAmount")?;
     if let Some(value) = &total.prepaid_amount {
         write_amount_text_element(xml, "ram:TotalPrepaidAmount", value.inner());
     }
+    write_preserved_xml_before(xml, document, container_path, None, "DuePayableAmount")?;
     write_amount_text_element(xml, "ram:DuePayableAmount", total.payable_amount.inner());
+    write_preserved_xml_after_all(xml, document, container_path, None)?;
     xml.push_str("</ram:SpecifiedTradeSettlementHeaderMonetarySummation>");
+    Ok(())
 }
 
-fn write_line(xml: &mut String, line: &DocumentLine, _currency: &str) {
+fn write_line(
+    xml: &mut String,
+    line: &DocumentLine,
+    _currency: &str,
+    document: &CommercialDocument,
+) -> Result<(), CiiError> {
+    let line_path =
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/IncludedSupplyChainTradeLineItem";
     xml.push_str("<ram:IncludedSupplyChainTradeLineItem>");
+    write_preserved_xml_before(
+        xml,
+        document,
+        line_path,
+        Some(&line.id),
+        "AssociatedDocumentLineDocument",
+    )?;
     xml.push_str("<ram:AssociatedDocumentLineDocument>");
     write_text_element(xml, "ram:LineID", &line.id);
+    write_preserved_xml_after_all(
+        xml,
+        document,
+        &format!("{line_path}/AssociatedDocumentLineDocument"),
+        Some(&line.id),
+    )?;
     xml.push_str("</ram:AssociatedDocumentLineDocument>");
+    write_preserved_xml_before(
+        xml,
+        document,
+        line_path,
+        Some(&line.id),
+        "SpecifiedTradeProduct",
+    )?;
     xml.push_str("<ram:SpecifiedTradeProduct>");
     write_text_element(xml, "ram:Name", &line.description);
+    write_preserved_xml_after_all(
+        xml,
+        document,
+        &format!("{line_path}/SpecifiedTradeProduct"),
+        Some(&line.id),
+    )?;
     xml.push_str("</ram:SpecifiedTradeProduct>");
+    write_preserved_xml_before(
+        xml,
+        document,
+        line_path,
+        Some(&line.id),
+        "SpecifiedLineTradeAgreement",
+    )?;
     xml.push_str("<ram:SpecifiedLineTradeAgreement><ram:NetPriceProductTradePrice>");
     write_amount_text_element(xml, "ram:ChargeAmount", line.unit_price.inner());
+    write_preserved_xml_after_all(
+        xml,
+        document,
+        &format!("{line_path}/SpecifiedLineTradeAgreement/NetPriceProductTradePrice"),
+        Some(&line.id),
+    )?;
     xml.push_str("</ram:NetPriceProductTradePrice></ram:SpecifiedLineTradeAgreement>");
+    write_preserved_xml_before(
+        xml,
+        document,
+        line_path,
+        Some(&line.id),
+        "SpecifiedLineTradeDelivery",
+    )?;
     xml.push_str("<ram:SpecifiedLineTradeDelivery>");
     xml.push_str(r"<ram:BilledQuantity");
     if let Some(unit_code) = &line.unit_code {
@@ -1132,6 +2333,13 @@ fn write_line(xml: &mut String, line: &DocumentLine, _currency: &str) {
     xml.push('>');
     write_xml_text(&line.quantity.inner().to_string(), xml);
     xml.push_str("</ram:BilledQuantity></ram:SpecifiedLineTradeDelivery>");
+    write_preserved_xml_before(
+        xml,
+        document,
+        line_path,
+        Some(&line.id),
+        "SpecifiedLineTradeSettlement",
+    )?;
     xml.push_str("<ram:SpecifiedLineTradeSettlement>");
     if let Some(category) = &line.tax_category {
         xml.push_str("<ram:ApplicableTradeTax>");
@@ -1146,14 +2354,40 @@ fn write_line(xml: &mut String, line: &DocumentLine, _currency: &str) {
         line.line_extension_amount.inner(),
     );
     xml.push_str("</ram:SpecifiedTradeSettlementLineMonetarySummation>");
+    write_preserved_xml_after_all(
+        xml,
+        document,
+        &format!("{line_path}/SpecifiedLineTradeSettlement"),
+        Some(&line.id),
+    )?;
     xml.push_str("</ram:SpecifiedLineTradeSettlement>");
+    write_preserved_xml_after_all(xml, document, line_path, Some(&line.id))?;
     xml.push_str("</ram:IncludedSupplyChainTradeLineItem>");
+    Ok(())
 }
 
-fn write_note(xml: &mut String, note: &LocalizedString) {
+fn write_note(
+    xml: &mut String,
+    note: &LocalizedString,
+    document: &CommercialDocument,
+) -> Result<(), CiiError> {
     xml.push_str("<ram:IncludedNote>");
+    write_preserved_xml_before(
+        xml,
+        document,
+        "CrossIndustryInvoice/ExchangedDocument/IncludedNote",
+        None,
+        "Content",
+    )?;
     write_text_element(xml, "ram:Content", &note.text);
+    write_preserved_xml_after_all(
+        xml,
+        document,
+        "CrossIndustryInvoice/ExchangedDocument/IncludedNote",
+        None,
+    )?;
     xml.push_str("</ram:IncludedNote>");
+    Ok(())
 }
 
 fn write_date_time(xml: &mut String, date: &DateOnly) -> Result<(), CiiError> {
@@ -1281,10 +2515,11 @@ fn read_attrs(
     let mut attrs = Vec::new();
     for attr in start.attributes().with_checks(true) {
         let attr = attr?;
-        let key = decode_local_name(attr.key.as_ref())?;
-        if key == "xmlns" {
+        let raw_key = decode_name(attr.key.as_ref())?;
+        if raw_key == "xmlns" || raw_key.starts_with("xmlns:") {
             continue;
         }
+        let key = local_xml_name(raw_key).to_owned();
         let value = attr
             .decoded_and_normalized_value(xml_version, reader.decoder())?
             .into_owned();
@@ -1303,13 +2538,1203 @@ fn attr_value<'a>(attrs: &'a [XmlAttribute], local_name: &str) -> Option<&'a str
         .map(|attr| attr.value.as_str())
 }
 
+fn reader_position(position: u64) -> Result<usize, CiiError> {
+    usize::try_from(position).map_err(|_| CiiError::UnsupportedRoot("xml-position".to_owned()))
+}
+
+fn input_slice(input: &str, start: usize, end: usize) -> Result<&str, CiiError> {
+    input
+        .get(start..end)
+        .ok_or_else(|| CiiError::UnsupportedRoot("xml-position-range".to_owned()))
+}
+
+fn preserved_string_field(payload: &Map<String, Value>, key: &str) -> Result<String, CiiError> {
+    payload
+        .get(key)
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| CiiError::InvalidPreservedXml {
+            container: payload
+                .get(CII_PRESERVED_CONTAINER_KEY)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            element: payload
+                .get(CII_PRESERVED_ELEMENT_KEY)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            message: format!("{key} must be a string"),
+        })
+}
+
+fn namespace_declarations_for_start(
+    reader: &Reader<&[u8]>,
+    start: &BytesStart<'_>,
+    xml_version: XmlVersion,
+) -> Result<Vec<XmlNamespaceBinding>, CiiError> {
+    let mut declarations = Vec::new();
+    for attr in start.attributes().with_checks(true) {
+        let attr = attr?;
+        let key = decode_name(attr.key.as_ref())?;
+        let prefix = if key == "xmlns" {
+            None
+        } else if let Some(prefix) = key.strip_prefix("xmlns:") {
+            if prefix == "xml" || prefix == "xmlns" {
+                continue;
+            }
+            Some(prefix.to_owned())
+        } else {
+            continue;
+        };
+        let uri = attr
+            .decoded_and_normalized_value(xml_version, reader.decoder())?
+            .into_owned();
+        declarations.push(XmlNamespaceBinding { prefix, uri });
+    }
+    Ok(declarations)
+}
+
+fn effective_namespace_bindings(
+    stack: &[Vec<XmlNamespaceBinding>],
+    declarations: &[XmlNamespaceBinding],
+) -> Vec<XmlNamespaceBinding> {
+    let mut frame = Vec::<XmlNamespaceBinding>::new();
+    for scope in stack
+        .iter()
+        .flat_map(|scope| scope.iter())
+        .chain(declarations)
+    {
+        frame.retain(|binding| binding.prefix != scope.prefix);
+        frame.push(scope.clone());
+    }
+    frame
+}
+
+fn resolve_element_namespace(
+    raw_name: &[u8],
+    stack: &[Vec<XmlNamespaceBinding>],
+    declarations: Option<&[XmlNamespaceBinding]>,
+) -> Result<String, CiiError> {
+    let name = decode_name(raw_name)?;
+    let (prefix, _local_name) = split_xml_name(name);
+    if prefix == "xml" {
+        return Ok("http://www.w3.org/XML/1998/namespace".to_owned());
+    }
+    for binding in declarations
+        .into_iter()
+        .flatten()
+        .rev()
+        .chain(stack.iter().rev().flat_map(|scope| scope.iter().rev()))
+    {
+        if binding.prefix.as_deref().unwrap_or_default() == prefix {
+            return Ok(binding.uri.clone());
+        }
+    }
+    Ok(if prefix.is_empty() {
+        "unbound".to_owned()
+    } else {
+        format!("unknown prefix `{prefix}`")
+    })
+}
+
+fn validate_cii_namespace(
+    namespace: &str,
+    parent_stack: &[String],
+    name: &str,
+) -> Result<(), CiiError> {
+    if parent_stack.is_empty() && name != "CrossIndustryInvoice" {
+        return Ok(());
+    }
+    let expected = expected_cii_namespace(parent_stack, name);
+    if namespace != expected {
+        return Err(CiiError::InvalidNamespace {
+            element: name.to_owned(),
+            expected,
+            actual: namespace.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn expected_cii_namespace(parent_stack: &[String], name: &str) -> &'static str {
+    if parent_stack.is_empty() && name == "CrossIndustryInvoice"
+        || parent_stack
+            .last()
+            .is_some_and(|parent| parent == "CrossIndustryInvoice")
+    {
+        CII_RSM_NAMESPACE_URI
+    } else if name == "DateTimeString" {
+        CII_UDT_NAMESPACE_URI
+    } else {
+        CII_RAM_NAMESPACE_URI
+    }
+}
+
+fn canonicalize_preserved_xml_fragment(
+    xml: &str,
+    namespaces: &[XmlNamespaceBinding],
+) -> Result<String, CiiError> {
+    let wrapper_prefix = preserved_wrapper_prefix(namespaces);
+    let wrapper_name = format!("{wrapper_prefix}:wrapper");
+    let mut wrapped = String::new();
+    wrapped.push('<');
+    wrapped.push_str(&wrapper_name);
+    wrapped.push_str(" xmlns:");
+    wrapped.push_str(&wrapper_prefix);
+    wrapped.push_str("=\"");
+    write_xml_attr("urn:invoicekit:preserved-fragment-wrapper", &mut wrapped);
+    wrapped.push('"');
+    for namespace in namespaces {
+        if namespace
+            .prefix
+            .as_deref()
+            .is_some_and(|prefix| prefix == "xml" || prefix == "xmlns" || prefix == wrapper_prefix)
+        {
+            continue;
+        }
+        match namespace.prefix.as_deref() {
+            Some(prefix) => {
+                wrapped.push_str(" xmlns:");
+                wrapped.push_str(prefix);
+            }
+            None => wrapped.push_str(" xmlns"),
+        }
+        wrapped.push_str("=\"");
+        write_xml_attr(&namespace.uri, &mut wrapped);
+        wrapped.push('"');
+    }
+    wrapped.push('>');
+    wrapped.push_str(xml);
+    wrapped.push_str("</");
+    wrapped.push_str(&wrapper_name);
+    wrapped.push('>');
+
+    let canonical = canonicalize_xml(&wrapped)?;
+    let start_end = canonical
+        .find('>')
+        .ok_or_else(|| CiiError::UnsupportedRoot("preserved-wrapper".to_owned()))?;
+    let end_tag = format!("</{wrapper_name}>");
+    if !canonical.ends_with(&end_tag) {
+        return Err(CiiError::UnsupportedRoot("preserved-wrapper".to_owned()));
+    }
+    let body_end = canonical.len() - end_tag.len();
+    canonical
+        .get(start_end + 1..body_end)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| CiiError::UnsupportedRoot("preserved-wrapper".to_owned()))
+}
+
+fn preserved_wrapper_prefix(namespaces: &[XmlNamespaceBinding]) -> String {
+    let base = "ikp";
+    if namespaces
+        .iter()
+        .all(|namespace| namespace.prefix.as_deref() != Some(base))
+    {
+        return base.to_owned();
+    }
+    for index in 0..100 {
+        let candidate = format!("{base}{index}");
+        if namespaces
+            .iter()
+            .all(|namespace| namespace.prefix.as_deref() != Some(candidate.as_str()))
+        {
+            return candidate;
+        }
+    }
+    format!("{base}Preserved")
+}
+
+fn should_preserve_raw_xml(stack: &[String], name: &str) -> bool {
+    stack
+        .last()
+        .and_then(|parent| known_cii_children(parent))
+        .is_some_and(|known| !known.contains(&name))
+}
+
+#[allow(clippy::too_many_lines)]
+fn known_cii_children(parent: &str) -> Option<&'static [&'static str]> {
+    match parent {
+        "CrossIndustryInvoice" => Some(&[
+            "ExchangedDocumentContext",
+            "ExchangedDocument",
+            "SupplyChainTradeTransaction",
+        ]),
+        "ExchangedDocumentContext" => Some(&[
+            "SpecifiedTransactionID",
+            "TestIndicator",
+            "BusinessProcessSpecifiedDocumentContextParameter",
+            "ApplicationSpecifiedDocumentContextParameter",
+            "GuidelineSpecifiedDocumentContextParameter",
+        ]),
+        "BusinessProcessSpecifiedDocumentContextParameter"
+        | "GuidelineSpecifiedDocumentContextParameter"
+        | "ApplicationSpecifiedDocumentContextParameter" => Some(&["ID", "Value"]),
+        "ExchangedDocument" => Some(&["ID", "TypeCode", "IssueDateTime", "IncludedNote"]),
+        "IncludedNote" => Some(&["Content"]),
+        "SupplyChainTradeTransaction" => Some(&[
+            "IncludedSupplyChainTradeLineItem",
+            "ApplicableHeaderTradeAgreement",
+            "ApplicableHeaderTradeDelivery",
+            "ApplicableHeaderTradeSettlement",
+        ]),
+        "IncludedSupplyChainTradeLineItem" => Some(&[
+            "AssociatedDocumentLineDocument",
+            "SpecifiedTradeProduct",
+            "SpecifiedLineTradeAgreement",
+            "SpecifiedLineTradeDelivery",
+            "SpecifiedLineTradeSettlement",
+        ]),
+        "AssociatedDocumentLineDocument" => Some(&["LineID"]),
+        "SpecifiedTradeProduct" => Some(&["Name", "Description"]),
+        "SpecifiedLineTradeAgreement" => Some(&["NetPriceProductTradePrice"]),
+        "NetPriceProductTradePrice" => Some(&["ChargeAmount"]),
+        "SpecifiedLineTradeDelivery" => Some(&["BilledQuantity", "CreditedQuantity"]),
+        "SpecifiedLineTradeSettlement" => Some(&[
+            "ApplicableTradeTax",
+            "SpecifiedTradeSettlementLineMonetarySummation",
+        ]),
+        "SpecifiedTradeSettlementLineMonetarySummation" => Some(&["LineTotalAmount"]),
+        "ApplicableHeaderTradeAgreement" => {
+            Some(&["BuyerReference", "SellerTradeParty", "BuyerTradeParty"])
+        }
+        "ApplicableHeaderTradeDelivery" => Some(&["ActualDeliverySupplyChainEvent"]),
+        "ActualDeliverySupplyChainEvent" => Some(&["OccurrenceDateTime"]),
+        "ApplicableHeaderTradeSettlement" => Some(&[
+            "PayeeTradeParty",
+            "PaymentReference",
+            "InvoiceCurrencyCode",
+            "SpecifiedTradeSettlementPaymentMeans",
+            "ApplicableTradeTax",
+            "SpecifiedTradePaymentTerms",
+            "SpecifiedTradeSettlementHeaderMonetarySummation",
+            "TaxPointDate",
+        ]),
+        "SpecifiedTradeSettlementPaymentMeans" => {
+            Some(&["TypeCode", "PayeePartyCreditorFinancialAccount"])
+        }
+        "PayeePartyCreditorFinancialAccount" => Some(&["IBANID", "ProprietaryID"]),
+        "SpecifiedTradePaymentTerms" => Some(&["Description", "DueDateDateTime"]),
+        "ApplicableTradeTax" => Some(&[
+            "CalculatedAmount",
+            "TypeCode",
+            "BasisAmount",
+            "CategoryCode",
+            "RateApplicablePercent",
+        ]),
+        "SpecifiedTradeSettlementHeaderMonetarySummation" => Some(&[
+            "LineTotalAmount",
+            "AllowanceTotalAmount",
+            "ChargeTotalAmount",
+            "TaxBasisTotalAmount",
+            "TaxTotalAmount",
+            "GrandTotalAmount",
+            "TotalPrepaidAmount",
+            "DuePayableAmount",
+        ]),
+        "SellerTradeParty" | "BuyerTradeParty" | "PayeeTradeParty" => Some(&[
+            "Name",
+            "SpecifiedLegalOrganization",
+            "DefinedTradeContact",
+            "PostalTradeAddress",
+            "SpecifiedTaxRegistration",
+        ]),
+        "SpecifiedLegalOrganization" | "SpecifiedTaxRegistration" => Some(&["ID"]),
+        "DefinedTradeContact" => Some(&[
+            "PersonName",
+            "TelephoneUniversalCommunication",
+            "EmailURIUniversalCommunication",
+        ]),
+        "TelephoneUniversalCommunication" => Some(&["CompleteNumber"]),
+        "EmailURIUniversalCommunication" => Some(&["URIID"]),
+        "PostalTradeAddress" => Some(&[
+            "PostcodeCode",
+            "LineOne",
+            "LineTwo",
+            "LineThree",
+            "CityName",
+            "CountrySubDivisionName",
+            "CountryID",
+        ]),
+        _ => None,
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn cii_child_order(parent: &str, child: &str) -> Option<u16> {
+    match parent {
+        "CrossIndustryInvoice" => child_order(
+            child,
+            &[
+                "ExchangedDocumentContext",
+                "ExchangedDocument",
+                "SupplyChainTradeTransaction",
+                "ValuationBreakdownStatement",
+            ],
+        ),
+        "ExchangedDocumentContext" => child_order(
+            child,
+            &[
+                "SpecifiedTransactionID",
+                "TestIndicator",
+                "BusinessProcessSpecifiedDocumentContextParameter",
+                "BIMSpecifiedDocumentContextParameter",
+                "ScenarioSpecifiedDocumentContextParameter",
+                "ApplicationSpecifiedDocumentContextParameter",
+                "GuidelineSpecifiedDocumentContextParameter",
+                "SubsetSpecifiedDocumentContextParameter",
+                "MessageStandardSpecifiedDocumentContextParameter",
+            ],
+        ),
+        "BusinessProcessSpecifiedDocumentContextParameter"
+        | "GuidelineSpecifiedDocumentContextParameter"
+        | "ApplicationSpecifiedDocumentContextParameter"
+        | "BIMSpecifiedDocumentContextParameter"
+        | "ScenarioSpecifiedDocumentContextParameter"
+        | "SubsetSpecifiedDocumentContextParameter"
+        | "MessageStandardSpecifiedDocumentContextParameter" => {
+            child_order(child, &["ID", "Value", "SpecifiedDocumentVersion"])
+        }
+        "ExchangedDocument" => child_order(
+            child,
+            &[
+                "ID",
+                "Name",
+                "TypeCode",
+                "IssueDateTime",
+                "CopyIndicator",
+                "Purpose",
+                "ControlRequirementIndicator",
+                "LanguageID",
+                "PurposeCode",
+                "RevisionDateTime",
+                "VersionID",
+                "GlobalID",
+                "RevisionID",
+                "PreviousRevisionID",
+                "CategoryCode",
+                "IncludedNote",
+                "EffectiveSpecifiedPeriod",
+                "IssuerTradeParty",
+            ],
+        ),
+        "IncludedNote" => child_order(
+            child,
+            &["Subject", "ContentCode", "Content", "SubjectCode", "ID"],
+        ),
+        "SupplyChainTradeTransaction" => child_order(
+            child,
+            &[
+                "IncludedSupplyChainTradeLineItem",
+                "ApplicableHeaderTradeAgreement",
+                "ApplicableHeaderTradeDelivery",
+                "ApplicableHeaderTradeSettlement",
+            ],
+        ),
+        "IncludedSupplyChainTradeLineItem" => child_order(
+            child,
+            &[
+                "DescriptionCode",
+                "AssociatedDocumentLineDocument",
+                "SpecifiedTradeProduct",
+                "SpecifiedLineTradeAgreement",
+                "SpecifiedLineTradeDelivery",
+                "SpecifiedLineTradeSettlement",
+                "IncludedSubordinateTradeLineItem",
+            ],
+        ),
+        "AssociatedDocumentLineDocument" => child_order(
+            child,
+            &[
+                "LineID",
+                "ParentLineID",
+                "LineStatusCode",
+                "LineStatusReasonCode",
+                "IncludedNote",
+            ],
+        ),
+        "SpecifiedTradeProduct" => child_order(
+            child,
+            &[
+                "ID",
+                "GlobalID",
+                "SellerAssignedID",
+                "BuyerAssignedID",
+                "ManufacturerAssignedID",
+                "Name",
+                "TradeName",
+                "Description",
+                "TypeCode",
+                "NetWeightMeasure",
+                "GrossWeightMeasure",
+                "ProductGroupID",
+                "EndItemTypeCode",
+                "EndItemName",
+                "AreaDensityMeasure",
+                "UseDescription",
+                "BrandName",
+                "SubBrandName",
+                "DrainedNetWeightMeasure",
+                "VariableMeasureIndicator",
+                "ColourCode",
+                "ColourDescription",
+                "Designation",
+                "FormattedCancellationAnnouncedLaunchDateTime",
+                "FormattedLatestProductDataChangeDateTime",
+                "ApplicableProductCharacteristic",
+                "ApplicableMaterialGoodsCharacteristic",
+                "DesignatedProductClassification",
+                "IndividualTradeProductInstance",
+                "CertificationEvidenceReferenceReferencedDocument",
+                "InspectionReferenceReferencedDocument",
+                "OriginTradeCountry",
+                "LinearSpatialDimension",
+                "MinimumLinearSpatialDimension",
+                "MaximumLinearSpatialDimension",
+                "ManufacturerTradeParty",
+                "PresentationSpecifiedBinaryFile",
+                "MSDSReferenceReferencedDocument",
+                "AdditionalReferenceReferencedDocument",
+                "LegalRightsOwnerTradeParty",
+                "BrandOwnerTradeParty",
+                "IncludedReferencedProduct",
+                "InformationNote",
+            ],
+        ),
+        "SpecifiedLineTradeAgreement" => child_order(
+            child,
+            &[
+                "BuyerReference",
+                "BuyerRequisitionerTradeParty",
+                "ApplicableTradeDeliveryTerms",
+                "SellerOrderReferencedDocument",
+                "BuyerOrderReferencedDocument",
+                "QuotationReferencedDocument",
+                "ContractReferencedDocument",
+                "DemandForecastReferencedDocument",
+                "PromotionalDealReferencedDocument",
+                "AdditionalReferencedDocument",
+                "GrossPriceProductTradePrice",
+                "NetPriceProductTradePrice",
+                "RequisitionerReferencedDocument",
+                "ItemSellerTradeParty",
+                "ItemBuyerTradeParty",
+                "IncludedSpecifiedMarketplace",
+                "UltimateCustomerOrderReferencedDocument",
+            ],
+        ),
+        "NetPriceProductTradePrice" => child_order(
+            child,
+            &[
+                "TypeCode",
+                "ChargeAmount",
+                "BasisQuantity",
+                "MinimumQuantity",
+                "MaximumQuantity",
+                "ChangeReason",
+                "OrderUnitConversionFactorNumeric",
+                "AppliedTradeAllowanceCharge",
+                "ValiditySpecifiedPeriod",
+                "IncludedTradeTax",
+                "DeliveryTradeLocation",
+                "TradeComparisonReferencePrice",
+                "AssociatedReferencedDocument",
+            ],
+        ),
+        "SpecifiedLineTradeDelivery" => child_order(
+            child,
+            &[
+                "RequestedQuantity",
+                "ReceivedQuantity",
+                "BilledQuantity",
+                "ChargeFreeQuantity",
+                "PackageQuantity",
+                "ProductUnitQuantity",
+                "PerPackageUnitQuantity",
+                "NetWeightMeasure",
+                "GrossWeightMeasure",
+                "TheoreticalWeightMeasure",
+                "DespatchedQuantity",
+                "SpecifiedDeliveryAdjustment",
+                "IncludedSupplyChainPackaging",
+                "RelatedSupplyChainConsignment",
+                "ShipToTradeParty",
+                "UltimateShipToTradeParty",
+                "ShipFromTradeParty",
+                "ActualDespatchSupplyChainEvent",
+                "ActualPickUpSupplyChainEvent",
+                "RequestedDeliverySupplyChainEvent",
+                "ActualDeliverySupplyChainEvent",
+                "ActualReceiptSupplyChainEvent",
+                "AdditionalReferencedDocument",
+                "DespatchAdviceReferencedDocument",
+                "ReceivingAdviceReferencedDocument",
+                "DeliveryNoteReferencedDocument",
+                "ConsumptionReportReferencedDocument",
+                "PackingListReferencedDocument",
+            ],
+        ),
+        "SpecifiedLineTradeSettlement" => child_order(
+            child,
+            &[
+                "PaymentReference",
+                "InvoiceIssuerReference",
+                "TotalAdjustmentAmount",
+                "DiscountIndicator",
+                "ApplicableTradeTax",
+                "BillingSpecifiedPeriod",
+                "SpecifiedTradeAllowanceCharge",
+                "SubtotalCalculatedTradeTax",
+                "SpecifiedLogisticsServiceCharge",
+                "SpecifiedTradePaymentTerms",
+                "SpecifiedTradeSettlementLineMonetarySummation",
+                "SpecifiedFinancialAdjustment",
+                "InvoiceReferencedDocument",
+                "AdditionalReferencedDocument",
+                "PayableSpecifiedTradeAccountingAccount",
+                "ReceivableSpecifiedTradeAccountingAccount",
+                "PurchaseSpecifiedTradeAccountingAccount",
+                "SalesSpecifiedTradeAccountingAccount",
+                "SpecifiedTradeSettlementFinancialCard",
+            ],
+        ),
+        "SpecifiedTradeSettlementLineMonetarySummation" => child_order(
+            child,
+            &[
+                "LineTotalAmount",
+                "ChargeTotalAmount",
+                "AllowanceTotalAmount",
+                "TaxBasisTotalAmount",
+                "TaxTotalAmount",
+                "GrandTotalAmount",
+                "InformationAmount",
+                "TotalAllowanceChargeAmount",
+                "TotalRetailValueInformationAmount",
+                "GrossLineTotalAmount",
+                "NetLineTotalAmount",
+                "NetIncludingTaxesLineTotalAmount",
+                "ProductWeightLossInformationAmount",
+            ],
+        ),
+        "ApplicableHeaderTradeAgreement" => child_order(
+            child,
+            &[
+                "Reference",
+                "BuyerReference",
+                "SellerTradeParty",
+                "BuyerTradeParty",
+                "SalesAgentTradeParty",
+                "BuyerRequisitionerTradeParty",
+                "BuyerAssignedAccountantTradeParty",
+                "SellerAssignedAccountantTradeParty",
+                "BuyerTaxRepresentativeTradeParty",
+                "SellerTaxRepresentativeTradeParty",
+                "ProductEndUserTradeParty",
+                "ApplicableTradeDeliveryTerms",
+                "SellerOrderReferencedDocument",
+                "BuyerOrderReferencedDocument",
+                "QuotationReferencedDocument",
+                "OrderResponseReferencedDocument",
+                "ContractReferencedDocument",
+                "DemandForecastReferencedDocument",
+                "SupplyInstructionReferencedDocument",
+                "PromotionalDealReferencedDocument",
+                "PriceListReferencedDocument",
+                "AdditionalReferencedDocument",
+                "RequisitionerReferencedDocument",
+                "BuyerAgentTradeParty",
+                "PurchaseConditionsReferencedDocument",
+                "SpecifiedProcuringProject",
+                "UltimateCustomerOrderReferencedDocument",
+            ],
+        ),
+        "ApplicableHeaderTradeDelivery" => child_order(
+            child,
+            &[
+                "RelatedSupplyChainConsignment",
+                "ShipToTradeParty",
+                "UltimateShipToTradeParty",
+                "ShipFromTradeParty",
+                "ActualDespatchSupplyChainEvent",
+                "ActualPickUpSupplyChainEvent",
+                "ActualDeliverySupplyChainEvent",
+                "ActualReceiptSupplyChainEvent",
+                "AdditionalReferencedDocument",
+                "DespatchAdviceReferencedDocument",
+                "ReceivingAdviceReferencedDocument",
+                "DeliveryNoteReferencedDocument",
+                "ConsumptionReportReferencedDocument",
+                "PreviousDeliverySupplyChainEvent",
+                "PackingListReferencedDocument",
+            ],
+        ),
+        "ActualDeliverySupplyChainEvent" => child_order(
+            child,
+            &[
+                "ID",
+                "OccurrenceDateTime",
+                "TypeCode",
+                "Description",
+                "DescriptionBinaryObject",
+                "UnitQuantity",
+                "LatestOccurrenceDateTime",
+                "EarliestOccurrenceDateTime",
+                "OccurrenceSpecifiedPeriod",
+                "OccurrenceLogisticsLocation",
+            ],
+        ),
+        "ApplicableHeaderTradeSettlement" => child_order(
+            child,
+            &[
+                "DuePayableAmount",
+                "CreditorReferenceTypeCode",
+                "CreditorReferenceType",
+                "CreditorReferenceIssuerID",
+                "CreditorReferenceID",
+                "PaymentReference",
+                "TaxCurrencyCode",
+                "InvoiceCurrencyCode",
+                "PaymentCurrencyCode",
+                "InvoiceIssuerReference",
+                "InvoiceDateTime",
+                "NextInvoiceDateTime",
+                "CreditReasonCode",
+                "CreditReason",
+                "InvoicerTradeParty",
+                "InvoiceeTradeParty",
+                "PayeeTradeParty",
+                "PayerTradeParty",
+                "TaxApplicableTradeCurrencyExchange",
+                "InvoiceApplicableTradeCurrencyExchange",
+                "PaymentApplicableTradeCurrencyExchange",
+                "SpecifiedTradeSettlementPaymentMeans",
+                "ApplicableTradeTax",
+                "BillingSpecifiedPeriod",
+                "SpecifiedTradeAllowanceCharge",
+                "SubtotalCalculatedTradeTax",
+                "SpecifiedLogisticsServiceCharge",
+                "SpecifiedTradePaymentTerms",
+                "SpecifiedTradeSettlementHeaderMonetarySummation",
+                "SpecifiedFinancialAdjustment",
+                "InvoiceReferencedDocument",
+                "ProFormaInvoiceReferencedDocument",
+                "LetterOfCreditReferencedDocument",
+                "FactoringAgreementReferencedDocument",
+                "FactoringListReferencedDocument",
+                "PayableSpecifiedTradeAccountingAccount",
+                "ReceivableSpecifiedTradeAccountingAccount",
+                "PurchaseSpecifiedTradeAccountingAccount",
+                "SalesSpecifiedTradeAccountingAccount",
+                "SpecifiedTradeSettlementFinancialCard",
+                "SpecifiedAdvancePayment",
+                "UltimatePayeeTradeParty",
+            ],
+        ),
+        "SpecifiedTradeSettlementPaymentMeans" => child_order(
+            child,
+            &[
+                "PaymentChannelCode",
+                "TypeCode",
+                "GuaranteeMethodCode",
+                "PaymentMethodCode",
+                "Information",
+                "ID",
+                "ApplicableTradeSettlementFinancialCard",
+                "PayerPartyDebtorFinancialAccount",
+                "PayeePartyCreditorFinancialAccount",
+                "PayerSpecifiedDebtorFinancialInstitution",
+                "PayeeSpecifiedCreditorFinancialInstitution",
+            ],
+        ),
+        "PayeePartyCreditorFinancialAccount" => {
+            child_order(child, &["IBANID", "AccountName", "ProprietaryID"])
+        }
+        "SpecifiedTradePaymentTerms" => child_order(
+            child,
+            &[
+                "ID",
+                "FromEventCode",
+                "SettlementPeriodMeasure",
+                "Description",
+                "DueDateDateTime",
+                "TypeCode",
+                "InstructionTypeCode",
+                "DirectDebitMandateID",
+                "PartialPaymentPercent",
+                "PaymentMeansID",
+                "PartialPaymentAmount",
+                "ApplicableTradePaymentPenaltyTerms",
+                "ApplicableTradePaymentDiscountTerms",
+                "PayeeTradeParty",
+            ],
+        ),
+        "ApplicableTradeTax" => child_order(
+            child,
+            &[
+                "CalculatedAmount",
+                "TypeCode",
+                "ExemptionReason",
+                "CalculatedRate",
+                "CalculationSequenceNumeric",
+                "BasisQuantity",
+                "BasisAmount",
+                "UnitBasisAmount",
+                "LineTotalBasisAmount",
+                "AllowanceChargeBasisAmount",
+                "CategoryCode",
+                "CurrencyCode",
+                "Jurisdiction",
+                "CustomsDutyIndicator",
+                "ExemptionReasonCode",
+                "TaxBasisAllowanceRate",
+                "TaxPointDate",
+                "Type",
+                "InformationAmount",
+                "CategoryName",
+                "DueDateTypeCode",
+                "RateApplicablePercent",
+                "SpecifiedTradeAccountingAccount",
+                "ServiceSupplyTradeCountry",
+                "BuyerRepayableTaxSpecifiedTradeAccountingAccount",
+                "SellerPayableTaxSpecifiedTradeAccountingAccount",
+                "SellerRefundableTaxSpecifiedTradeAccountingAccount",
+                "BuyerDeductibleTaxSpecifiedTradeAccountingAccount",
+                "BuyerNonDeductibleTaxSpecifiedTradeAccountingAccount",
+                "PlaceApplicableTradeLocation",
+            ],
+        ),
+        "SpecifiedTradeSettlementHeaderMonetarySummation" => child_order(
+            child,
+            &[
+                "LineTotalAmount",
+                "ChargeTotalAmount",
+                "AllowanceTotalAmount",
+                "TaxBasisTotalAmount",
+                "TaxTotalAmount",
+                "RoundingAmount",
+                "GrandTotalAmount",
+                "InformationAmount",
+                "TotalPrepaidAmount",
+                "TotalDiscountAmount",
+                "TotalAllowanceChargeAmount",
+                "DuePayableAmount",
+                "RetailValueExcludingTaxInformationAmount",
+                "TotalDepositFeeInformationAmount",
+                "ProductValueExcludingTobaccoTaxInformationAmount",
+                "TotalRetailValueInformationAmount",
+                "GrossLineTotalAmount",
+                "NetLineTotalAmount",
+                "NetIncludingTaxesLineTotalAmount",
+            ],
+        ),
+        "SellerTradeParty" | "BuyerTradeParty" | "PayeeTradeParty" => child_order(
+            child,
+            &[
+                "ID",
+                "GlobalID",
+                "Name",
+                "RoleCode",
+                "Description",
+                "SpecifiedLegalOrganization",
+                "DefinedTradeContact",
+                "PostalTradeAddress",
+                "URIUniversalCommunication",
+                "SpecifiedTaxRegistration",
+                "EndPointURIUniversalCommunication",
+                "LogoAssociatedSpecifiedBinaryFile",
+            ],
+        ),
+        "SpecifiedLegalOrganization" => child_order(
+            child,
+            &[
+                "LegalClassificationCode",
+                "Name",
+                "ID",
+                "TradingBusinessName",
+                "PostalTradeAddress",
+                "AuthorizedLegalRegistration",
+            ],
+        ),
+        "SpecifiedTaxRegistration" => child_order(child, &["ID", "AssociatedRegisteredTax"]),
+        "PostalTradeAddress" => child_order(
+            child,
+            &[
+                "ID",
+                "PostcodeCode",
+                "PostOfficeBox",
+                "BuildingName",
+                "LineOne",
+                "LineTwo",
+                "LineThree",
+                "LineFour",
+                "LineFive",
+                "StreetName",
+                "CityName",
+                "CitySubDivisionName",
+                "CountryID",
+                "CountryName",
+                "CountrySubDivisionID",
+                "CountrySubDivisionName",
+                "AttentionOf",
+                "CareOf",
+                "BuildingNumber",
+                "DepartmentName",
+                "AdditionalStreetName",
+            ],
+        ),
+        "DefinedTradeContact" => child_order(
+            child,
+            &[
+                "ID",
+                "PersonName",
+                "DepartmentName",
+                "TypeCode",
+                "JobTitle",
+                "Responsibility",
+                "PersonID",
+                "TelephoneUniversalCommunication",
+                "DirectTelephoneUniversalCommunication",
+                "MobileTelephoneUniversalCommunication",
+                "FaxUniversalCommunication",
+                "EmailURIUniversalCommunication",
+                "TelexUniversalCommunication",
+                "VOIPUniversalCommunication",
+                "InstantMessagingUniversalCommunication",
+                "SpecifiedNote",
+                "SpecifiedContactPerson",
+            ],
+        ),
+        "TelephoneUniversalCommunication" | "EmailURIUniversalCommunication" => {
+            child_order(child, &["URIID", "ChannelCode", "CompleteNumber"])
+        }
+        _ => known_cii_children(parent)
+            .and_then(|children| children.iter().position(|value| *value == child))
+            .and_then(|position| u16::try_from(position + 1).ok()),
+    }
+}
+
+fn child_order(child: &str, children: &[&str]) -> Option<u16> {
+    children
+        .iter()
+        .position(|value| *value == child)
+        .and_then(|position| u16::try_from(position + 1).ok())
+}
+
+fn previous_known_child_order(parent: &str, before_child: &str) -> Option<u16> {
+    let before = cii_child_order(parent, before_child)?;
+    known_cii_children(parent).and_then(|children| {
+        children
+            .iter()
+            .filter_map(|child| cii_child_order(parent, child))
+            .filter(|order| *order < before)
+            .max()
+    })
+}
+
+fn container_name(container: &str) -> &str {
+    container
+        .rsplit('/')
+        .next()
+        .filter(|value| !value.is_empty())
+        .unwrap_or(container)
+}
+
+fn validate_preserved_xml_entry(
+    document: &CommercialDocument,
+    preserved: &CiiPreservedXml,
+) -> Result<(), CiiError> {
+    validate_preserved_xml_fragment(preserved)?;
+    if !is_replayable_container_path(&preserved.container) {
+        return Err(preserved_xml_error(
+            preserved,
+            "container path is not replayable by the CII serializer",
+        ));
+    }
+    let line_scoped = is_line_scoped_container_path(&preserved.container);
+    match (line_scoped, preserved.line_id.as_deref()) {
+        (true, None) => {
+            return Err(preserved_xml_error(
+                preserved,
+                "line-scoped preserved XML requires line_id",
+            ));
+        }
+        (false, Some(_)) => {
+            return Err(preserved_xml_error(
+                preserved,
+                "line_id is only valid for line-scoped preserved XML",
+            ));
+        }
+        (true, Some(line_id)) if !document.lines.iter().any(|line| line.id == line_id) => {
+            return Err(preserved_xml_error(
+                preserved,
+                "line_id does not match any document line",
+            ));
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn is_line_scoped_container_path(container: &str) -> bool {
+    container.starts_with(
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/IncludedSupplyChainTradeLineItem",
+    )
+}
+
+fn is_replayable_container_path(container: &str) -> bool {
+    matches!(
+        container,
+        "CrossIndustryInvoice"
+            | "CrossIndustryInvoice/ExchangedDocumentContext"
+            | "CrossIndustryInvoice/ExchangedDocumentContext/BusinessProcessSpecifiedDocumentContextParameter"
+            | "CrossIndustryInvoice/ExchangedDocumentContext/ApplicationSpecifiedDocumentContextParameter"
+            | "CrossIndustryInvoice/ExchangedDocumentContext/GuidelineSpecifiedDocumentContextParameter"
+            | "CrossIndustryInvoice/ExchangedDocument"
+            | "CrossIndustryInvoice/ExchangedDocument/IncludedNote"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/IncludedSupplyChainTradeLineItem"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/IncludedSupplyChainTradeLineItem/AssociatedDocumentLineDocument"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/IncludedSupplyChainTradeLineItem/SpecifiedTradeProduct"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/IncludedSupplyChainTradeLineItem/SpecifiedLineTradeAgreement"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/IncludedSupplyChainTradeLineItem/SpecifiedLineTradeAgreement/NetPriceProductTradePrice"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/IncludedSupplyChainTradeLineItem/SpecifiedLineTradeDelivery"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/IncludedSupplyChainTradeLineItem/SpecifiedLineTradeSettlement"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/IncludedSupplyChainTradeLineItem/SpecifiedLineTradeSettlement/ApplicableTradeTax"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/IncludedSupplyChainTradeLineItem/SpecifiedLineTradeSettlement/SpecifiedTradeSettlementLineMonetarySummation"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/SellerTradeParty"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/SellerTradeParty/SpecifiedLegalOrganization"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/SellerTradeParty/DefinedTradeContact"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/SellerTradeParty/DefinedTradeContact/TelephoneUniversalCommunication"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/SellerTradeParty/DefinedTradeContact/EmailURIUniversalCommunication"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/SellerTradeParty/PostalTradeAddress"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/SellerTradeParty/SpecifiedTaxRegistration"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/BuyerTradeParty"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/BuyerTradeParty/SpecifiedLegalOrganization"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/BuyerTradeParty/DefinedTradeContact"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/BuyerTradeParty/DefinedTradeContact/TelephoneUniversalCommunication"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/BuyerTradeParty/DefinedTradeContact/EmailURIUniversalCommunication"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/BuyerTradeParty/PostalTradeAddress"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/BuyerTradeParty/SpecifiedTaxRegistration"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeDelivery"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeDelivery/ActualDeliverySupplyChainEvent"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement/PayeeTradeParty"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement/PayeeTradeParty/SpecifiedLegalOrganization"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement/PayeeTradeParty/DefinedTradeContact"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement/PayeeTradeParty/DefinedTradeContact/TelephoneUniversalCommunication"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement/PayeeTradeParty/DefinedTradeContact/EmailURIUniversalCommunication"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement/PayeeTradeParty/PostalTradeAddress"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement/PayeeTradeParty/SpecifiedTaxRegistration"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement/SpecifiedTradeSettlementPaymentMeans"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement/SpecifiedTradeSettlementPaymentMeans/PayeePartyCreditorFinancialAccount"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement/ApplicableTradeTax"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement/SpecifiedTradePaymentTerms"
+            | "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement/SpecifiedTradeSettlementHeaderMonetarySummation"
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_preserved_xml_fragment(preserved: &CiiPreservedXml) -> Result<(), CiiError> {
+    let container_name = container_name(&preserved.container);
+    if known_cii_children(container_name).is_none() {
+        return Err(preserved_xml_error(
+            preserved,
+            "container is not a replayable CII container",
+        ));
+    }
+    let Some(order) = cii_child_order(container_name, &preserved.element) else {
+        return Err(preserved_xml_error(
+            preserved,
+            "root element is not ordered for this CII container",
+        ));
+    };
+    if order == 0 {
+        return Err(preserved_xml_error(preserved, "invalid schema order"));
+    }
+
+    let mut reader = Reader::from_str(&preserved.xml);
+    reader.config_mut().trim_text(false);
+    let mut root_count = 0_usize;
+    let mut depth = 0_usize;
+    let root_parent_stack = preserved
+        .container
+        .split('/')
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    let mut element_stack = Vec::<String>::new();
+    let mut namespace_stack = Vec::<Vec<XmlNamespaceBinding>>::new();
+
+    loop {
+        match reader.read_event()? {
+            Event::Start(start) => {
+                let name = decode_local_name(start.name().as_ref())?;
+                let namespace_declarations =
+                    namespace_declarations_for_start(&reader, &start, XmlVersion::default())?;
+                let namespace = resolve_element_namespace(
+                    start.name().as_ref(),
+                    &namespace_stack,
+                    Some(&namespace_declarations),
+                )?;
+                if depth == 0 {
+                    root_count += 1;
+                    if root_count > 1 {
+                        return Err(preserved_xml_error(
+                            preserved,
+                            "fragment must contain exactly one root element",
+                        ));
+                    }
+                    if name != preserved.element {
+                        return Err(preserved_xml_error(
+                            preserved,
+                            "root element does not match preserved element",
+                        ));
+                    }
+                }
+                let parent_stack = if depth == 0 {
+                    root_parent_stack.as_slice()
+                } else {
+                    element_stack.as_slice()
+                };
+                validate_cii_namespace(&namespace, parent_stack, &name)?;
+                depth += 1;
+                element_stack.push(name);
+                namespace_stack.push(namespace_declarations);
+            }
+            Event::Empty(start) => {
+                let name = decode_local_name(start.name().as_ref())?;
+                let namespace_declarations =
+                    namespace_declarations_for_start(&reader, &start, XmlVersion::default())?;
+                let namespace = resolve_element_namespace(
+                    start.name().as_ref(),
+                    &namespace_stack,
+                    Some(&namespace_declarations),
+                )?;
+                if depth == 0 {
+                    root_count += 1;
+                    if root_count > 1 {
+                        return Err(preserved_xml_error(
+                            preserved,
+                            "fragment must contain exactly one root element",
+                        ));
+                    }
+                    if name != preserved.element {
+                        return Err(preserved_xml_error(
+                            preserved,
+                            "root element does not match preserved element",
+                        ));
+                    }
+                }
+                let parent_stack = if depth == 0 {
+                    root_parent_stack.as_slice()
+                } else {
+                    element_stack.as_slice()
+                };
+                validate_cii_namespace(&namespace, parent_stack, &name)?;
+            }
+            Event::End(end) => {
+                if depth == 0 {
+                    return Err(preserved_xml_error(preserved, "unexpected closing element"));
+                }
+                let name = decode_local_name(end.name().as_ref())?;
+                let Some((opened, parent_stack)) = element_stack.split_last() else {
+                    return Err(preserved_xml_error(preserved, "unexpected closing element"));
+                };
+                if opened != &name {
+                    return Err(preserved_xml_error(
+                        preserved,
+                        "start and end elements do not match",
+                    ));
+                }
+                let namespace =
+                    resolve_element_namespace(end.name().as_ref(), &namespace_stack, None)?;
+                validate_cii_namespace(&namespace, parent_stack, &name)?;
+                depth -= 1;
+                element_stack.pop();
+                namespace_stack.pop();
+            }
+            Event::Text(text) => {
+                if depth == 0 && !text.xml_content(XmlVersion::default())?.trim().is_empty() {
+                    return Err(preserved_xml_error(
+                        preserved,
+                        "text outside the root element is not allowed",
+                    ));
+                }
+            }
+            Event::CData(cdata) => {
+                if depth == 0 && !cdata.xml_content(XmlVersion::default())?.trim().is_empty() {
+                    return Err(preserved_xml_error(
+                        preserved,
+                        "CDATA outside the root element is not allowed",
+                    ));
+                }
+            }
+            Event::GeneralRef(reference) => {
+                if depth == 0
+                    && !reference
+                        .xml_content(XmlVersion::default())?
+                        .trim()
+                        .is_empty()
+                {
+                    return Err(preserved_xml_error(
+                        preserved,
+                        "entity reference outside the root element is not allowed",
+                    ));
+                }
+            }
+            Event::DocType(_) => {
+                return Err(preserved_xml_error(preserved, "DOCTYPE is not allowed"));
+            }
+            Event::Decl(_) => {
+                return Err(preserved_xml_error(
+                    preserved,
+                    "XML declaration is not allowed in a fragment",
+                ));
+            }
+            Event::PI(_) | Event::Comment(_) => {}
+            Event::Eof => {
+                if root_count != 1 {
+                    return Err(preserved_xml_error(
+                        preserved,
+                        "fragment must contain exactly one root element",
+                    ));
+                }
+                if depth != 0 {
+                    return Err(preserved_xml_error(
+                        preserved,
+                        "fragment ended before closing the root element",
+                    ));
+                }
+                return Ok(());
+            }
+        }
+    }
+}
+
+fn preserved_xml_error(preserved: &CiiPreservedXml, message: &str) -> CiiError {
+    CiiError::InvalidPreservedXml {
+        container: preserved.container.clone(),
+        element: preserved.element.clone(),
+        message: message.to_owned(),
+    }
+}
+
 fn decode_local_name(raw: &[u8]) -> Result<String, CiiError> {
-    let name = std::str::from_utf8(raw)
-        .map_err(|_| CiiError::InvalidName(String::from_utf8_lossy(raw).into_owned()))?;
-    Ok(name
-        .split_once(':')
-        .map_or(name, |(_, local_name)| local_name)
-        .to_owned())
+    Ok(local_xml_name(decode_name(raw)?).to_owned())
+}
+
+fn decode_name(raw: &[u8]) -> Result<&str, CiiError> {
+    std::str::from_utf8(raw)
+        .map_err(|_| CiiError::InvalidName(String::from_utf8_lossy(raw).into_owned()))
+}
+
+fn local_xml_name(name: &str) -> &str {
+    split_xml_name(name).1
+}
+
+fn split_xml_name(name: &str) -> (&str, &str) {
+    name.split_once(':')
+        .map_or(("", name), |(prefix, local_name)| (prefix, local_name))
 }
 
 fn append_text(text_stack: &mut [String], text: &str) -> Result<(), CiiError> {
@@ -1402,14 +3827,19 @@ fn party_role(stack: &[String]) -> Option<PartyRole> {
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
+    use serde_json::{json, Value};
 
-    use super::{crate_name, from_xml, to_xml, CiiError};
+    use super::{
+        crate_name, from_xml, mapping, to_xml, CiiError, CII_RAM_NAMESPACE_URI,
+        CII_RSM_NAMESPACE_URI,
+    };
     use invoicekit_canonical::canonicalize_xml;
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly, DecimalValue,
         DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentType, Iso4217Code,
-        LocalizedString, MonetaryTotal, Party, PartyTaxId, PaymentInstruction,
-        PaymentInstructionKind, PaymentTerms, PostalAddress, SchemaVersion, TaxCategorySummary,
+        JurisdictionExtension, LocalizedString, MonetaryTotal, Party, PartyTaxId,
+        PaymentInstruction, PaymentInstructionKind, PaymentTerms, PostalAddress, SchemaVersion,
+        TaxCategorySummary,
     };
     use rust_decimal::Decimal;
 
@@ -1432,6 +3862,658 @@ mod tests {
         let xml = to_xml(&document).unwrap();
         let parsed = from_xml(&xml).unwrap();
         assert_eq!(parsed, document);
+    }
+
+    #[test]
+    fn metadata_uses_application_context_without_overloading_cii_fields() {
+        let document = fixture(DocumentType::Invoice, 21);
+        let xml = to_xml(&document).unwrap();
+
+        assert!(xml.contains("ApplicationSpecifiedDocumentContextParameter"));
+        assert!(xml.contains(mapping::INVOICEKIT_CII_METADATA_EXTENSION_URN));
+        assert!(!xml.contains("BusinessProcessSpecifiedDocumentContextParameter"));
+        assert!(!xml.contains("BuyerReference"));
+        assert_eq!(from_xml(&xml).unwrap(), document);
+    }
+
+    #[test]
+    fn parser_preserves_standard_cii_fields_as_document_extension() {
+        let document = fixture(DocumentType::Invoice, 22);
+        let xml = to_xml(&document).unwrap();
+        let application_context = xml
+            .find("<ram:ApplicationSpecifiedDocumentContextParameter")
+            .unwrap();
+        let with_business_process = format!(
+            "{}{}{}",
+            &xml[..application_context],
+            &format!(
+                r#"<ram:BusinessProcessSpecifiedDocumentContextParameter xmlns:ram="{CII_RAM_NAMESPACE_URI}"><ram:ID>PROCESS-42</ram:ID></ram:BusinessProcessSpecifiedDocumentContextParameter><ram:BusinessProcessSpecifiedDocumentContextParameter xmlns:ram="{CII_RAM_NAMESPACE_URI}"><ram:ID>PROCESS-43</ram:ID></ram:BusinessProcessSpecifiedDocumentContextParameter>"#
+            ),
+            &xml[application_context..],
+        );
+        assert!(with_business_process.contains("PROCESS-42"));
+        let with_buyer_reference = with_business_process.replace(
+            "<ram:SellerTradeParty>",
+            &format!(
+                r#"<ram:BuyerReference xmlns:ram="{CII_RAM_NAMESPACE_URI}">BUYER-PO-7</ram:BuyerReference><ram:SellerTradeParty>"#
+            ),
+        );
+
+        let parsed = from_xml(&with_buyer_reference).unwrap();
+        assert_eq!(parsed.meta, document.meta);
+        let extension = parsed
+            .extensions
+            .iter()
+            .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
+            .unwrap();
+        assert_eq!(
+            extension
+                .payload
+                .get("buyer_reference")
+                .and_then(|value| value.as_str()),
+            Some("BUYER-PO-7")
+        );
+        assert_eq!(
+            extension
+                .payload
+                .get("business_process_context_ids")
+                .and_then(|value| value.as_array())
+                .map(Vec::as_slice),
+            Some([json!("PROCESS-42"), json!("PROCESS-43")].as_slice())
+        );
+    }
+
+    #[test]
+    fn serializer_emits_preserved_cii_document_fields() {
+        let mut document = fixture(DocumentType::Invoice, 23);
+        document.extensions.push(
+            JurisdictionExtension::new(
+                mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN,
+                json!({
+                    "buyer_reference": "BUYER-PO-8",
+                    "business_process_context_ids": ["PROCESS-43", "PROCESS-44"]
+                }),
+            )
+            .unwrap(),
+        );
+
+        let xml = to_xml(&document).unwrap();
+        assert!(xml.contains("BusinessProcessSpecifiedDocumentContextParameter"));
+        assert!(xml.contains("<ram:ID>PROCESS-43</ram:ID>"));
+        assert!(xml.contains("<ram:ID>PROCESS-44</ram:ID>"));
+        assert!(xml.contains("<ram:BuyerReference>BUYER-PO-8</ram:BuyerReference>"));
+        assert_eq!(from_xml(&xml).unwrap(), document);
+    }
+
+    #[test]
+    fn serializer_emits_profile_guideline_context() {
+        let mut document = fixture(DocumentType::Invoice, 24);
+        document.extensions.push(
+            JurisdictionExtension::new(
+                mapping::CII_PROFILE_CONTEXT_EXTENSION_URN,
+                json!({
+                    "guideline_context_ids": [
+                        "urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic"
+                    ]
+                }),
+            )
+            .unwrap(),
+        );
+
+        let xml = to_xml(&document).unwrap();
+        assert!(xml.contains("GuidelineSpecifiedDocumentContextParameter"));
+        assert!(xml.contains("urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic"));
+        assert_eq!(from_xml(&xml).unwrap(), document);
+    }
+
+    #[test]
+    fn parser_preserves_unmapped_cii_fragments_as_document_extension() {
+        let document = fixture(DocumentType::Invoice, 25);
+        let xml = to_xml(&document).unwrap();
+        let document_name = format!(
+            r#"<ram:Name xmlns:ram="{CII_RAM_NAMESPACE_URI}">Commercial invoice</ram:Name>"#
+        );
+        let tax_representative = format!(
+            r#"<ram:SellerTaxRepresentativeTradeParty xmlns:ram="{CII_RAM_NAMESPACE_URI}"><ram:Name>Tax Representative</ram:Name></ram:SellerTaxRepresentativeTradeParty>"#
+        );
+        let with_document_name = insert_before_tag_after(
+            &xml,
+            "<rsm:ExchangedDocument>",
+            "<ram:TypeCode",
+            &document_name,
+        );
+        let with_tax_representative = with_document_name.replacen(
+            "</ram:ApplicableHeaderTradeAgreement>",
+            &format!("{tax_representative}</ram:ApplicableHeaderTradeAgreement>"),
+            1,
+        );
+
+        let parsed = from_xml(&with_tax_representative).unwrap();
+        let preserved = parsed
+            .extensions
+            .iter()
+            .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
+            .and_then(|extension| extension.payload.get("preserved_xml"))
+            .and_then(|value| value.as_array())
+            .unwrap();
+        assert!(preserved.iter().any(|item| {
+            item.get("container").and_then(|value| value.as_str())
+                == Some("CrossIndustryInvoice/ExchangedDocument")
+                && item.get("element").and_then(|value| value.as_str()) == Some("Name")
+                && item
+                    .get("xml")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|xml| xml.contains("Commercial invoice"))
+        }));
+        assert!(preserved.iter().any(|item| {
+            item.get("element").and_then(|value| value.as_str())
+                == Some("SellerTaxRepresentativeTradeParty")
+                && item
+                    .get("xml")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|xml| xml.contains("Tax Representative"))
+        }));
+        assert_eq!(from_xml(&to_xml(&parsed).unwrap()).unwrap(), parsed);
+    }
+
+    #[test]
+    fn parser_accepts_alternate_cii_prefixes_with_stable_preserved_xml() {
+        let document = fixture(DocumentType::Invoice, 26);
+        let xml = to_xml(&document).unwrap();
+        let document_name = format!(
+            r#"<alt:Name xmlns:alt="{CII_RAM_NAMESPACE_URI}" beta="2" alpha="1">Alt Prefix</alt:Name>"#
+        );
+        let with_document_name = insert_before_tag_after(
+            &xml,
+            "<rsm:ExchangedDocument>",
+            "<ram:TypeCode",
+            &document_name,
+        );
+
+        let parsed = from_xml(&with_document_name).unwrap();
+        let preserved_xml = parsed
+            .extensions
+            .iter()
+            .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
+            .and_then(|extension| extension.payload.get("preserved_xml"))
+            .and_then(|value| value.as_array())
+            .and_then(|items| items.first())
+            .and_then(|item| item.get("xml"))
+            .and_then(|value| value.as_str())
+            .unwrap();
+        assert!(preserved_xml.contains(r#"alpha="1" beta="2""#));
+        assert!(preserved_xml.contains(CII_RAM_NAMESPACE_URI));
+        assert_eq!(from_xml(&to_xml(&parsed).unwrap()).unwrap(), parsed);
+    }
+
+    #[test]
+    fn parser_rejects_wrong_cii_namespace_for_known_elements() {
+        let xml = to_xml(&fixture(DocumentType::Invoice, 27)).unwrap();
+        let document_start = xml.find("<rsm:ExchangedDocument>").unwrap();
+        let type_start = document_start
+            + xml[document_start..]
+                .find("<ram:TypeCode")
+                .expect("document TypeCode start");
+        let open_end = type_start + xml[type_start..].find('>').unwrap() + 1;
+        let close_start = open_end + xml[open_end..].find("</ram:TypeCode>").unwrap();
+        let close_end = close_start + "</ram:TypeCode>".len();
+        let xml = format!(
+            r#"{}<bad:TypeCode xmlns:bad="urn:wrong">{}</bad:TypeCode>{}"#,
+            &xml[..type_start],
+            &xml[open_end..close_start],
+            &xml[close_end..],
+        );
+
+        let err = from_xml(&xml).unwrap_err();
+        assert!(matches!(
+            err,
+            CiiError::InvalidNamespace {
+                element,
+                expected,
+                ..
+            } if element == "TypeCode" && expected == CII_RAM_NAMESPACE_URI
+        ));
+    }
+
+    #[test]
+    fn parser_preserves_repeatable_party_identifiers_as_cii_xml() {
+        let document = fixture(DocumentType::Invoice, 28);
+        let xml = to_xml(&document).unwrap();
+        let party_identifiers = format!(
+            r#"<ram:ID xmlns:ram="{CII_RAM_NAMESPACE_URI}" schemeID="GLN">4000001123452</ram:ID><ram:GlobalID xmlns:ram="{CII_RAM_NAMESPACE_URI}" schemeID="0088">4000001123452</ram:GlobalID>"#
+        );
+        let with_party_identifiers = xml.replacen(
+            "<ram:Name>Supplier GmbH</ram:Name>",
+            &format!("{party_identifiers}<ram:Name>Supplier GmbH</ram:Name>"),
+            1,
+        );
+
+        let parsed = from_xml(&with_party_identifiers).unwrap();
+        assert_eq!(parsed.supplier.id, document.supplier.id);
+        let serialized = to_xml(&parsed).unwrap();
+        let id_pos = serialized.find("4000001123452").unwrap();
+        let name_pos = serialized
+            .find("<ram:Name>Supplier GmbH</ram:Name>")
+            .unwrap();
+        assert!(id_pos < name_pos);
+        assert_eq!(from_xml(&serialized).unwrap(), parsed);
+    }
+
+    #[test]
+    fn parser_assigns_line_id_to_pre_lineid_preserved_cii_fragments() {
+        let document = fixture(DocumentType::Invoice, 38);
+        let xml = to_xml(&document).unwrap();
+        let description_code = format!(
+            r#"<ram:DescriptionCode xmlns:ram="{CII_RAM_NAMESPACE_URI}">AAA</ram:DescriptionCode>"#
+        );
+        let with_description_code = xml.replacen(
+            "<ram:AssociatedDocumentLineDocument>",
+            &format!("{description_code}<ram:AssociatedDocumentLineDocument>"),
+            1,
+        );
+
+        let parsed = from_xml(&with_description_code).unwrap();
+        let preserved = preserved_xml_items(&parsed);
+        assert!(preserved.iter().any(|item| {
+            item.get("container").and_then(|value| value.as_str())
+                == Some("CrossIndustryInvoice/SupplyChainTradeTransaction/IncludedSupplyChainTradeLineItem")
+                && item.get("element").and_then(|value| value.as_str())
+                    == Some("DescriptionCode")
+                && item.get("line_id").and_then(|value| value.as_str()) == Some("1")
+        }));
+
+        let serialized = to_xml(&parsed).unwrap();
+        let description_pos = serialized.find("<ram:DescriptionCode").unwrap();
+        let line_id_container_pos = serialized
+            .find("<ram:AssociatedDocumentLineDocument>")
+            .unwrap();
+        assert!(description_pos < line_id_container_pos);
+        assert_eq!(from_xml(&serialized).unwrap(), parsed);
+    }
+
+    #[test]
+    fn parser_replays_preserved_only_defined_trade_contact() {
+        let mut document = fixture(DocumentType::Invoice, 39);
+        document.supplier.contact = None;
+        let xml = to_xml(&document).unwrap();
+        let contact = format!(
+            r#"<ram:DefinedTradeContact xmlns:ram="{CII_RAM_NAMESPACE_URI}"><ram:ID>CONTACT-ONLY</ram:ID></ram:DefinedTradeContact>"#
+        );
+        let with_contact = xml.replacen(
+            "<ram:PostalTradeAddress>",
+            &format!("{contact}<ram:PostalTradeAddress>"),
+            1,
+        );
+
+        let parsed = from_xml(&with_contact).unwrap();
+        assert_eq!(parsed.supplier.contact, None);
+        let preserved = preserved_xml_items(&parsed);
+        assert!(preserved.iter().any(|item| {
+            item.get("container").and_then(|value| value.as_str())
+                == Some("CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/SellerTradeParty/DefinedTradeContact")
+                && item.get("element").and_then(|value| value.as_str()) == Some("ID")
+                && item
+                    .get("xml")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|xml| xml.contains("CONTACT-ONLY"))
+        }));
+
+        let serialized = to_xml(&parsed).unwrap();
+        assert!(serialized.contains("<ram:DefinedTradeContact><ram:ID"));
+        assert!(serialized.contains("CONTACT-ONLY"));
+        assert_eq!(from_xml(&serialized).unwrap(), parsed);
+    }
+
+    #[test]
+    fn parser_replays_preserved_only_nested_contact_communication() {
+        let mut document = fixture(DocumentType::Invoice, 40);
+        document.supplier.contact = None;
+        let xml = to_xml(&document).unwrap();
+        let contact = format!(
+            r#"<ram:DefinedTradeContact xmlns:ram="{CII_RAM_NAMESPACE_URI}"><ram:TelephoneUniversalCommunication><ram:URIID>tel:+4930000000</ram:URIID><ram:ChannelCode>TELEPHONE</ram:ChannelCode></ram:TelephoneUniversalCommunication></ram:DefinedTradeContact>"#
+        );
+        let with_contact = xml.replacen(
+            "<ram:PostalTradeAddress>",
+            &format!("{contact}<ram:PostalTradeAddress>"),
+            1,
+        );
+
+        let parsed = from_xml(&with_contact).unwrap();
+        assert_eq!(parsed.supplier.contact, None);
+        let preserved = preserved_xml_items(&parsed);
+        assert!(preserved.iter().any(|item| {
+            item.get("container").and_then(|value| value.as_str())
+                == Some("CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/SellerTradeParty/DefinedTradeContact/TelephoneUniversalCommunication")
+                && item.get("element").and_then(|value| value.as_str()) == Some("ChannelCode")
+                && item
+                    .get("xml")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|xml| xml.contains("TELEPHONE"))
+        }));
+        assert!(preserved.iter().any(|item| {
+            item.get("container").and_then(|value| value.as_str())
+                == Some("CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/SellerTradeParty/DefinedTradeContact/TelephoneUniversalCommunication")
+                && item.get("element").and_then(|value| value.as_str()) == Some("URIID")
+                && item
+                    .get("xml")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|xml| xml.contains("tel:+4930000000"))
+        }));
+
+        let serialized = to_xml(&parsed).unwrap();
+        assert!(
+            serialized.contains("<ram:DefinedTradeContact><ram:TelephoneUniversalCommunication>")
+        );
+        assert!(serialized.contains("<ram:URIID"));
+        assert!(serialized.contains("<ram:ChannelCode"));
+        assert!(serialized.contains("TELEPHONE"));
+        assert_eq!(from_xml(&serialized).unwrap(), parsed);
+    }
+
+    #[test]
+    fn parser_preserves_root_level_cii_extension_elements() {
+        let document = fixture(DocumentType::Invoice, 33);
+        let xml = to_xml(&document).unwrap();
+        let valuation = format!(
+            r#"<rsm:ValuationBreakdownStatement xmlns:rsm="{CII_RSM_NAMESPACE_URI}" xmlns:ram="{CII_RAM_NAMESPACE_URI}"><ram:ID>VAL-1</ram:ID></rsm:ValuationBreakdownStatement>"#
+        );
+        let xml = xml.replacen(
+            "</rsm:CrossIndustryInvoice>",
+            &format!("{valuation}</rsm:CrossIndustryInvoice>"),
+            1,
+        );
+
+        let parsed = from_xml(&xml).unwrap();
+        let serialized = to_xml(&parsed).unwrap();
+        let transaction_pos = serialized
+            .find("</rsm:SupplyChainTradeTransaction>")
+            .unwrap();
+        let valuation_pos = serialized.find("<rsm:ValuationBreakdownStatement").unwrap();
+        assert!(transaction_pos < valuation_pos);
+        assert_eq!(from_xml(&serialized).unwrap(), parsed);
+    }
+
+    #[test]
+    fn parser_round_trips_profile_context_payloads() {
+        let document = fixture(DocumentType::Invoice, 29);
+        let xml = to_xml(&document).unwrap();
+        let profile_context = format!(
+            r#"<ram:SpecifiedTransactionID xmlns:ram="{CII_RAM_NAMESPACE_URI}">TX-42</ram:SpecifiedTransactionID><ram:TestIndicator xmlns:ram="{CII_RAM_NAMESPACE_URI}">true</ram:TestIndicator><ram:ApplicationSpecifiedDocumentContextParameter xmlns:ram="{CII_RAM_NAMESPACE_URI}"><ram:ID>urn:example:profile-app</ram:ID><ram:Value>profile-value</ram:Value></ram:ApplicationSpecifiedDocumentContextParameter>"#
+        );
+        let with_profile_context = xml.replacen(
+            "<ram:ApplicationSpecifiedDocumentContextParameter",
+            &format!("{profile_context}<ram:ApplicationSpecifiedDocumentContextParameter"),
+            1,
+        );
+
+        let parsed = from_xml(&with_profile_context).unwrap();
+        let extension = parsed
+            .extensions
+            .iter()
+            .find(|extension| extension.urn == mapping::CII_PROFILE_CONTEXT_EXTENSION_URN)
+            .unwrap();
+        assert_eq!(
+            extension
+                .payload
+                .get("transaction_ids")
+                .and_then(|value| value.as_array())
+                .map(Vec::as_slice),
+            Some([json!("TX-42")].as_slice())
+        );
+        assert_eq!(
+            extension
+                .payload
+                .get("test_indicators")
+                .and_then(|value| value.as_array())
+                .map(Vec::as_slice),
+            Some([json!("true")].as_slice())
+        );
+        assert_eq!(from_xml(&to_xml(&parsed).unwrap()).unwrap(), parsed);
+    }
+
+    #[test]
+    fn serializer_rejects_wrong_namespace_preserved_cii_fragment() {
+        let mut document = fixture(DocumentType::Invoice, 30);
+        document.extensions.push(
+            JurisdictionExtension::new(
+                mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN,
+                json!({
+                    "preserved_xml": [{
+                        "container": "CrossIndustryInvoice/ExchangedDocument",
+                        "element": "Name",
+                        "xml": r#"<evil:Name xmlns:evil="urn:wrong">Bad</evil:Name>"#
+                    }]
+                }),
+            )
+            .unwrap(),
+        );
+
+        let err = to_xml(&document).unwrap_err();
+        assert!(matches!(
+            err,
+            CiiError::InvalidNamespace { element, .. } if element == "Name"
+        ));
+    }
+
+    #[test]
+    fn serializer_rejects_unmatched_preserved_cii_payloads() {
+        let mut typoed_container = fixture(DocumentType::Invoice, 34);
+        typoed_container.extensions.push(
+            JurisdictionExtension::new(
+                mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN,
+                json!({
+                    "preserved_xml": [{
+                        "container": "CrossIndustryInvoice/Typo/ExchangedDocument",
+                        "element": "Name",
+                        "xml": format!(r#"<ram:Name xmlns:ram="{CII_RAM_NAMESPACE_URI}">Bad</ram:Name>"#)
+                    }]
+                }),
+            )
+            .unwrap(),
+        );
+        let err = to_xml(&typoed_container).unwrap_err();
+        assert!(matches!(
+            err,
+            CiiError::InvalidPreservedXml { message, .. }
+                if message.contains("container path")
+        ));
+
+        let mut missing_line = fixture(DocumentType::Invoice, 35);
+        missing_line.extensions.push(
+            JurisdictionExtension::new(
+                mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN,
+                json!({
+                    "preserved_xml": [{
+                        "container": "CrossIndustryInvoice/SupplyChainTradeTransaction/IncludedSupplyChainTradeLineItem",
+                        "element": "DescriptionCode",
+                        "line_id": "missing-line",
+                        "xml": format!(r#"<ram:DescriptionCode xmlns:ram="{CII_RAM_NAMESPACE_URI}">A</ram:DescriptionCode>"#)
+                    }]
+                }),
+            )
+            .unwrap(),
+        );
+        let err = to_xml(&missing_line).unwrap_err();
+        assert!(matches!(
+            err,
+            CiiError::InvalidPreservedXml { message, .. }
+                if message.contains("line_id")
+        ));
+
+        let mut stray_line_id = fixture(DocumentType::Invoice, 37);
+        let line_id = stray_line_id.lines.first().unwrap().id.clone();
+        stray_line_id.extensions.push(
+            JurisdictionExtension::new(
+                mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN,
+                json!({
+                    "preserved_xml": [{
+                        "container": "CrossIndustryInvoice/ExchangedDocument",
+                        "element": "Name",
+                        "line_id": line_id,
+                        "xml": format!(r#"<ram:Name xmlns:ram="{CII_RAM_NAMESPACE_URI}">Bad</ram:Name>"#)
+                    }]
+                }),
+            )
+            .unwrap(),
+        );
+        let err = to_xml(&stray_line_id).unwrap_err();
+        assert!(matches!(
+            err,
+            CiiError::InvalidPreservedXml { message, .. }
+                if message.contains("line_id")
+        ));
+    }
+
+    #[test]
+    fn parser_rejects_wrong_namespace_inside_preserved_cii_fragment() {
+        let document = fixture(DocumentType::Invoice, 32);
+        let xml = to_xml(&document).unwrap();
+        let tax_representative = format!(
+            r#"<ram:SellerTaxRepresentativeTradeParty xmlns:ram="{CII_RAM_NAMESPACE_URI}"><bad:Name xmlns:bad="urn:wrong">Tax Representative</bad:Name></ram:SellerTaxRepresentativeTradeParty>"#
+        );
+        let xml = xml.replacen(
+            "</ram:ApplicableHeaderTradeAgreement>",
+            &format!("{tax_representative}</ram:ApplicableHeaderTradeAgreement>"),
+            1,
+        );
+
+        let err = from_xml(&xml).unwrap_err();
+        assert!(matches!(
+            err,
+            CiiError::InvalidNamespace { element, .. } if element == "Name"
+        ));
+    }
+
+    #[test]
+    fn serializer_replays_preserved_cii_fragments_in_schema_order() {
+        let document = fixture(DocumentType::Invoice, 31);
+        let xml = to_xml(&document).unwrap();
+        let document_name =
+            format!(r#"<ram:Name xmlns:ram="{CII_RAM_NAMESPACE_URI}">Ordered Name</ram:Name>"#);
+        let context_fragments = format!(
+            r#"<ram:BIMSpecifiedDocumentContextParameter xmlns:ram="{CII_RAM_NAMESPACE_URI}"><ram:ID>BIM-1</ram:ID></ram:BIMSpecifiedDocumentContextParameter><ram:ScenarioSpecifiedDocumentContextParameter xmlns:ram="{CII_RAM_NAMESPACE_URI}"><ram:ID>SCENARIO-1</ram:ID></ram:ScenarioSpecifiedDocumentContextParameter>"#
+        );
+        let with_document_name = insert_before_tag_after(
+            &xml,
+            "<rsm:ExchangedDocument>",
+            "<ram:TypeCode",
+            &document_name,
+        );
+        let with_context_fragments = with_document_name.replacen(
+            "<ram:ApplicationSpecifiedDocumentContextParameter",
+            &format!("{context_fragments}<ram:ApplicationSpecifiedDocumentContextParameter"),
+            1,
+        );
+
+        let parsed = from_xml(&with_context_fragments).unwrap();
+        let serialized = to_xml(&parsed).unwrap();
+        let exchanged_document_start = serialized.find("<rsm:ExchangedDocument>").unwrap();
+        let id_pos = exchanged_document_start
+            + serialized[exchanged_document_start..]
+                .find("CII-0031")
+                .unwrap();
+        let name_pos = serialized.find("Ordered Name").unwrap();
+        let type_pos = exchanged_document_start
+            + serialized[exchanged_document_start..]
+                .find("<ram:TypeCode")
+                .unwrap();
+        assert!(id_pos < name_pos);
+        assert!(name_pos < type_pos);
+
+        let bim_pos = serialized
+            .find("<ram:BIMSpecifiedDocumentContextParameter")
+            .unwrap();
+        let scenario_pos = serialized
+            .find("<ram:ScenarioSpecifiedDocumentContextParameter")
+            .unwrap();
+        let application_pos = serialized
+            .find("<ram:ApplicationSpecifiedDocumentContextParameter")
+            .unwrap();
+        let guideline_pos = serialized
+            .find("<ram:GuidelineSpecifiedDocumentContextParameter")
+            .unwrap();
+        assert!(bim_pos < scenario_pos);
+        assert!(scenario_pos < application_pos);
+        assert!(application_pos < guideline_pos);
+        assert_eq!(from_xml(&serialized).unwrap(), parsed);
+    }
+
+    #[test]
+    fn serializer_sorts_hand_authored_preserved_cii_fragments() {
+        let mut document = fixture(DocumentType::Invoice, 36);
+        document.extensions.push(
+            JurisdictionExtension::new(
+                mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN,
+                json!({
+                    "preserved_xml": [
+                        {
+                            "container": "CrossIndustryInvoice/ExchangedDocumentContext",
+                            "element": "ScenarioSpecifiedDocumentContextParameter",
+                            "xml": format!(r#"<ram:ScenarioSpecifiedDocumentContextParameter xmlns:ram="{CII_RAM_NAMESPACE_URI}"><ram:ID>SCENARIO-1</ram:ID></ram:ScenarioSpecifiedDocumentContextParameter>"#)
+                        },
+                        {
+                            "container": "CrossIndustryInvoice/ExchangedDocumentContext",
+                            "element": "BIMSpecifiedDocumentContextParameter",
+                            "xml": format!(r#"<ram:BIMSpecifiedDocumentContextParameter xmlns:ram="{CII_RAM_NAMESPACE_URI}"><ram:ID>BIM-1</ram:ID></ram:BIMSpecifiedDocumentContextParameter>"#)
+                        }
+                    ]
+                }),
+            )
+            .unwrap(),
+        );
+
+        let serialized = to_xml(&document).unwrap();
+        let bim_pos = serialized
+            .find("<ram:BIMSpecifiedDocumentContextParameter")
+            .unwrap();
+        let scenario_pos = serialized
+            .find("<ram:ScenarioSpecifiedDocumentContextParameter")
+            .unwrap();
+        assert!(bim_pos < scenario_pos);
+    }
+
+    #[test]
+    fn mapping_decisions_name_standard_field_boundaries() {
+        assert_eq!(mapping::NAMED_MAPPING_DECISIONS.len(), 7);
+        assert!(mapping::NAMED_MAPPING_DECISIONS.iter().any(|decision| {
+            decision.element == "HeaderTradeAgreementType/BuyerReference"
+                && decision.class == "cii_document_field_extension"
+                && decision.rationale.contains("never tenant_id")
+        }));
+        assert!(mapping::NAMED_MAPPING_DECISIONS.iter().any(|decision| {
+            decision.element
+                == "ExchangedDocumentContextType/BusinessProcessSpecifiedDocumentContextParameter"
+                && decision.class == "cii_document_field_extension"
+                && decision.rationale.contains("never trace_id")
+                && decision
+                    .representation
+                    .contains("business_process_context_ids[]")
+        }));
+        assert!(mapping::NAMED_MAPPING_DECISIONS.iter().any(|decision| {
+            decision.element
+                == "ExchangedDocumentContextType/GuidelineSpecifiedDocumentContextParameter"
+                && decision.class == "profile_extension_payload"
+                && decision.representation.contains("guideline_context_ids[]")
+                && decision
+                    .rationale
+                    .contains("never a business-process context")
+        }));
+        assert!(mapping::NAMED_MAPPING_DECISIONS.iter().any(|decision| {
+            decision.element == "ExchangedDocumentContextType/SpecifiedTransactionID"
+                && decision.class == "profile_extension_payload"
+                && decision.representation.contains("transaction_ids[]")
+        }));
+        assert!(mapping::NAMED_MAPPING_DECISIONS.iter().any(|decision| {
+            decision.element == "ExchangedDocumentContextType/TestIndicator"
+                && decision.class == "profile_extension_payload"
+                && decision.representation.contains("test_indicators[]")
+        }));
+        assert!(mapping::NAMED_MAPPING_DECISIONS.iter().any(|decision| {
+            decision.element
+                == "ExchangedDocumentContextType/ApplicationSpecifiedDocumentContextParameter"
+                && decision.class == "profile_extension_payload"
+                && decision.representation.contains("application_contexts[]")
+        }));
     }
 
     #[test]
@@ -1638,5 +4720,27 @@ mod tests {
                 phone: Some("+49-30-000000".to_owned()),
             }),
         }
+    }
+
+    fn preserved_xml_items(document: &CommercialDocument) -> &[Value] {
+        document
+            .extensions
+            .iter()
+            .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
+            .and_then(|extension| extension.payload.get("preserved_xml"))
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .expect("preserved_xml extension")
+    }
+
+    fn insert_before_tag_after(
+        input: &str,
+        start_marker: &str,
+        tag_start: &str,
+        insertion: &str,
+    ) -> String {
+        let start = input.find(start_marker).expect("start marker");
+        let position = start + input[start..].find(tag_start).expect("tag start");
+        format!("{}{}{}", &input[..position], insertion, &input[position..])
     }
 }

@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-799 country feasibility manifest: South Korea.
+#
+# South Korea's NTS (National Tax Service) operates one of the
+# oldest mandatory e-tax-invoice systems globally: Jeonja Segeumgyesa
+# (electronic tax invoice) has been mandatory for corporate
+# taxpayers since 2011 and for sole-proprietors above the threshold
+# since 2014. Every VAT-taxable B2B invoice must be transmitted to
+# Hometax within 24 hours of issuance.
+
+schema_version = "1.0"
+country = "KR"
+country_name = "South Korea"
+program = "Jeonja Segeumgyesa (e-Tax Invoice) — NTS / Hometax"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-799-manifest-south-korea-8lz"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "NTS — Hometax portal"
+url = "https://www.hometax.go.kr/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Value-Added Tax Act (VAT Law)"
+url = "https://elaw.klri.re.kr/eng_service/lawView.do?hseq=53826"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Jeonja Segeumgyesa XML schema (NTS specification)"
+url = "https://www.hometax.go.kr/websquare/websquare.html?w2xPath=/ui/sf/a/UTESFAAZ73.xml"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "List of ASP (Application Service Providers)"
+url = "https://www.hometax.go.kr/websquare/websquare.html?w2xPath=/ui/sf/a/UTESFAAZ19.xml"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "requires_local_tax_id"
+notes = """
+NTS Hometax operates a test environment that requires a Korean
+business registration number (Saeop-eun beonho) and an NTS-
+recognised Korean PKI certificate. Foreign-only providers cannot
+enroll without a Korean entity. The standard path is through one
+of the NTS-listed ASPs.
+"""
+endpoint = "https://test.hometax.go.kr/api/jts/v1/submit"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_KR_NTS_CERT"
+
+[production]
+endpoint = "https://hometax.go.kr/api/jts/v1/submit"
+production_credentials_env_var = "INVOICEKIT_PROD_KR_NTS_CERT"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every Jeonja Segeumgyesa must be signed with a XAdES signature
+using a Korean PKI certificate from one of the NTS-approved CAs
+(KISA's national PKI, Korean SDA — Korea Securities Depository
+Agency, Korea Trade Network's KTNet). The certificate carries the
+issuer's Saeop-eun beonho. Tokenless software keys are common.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "common_for_high_volume"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses without a Korean establishment must register
+for VAT through a Korean tax representative who holds the
+Saeop-eun beonho. Cross-border B2C digital-services providers
+register under the Simplified Foreign Business Registration
+regime introduced in 2015.
+"""
+
+[validator]
+backend = "jvm:saxon"
+backend_notes = """
+Jeonja Segeumgyesa uses an XML schema validated via Saxon-HE
+in validator-saxon. The business-rule layer (BR-KR-*) covers
+Saeop-eun beonho checksum, VAT rate enumeration (10% standard,
+0% zero-rated), and per-invoice-type field validation. Signature
+verification delegates to validator-kosit.
+"""
+
+[interop]
+formats = ["NTS Jeonja Segeumgyesa XML (Korea proprietary)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+Jeonja Segeumgyesa is national-format-only. There is no PEPPOL
+PINT-KR profile.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/south-korea"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/south-korea"
+
+[follow_ups]
+items = [
+    "Pin a Korean ASP partner for the hosted layer's Saeop-eun beonho-holding entity",
+    "Add support for Hyungeumgyesa (cash receipt) flow alongside e-tax invoice",
+    "Track NTS's planned move to a UBL-aligned format (rumoured but not announced)",
+]

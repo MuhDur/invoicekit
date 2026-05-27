@@ -1,0 +1,112 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-7a1 country feasibility manifest: Taiwan.
+#
+# Taiwan's MOF (Ministry of Finance) operates the Tongyi Fapiao
+# (Uniform Invoice) system: every B2B and B2C invoice must be
+# issued with a government-allocated invoice number and reported
+# to the MOF e-Invoice Platform. The system has a unique consumer-
+# facing lottery element (Uniform Invoice Lottery) intended to
+# drive compliance by giving every invoice a winning-chance.
+
+schema_version = "1.0"
+country = "TW"
+country_name = "Taiwan"
+program = "Uniform Invoice (Tongyi Fapiao) — Ministry of Finance"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-7a1-manifest-taiwan-v7k"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "MOF — e-Invoice Platform"
+url = "https://www.einvoice.nat.gov.tw/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Value-added and Non-value-added Business Tax Act"
+url = "https://law.moj.gov.tw/ENG/LawClass/LawAll.aspx?pcode=G0340080"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "MOF e-Invoice technical documentation"
+url = "https://www.einvoice.nat.gov.tw/ein_upload/html/1505191743000.html"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "public"
+notes = """
+MOF operates a publicly accessible test environment
+(www-vc.einvoice.nat.gov.tw) accessible to any registered
+developer. Production access requires a Taiwan VAT identification
+number (Tongyi bianhao) and MOF enrollment. Foreign-only
+providers can access the test environment for integration but
+need a Taiwanese fiscal representative for production.
+"""
+endpoint = "https://www-vc.einvoice.nat.gov.tw/api/v1/upload"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_TW_MOF_CERT"
+
+[production]
+endpoint = "https://www.einvoice.nat.gov.tw/api/v1/upload"
+production_credentials_env_var = "INVOICEKIT_PROD_TW_MOF_CERT"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every e-Invoice (Dianzi fapiao) must be signed with a XAdES
+signature using a TWCA (Taiwan-Certificate Authority) or HiCOS
+issued certificate. The certificate carries the issuer's Tongyi
+bianhao. The MOF additionally issues invoice number ranges
+(zihao) to each business; invoices must use a number from the
+allocated range.
+"""
+smart_card_requirement = "common"
+hsm_requirement = "recommended_for_high_volume"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses without a Taiwanese establishment must
+register for VAT (Yingye shui) in Taiwan by appointing a
+Taiwanese tax representative who holds the Tongyi bianhao.
+Cross-border B2C digital-services providers can register under
+the foreign e-service VAT regime established in 2017.
+"""
+
+[validator]
+backend = "jvm:saxon"
+backend_notes = """
+MOF e-Invoice uses a proprietary XML schema validated via
+Saxon-HE in validator-saxon. The business-rule layer (BR-TW-*)
+covers Tongyi bianhao checksum, business tax rate enumeration
+(5% standard, 0% zero-rated), invoice number range validation,
+and per-document-type field rules. Signature verification
+delegates to validator-kosit.
+"""
+
+[interop]
+formats = ["MOF e-Invoice XML (Taiwan proprietary)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+MOF e-Invoice is national-format-only. There is no PEPPOL PINT-TW
+profile.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/taiwan"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/taiwan"
+
+[follow_ups]
+items = [
+    "Pin a Taiwanese fiscal-representative partner for the hosted layer's Tongyi bianhao-holding entity",
+    "Add support for the Uniform Invoice Lottery (Tongyi fapiao zhongjiang) prize-tracking flow if scope expands to consumer-side features",
+    "Track MOF's expected migration to UBL-aligned formats in the next major refresh",
+]

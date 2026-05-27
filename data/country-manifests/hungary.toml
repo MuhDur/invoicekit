@@ -1,0 +1,128 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-784 country feasibility manifest: Hungary.
+#
+# Phase 2.5 prerequisite for `crates/report-hu-nav`. Hungary's
+# Online Szamla (Online Invoice) system, operated by NAV (Nemzeti
+# Ado- es Vamhivatal), is a near-real-time reporting platform that
+# requires every B2B and B2C invoice issued by a Hungarian
+# taxpayer to be reported within 24 hours of issuance.
+
+schema_version = "1.0"
+country = "HU"
+country_name = "Hungary"
+program = "Online Szamla (NAV)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-784-manifest-hungary-ecs"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "NAV — Online Szamla portal"
+url = "https://onlineszamla.nav.gov.hu/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Online Szamla 3.0 XSD technical specification"
+url = "https://onlineszamla.nav.gov.hu/api_documentation"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Act CXXVII of 2007 on Value Added Tax (e-invoicing amendments)"
+url = "https://njt.hu/jogszabaly/2007-127-00-00"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "NAV Online Szamla API description (REST + XML)"
+url = "https://onlineszamla.nav.gov.hu/dokumentumok"
+kind = "api_documentation"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "public"
+notes = """
+NAV operates a publicly accessible sandbox at
+api-test.onlineszamla.nav.gov.hu where developers can register
+for a sandbox technical-user account without holding a Hungarian
+tax number. The sandbox mirrors production schemas (currently
+3.0) and returns realistic rule-level diagnostics. For
+production access the taxpayer must be registered with NAV and
+have generated technical users through the Online Szamla portal.
+"""
+endpoint = "https://api-test.onlineszamla.nav.gov.hu/invoiceService/v3/"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_HU_NAV_TOKEN"
+
+[production]
+endpoint = "https://api.onlineszamla.nav.gov.hu/invoiceService/v3/"
+production_credentials_env_var = "INVOICEKIT_PROD_HU_NAV_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_optional"
+qualified_seal_notes = """
+The Online Szamla API authenticates each request via a per-call
+SHA-512 request signature derived from the technical-user
+credentials (login + password + signing key) generated through
+the portal; a qualified electronic signature is NOT required for
+the API call. Hungarian invoices themselves may optionally carry
+a XAdES signature for archival purposes under the EU eIDAS
+framework; Hungarian Trust Service Providers (Microsec, NetLock,
+Magyar Telekom) issue the qualified certificates when needed.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "recommended_for_archival_signing"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign sellers without a Hungarian establishment that issue
+invoices to Hungarian customers must register for Hungarian VAT
+(adoszam) or appoint a Hungarian fiscal representative (penzugyi
+kepviselo). EU-resident sellers can register directly under the
+One-Stop Shop for distance sales. The Online Szamla reporting
+obligation applies to every issuer that holds a Hungarian
+adoszam; the fiscal representative submits Online Szamla data on
+behalf of the foreign seller.
+"""
+
+[validator]
+backend = "rest:nav-onlineszamla"
+backend_notes = """
+Online Szamla submissions are validated server-side by NAV with
+extensive rule diagnostics returned in the response payload.
+The rust side runs a minimal pre-validator (adoszam format,
+required-field presence, decimal-place rounding) before the
+REST call to avoid trivially malformed submissions consuming
+rate-limit quota. A future migration to validator-saxon for
+offline XSD checking is queued; NAV publishes the XSD bundle
+alongside the API documentation.
+"""
+
+[interop]
+formats = ["NAV Online Szamla 3.0 (proprietary XML)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+NAV Online Szamla accepts only its proprietary XML envelope.
+Hungary has no formal Peppol mandate today; cross-border B2B
+flow uses email/PDF or the buyer's choice of platform, with the
+Hungarian seller separately reporting to NAV within 24 hours of
+issuance regardless of the wire format used for delivery.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/hungary"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/hungary"
+
+[follow_ups]
+items = [
+    "Track NAV's Online Szamla 4.0 schema publication; currently 3.0 is in force",
+    "Evaluate cross-flow with the Hungarian e-VAT return prefill once NAV's API for that lands",
+    "Confirm the 24-hour reporting deadline definition for after-the-fact corrections (modifying invoices)",
+]

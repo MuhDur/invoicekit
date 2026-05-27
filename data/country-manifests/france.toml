@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-774 country feasibility manifest: France.
+
+schema_version = "1.0"
+country = "FR"
+country_name = "France"
+program = "Reforme e-facturation (DGFiP PPF + PDP network)"
+retrieved_at = "2026-05-27"
+maintainer = "RainyBeaver"
+bead = "invoices-t-774-manifest-france-nd7"
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "DGFiP e-invoicing reform program homepage"
+url = "https://www.impots.gouv.fr/portail/professionnel/facturation-electronique"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "External specifications (specifications externes) for the PPF / PDP network"
+url = "https://www.impots.gouv.fr/specifications-externes-b2b"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Chorus Pro program homepage (B2G channel, currently live)"
+url = "https://communaute.chorus-pro.gouv.fr/"
+kind = "operator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "French e-invoicing law (Loi de finances rectificative 2022, art. 26)"
+url = "https://www.legifrance.gouv.fr/"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "partner_gated"
+notes = """
+The PPF (Portail Public de Facturation) sandbox is only accessible
+through a registered PDP (Plateforme de Dematerialisation
+Partenaire) or directly via DGFiP's registration portal once a
+SIRET is associated. Chorus Pro (the B2G channel that's already
+live) has a developer-friendly pre-production environment
+accessible with any account.
+"""
+endpoint = "https://sandbox.chorus-pro.gouv.fr/"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_FR_CHORUS_TOKEN"
+
+[production]
+endpoint = "https://www.chorus-pro.gouv.fr/"
+production_credentials_env_var = "INVOICEKIT_PROD_FR_CHORUS_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_optional"
+qualified_seal_notes = """
+France does NOT mandate a per-invoice qualified electronic seal in
+the post-2026 B2B reform. The signing happens at the PDP layer
+(the platform attests to the invoice's authenticity), so the
+seller's invoice doesn't need its own QES key. A QES on the
+seller side is still recommended for the B2G channel via Chorus
+Pro where the platform-level signing is asymmetric.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "recommended_for_pdp_operators"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign sellers without a French establishment must either appoint
+a French fiscal representative or operate through a registered
+PDP that handles the representation. EU sellers with French VAT
+obligations under the OSS flow still need either route for the
+e-invoicing channel because the PPF requires a French SIREN to
+route the invoice to the buyer.
+"""
+
+[validator]
+backend = "rust_native"
+backend_notes = """
+France's reform accepts Factur-X (PDF/A-3 with embedded
+EN 16931-compliant XML), UBL 2.1 (Peppol BIS 3.0), and CII D16B.
+All three are within InvoiceKit's hand-written EN 16931 validator
+(invoicekit-validate-ubl-cii, T-031). PPF and PDP interchange
+adds a small French-specific business-rule layer that lands in a
+French-specific rulepack; structural validation is rust_native.
+"""
+
+[interop]
+formats = ["Factur-X", "UBL 2.1", "CII D16B"]
+peppol_bis_accepted = true
+peppol_pint_accepted = false
+notes = """
+France's reform was deliberately designed to be format-neutral:
+any of Factur-X / UBL / CII is accepted at the PPF gate, and
+Peppol BIS routing into the PDP network is supported. PINT is on
+the future roadmap. Cross-border invoices to French recipients
+can come through any of these channels and the PPF brokers the
+delivery to the buyer's chosen PDP.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/france"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/france"
+
+[follow_ups]
+items = [
+    "Ship a French-specific rulepack covering PPF-required business assertions (BR-FR-*) on top of EN 16931",
+    "Wire one or more PDP partner credentials into the hosted layer's deployment runbooks",
+    "When PINT lands in France, flip interop.peppol_pint_accepted",
+]

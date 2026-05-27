@@ -20,7 +20,13 @@ CORPUS_ROOT = REPO / "conformance-corpus"
 SCHEMA_PATH = CORPUS_ROOT / "fixture-metadata.schema.json"
 ARTIFACT_SUFFIXES = frozenset({".json", ".xml", ".pdf"})
 IGNORED_ARTIFACT_PATHS = frozenset({Path("fixture-metadata.schema.json")})
-IGNORED_ARTIFACT_DIRS = frozenset({"generators", "fuzz"})
+# wcep: `gobl-upstream` carries fixtures sourced from invopop/gobl's
+# Apache-2.0 example corpus. They are not InvoiceKit conformance
+# artefacts and intentionally do not follow the per-fixture
+# `metadata.json` schema — provenance is recorded once in the
+# directory's `README.md` and the upstream commit SHA is pinned in
+# the round-trip test that consumes them.
+IGNORED_ARTIFACT_DIRS = frozenset({"generators", "fuzz", "gobl-upstream"})
 REFERENCE_PATH_FIELDS = (
     ("license", "evidence_path"),
     ("pii", "redaction_report_path"),
@@ -321,8 +327,17 @@ def validate_all(corpus_root: Path = CORPUS_ROOT, schema_path: Path = SCHEMA_PAT
     metadata_files = iter_metadata_files(corpus_root)
     if not metadata_files:
         raise MetadataError(f"{corpus_root}: no metadata.json files found")
+    fixture_ids: dict[str, Path] = {}
     for metadata_path in metadata_files:
         validate_metadata_file(metadata_path, schema)
+        fixture_id = load_json(metadata_path)["fixture_id"]
+        previous = fixture_ids.get(fixture_id)
+        if previous is not None:
+            raise MetadataError(
+                f"{metadata_path}: duplicate fixture_id {fixture_id!r}; "
+                f"already declared by {previous}"
+            )
+        fixture_ids[fixture_id] = metadata_path
     validate_metadata_coverage(corpus_root, metadata_files)
     return metadata_files
 

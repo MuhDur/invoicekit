@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+# T-114 Storybook templates: CI gate.
+
+name: storybook-templates
+
+on:
+  push:
+    paths:
+      - "templates/typescript/**"
+      - "templates/typescript-storybook/**"
+      - ".github/workflows/storybook-templates.yml"
+  pull_request:
+    paths:
+      - "templates/typescript/**"
+      - "templates/typescript-storybook/**"
+      - ".github/workflows/storybook-templates.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build + smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: templates/typescript-storybook
+        run: bun install
+
+      - name: Type-check
+        working-directory: templates/typescript-storybook
+        run: bunx tsc --noEmit -p tsconfig.json
+
+      - name: Smoke (4 story-shape assertions)
+        working-directory: templates/typescript-storybook
+        run: bun test tests/stories.test.mjs
+
+      - name: Production Storybook build
+        working-directory: templates/typescript-storybook
+        run: bunx storybook build
+
+      - name: Upload Storybook artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: invoicekit-storybook
+          path: templates/typescript-storybook/storybook-static
+          retention-days: 7
+          if-no-files-found: error

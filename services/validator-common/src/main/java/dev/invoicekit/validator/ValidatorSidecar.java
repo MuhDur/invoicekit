@@ -107,13 +107,26 @@ public final class ValidatorSidecar {
         }
 
         JsonNode id = request.get("id");
-        if (!"2.0".equals(request.path("jsonrpc").asText()) ||
-            !"validator.validate".equals(request.path("method").asText())) {
-            sendJson(exchange, 200, jsonRpcError(id, -32601, "expected JSON-RPC 2.0 method validator.validate"));
+        if (!"2.0".equals(request.path("jsonrpc").asText())) {
+            sendJson(exchange, 200, jsonRpcError(id, -32600, "expected JSON-RPC 2.0 envelope"));
+            return;
+        }
+        String method = request.path("method").asText();
+        if (!"validator.validate".equals(method) && !"validator.validate_pdf".equals(method)) {
+            sendJson(exchange, 200, jsonRpcError(id, -32601,
+                "method must be validator.validate or validator.validate_pdf"));
+            return;
+        }
+        JsonNode params = request.path("params");
+
+        // T-052: jvm:verapdf backend handles validator.validate_pdf
+        // (base64 PDF input + typed PdfAReport output). XML backends
+        // continue to handle the legacy validator.validate path.
+        if ("validator.validate_pdf".equals(method)) {
+            handlePdfValidate(exchange, config, id, params);
             return;
         }
 
-        JsonNode params = request.path("params");
         JsonNode xmlNode = params.path("document").path("xml");
         if (!xmlNode.isTextual() || xmlNode.asText().isBlank()) {
             sendJson(exchange, 200, jsonRpcError(id, -32602, "params.document.xml must be a non-empty string"));
@@ -147,14 +160,135 @@ public final class ValidatorSidecar {
         sendJson(exchange, 200, response);
     }
 
+    private static void handlePdfValidate(
+        HttpExchange exchange,
+        BackendConfig config,
+        JsonNode id,
+        JsonNode params
+    ) throws IOException {
+        if (!"jvm:verapdf".equals(config.backend())) {
+            sendJson(exchange, 200, jsonRpcError(id, -32601,
+                "validator.validate_pdf is only available on the jvm:verapdf backend (current: "
+                    + config.backend() + ")"));
+            return;
+        }
+        JsonNode pdfNode = params.path("document").path("pdf_base64");
+        if (!pdfNode.isTextual() || pdfNode.asText().isBlank()) {
+            sendJson(exchange, 200, jsonRpcError(id, -32602,
+                "params.document.pdf_base64 must be a non-empty base64 string"));
+            return;
+        }
+        String flavour = params.path("flavour").asText("pdfa-3b");
+        String traceId = params.path("trace_id").asText(UUID.randomUUID().toString());
+
+        long started = System.nanoTime();
+        byte[] pdfBytes;
+        try {
+            pdfBytes = java.util.Base64.getDecoder().decode(pdfNode.asText());
+        } catch (IllegalArgumentException ex) {
+            sendJson(exchange, 200, jsonRpcError(id, -32602,
+                "params.document.pdf_base64 is not valid base64: " + sanitizeMessage(ex.getMessage())));
+            return;
+        }
+        ObjectNode report = runVeraPdf(config, pdfBytes, flavour, traceId);
+        long durationMs = Math.max(0, (System.nanoTime() - started) / 1_000_000);
+
+        ObjectNode response = MAPPER.createObjectNode();
+        response.put("jsonrpc", "2.0");
+        response.set("id", id == null ? MAPPER.nullNode() : id);
+        ObjectNode result = response.putObject("result");
+        result.put("backend", config.backend());
+        result.put("service", config.serviceName());
+        result.put("oracle_coordinate", config.oracleCoordinate());
+        result.put("oracle_class", config.oracleClass());
+        result.put("flavour", flavour);
+        result.put("trace_id", traceId);
+        result.put("duration_ms", durationMs);
+        ObjectNode document = result.putObject("document");
+        document.put("content_type", "application/pdf");
+        document.put("byte_length", pdfBytes.length);
+        document.put("sha256", sha256Bytes(pdfBytes));
+        result.set("report", report);
+        sendJson(exchange, 200, response);
+    }
+
+    /**
+     * Runs veraPDF against `pdfBytes` and returns a typed PdfAReport
+     * shape. The actual veraPDF library calls are intentionally
+     * isolated behind a small wrapper class
+     * ({@link PdfAReport}) so the JSON shape stays stable across
+     * library upgrades and so this sidecar compiles cleanly on
+     * profiles where the verapdf-library isn't on the classpath.
+     */
+    private static ObjectNode runVeraPdf(
+        BackendConfig config,
+        byte[] pdfBytes,
+        String flavour,
+        String traceId
+    ) {
+        try {
+            return PdfAReport.run(pdfBytes, flavour, traceId, MAPPER);
+        } catch (Throwable ex) {
+            ObjectNode report = MAPPER.createObjectNode();
+            report.put("conformant", false);
+            report.put("error_class", ex.getClass().getName());
+            report.put("error_message", sanitizeMessage(ex.getMessage()));
+            ArrayNode failures = report.putArray("failures");
+            ObjectNode finding = failures.addObject();
+            finding.put("rule_id", config.rulePrefix() + "-LIBRARY-ERROR");
+            finding.put("severity", "fatal");
+            finding.put("message",
+                "veraPDF library raised " + ex.getClass().getName() + " before producing a report");
+            return report;
+        }
+    }
+
+    private static String sha256Bytes(byte[] bytes) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(bytes));
+        } catch (Exception ex) {
+            throw new IllegalStateException("SHA-256 digest unavailable", ex);
+        }
+    }
+
     private static ValidationOutcome validateXml(BackendConfig config, String xml, JsonNode params) {
         ArrayNode results = MAPPER.createArrayNode();
+        String rootElement;
         try {
-            String rootElement = parseRootElement(xml);
-            return new ValidationOutcome(true, rootElement, results);
+            rootElement = parseRootElement(xml);
         } catch (ParserConfigurationException | SAXException | IOException ex) {
             results.add(wellFormednessFinding(config, params, ex));
             return new ValidationOutcome(false, null, results);
+        }
+
+        // 7psv: dispatch to the real domain validator (KoSIT or
+        // phive) when the request asks for a non-smoke profile.
+        // The smoke contract (profile="contract-smoke") stays on
+        // the well-formedness-only path so the p95 latency gate
+        // and the existing services/validator-smoke.py harness
+        // continue to work unchanged.
+        String profile = params.path("profile").asText("contract-smoke");
+        String traceId = params.path("trace_id").asText(null);
+        if ("contract-smoke".equals(profile)) {
+            return new ValidationOutcome(true, rootElement, results);
+        }
+
+        switch (config.backend()) {
+            case "jvm:phive" -> {
+                PhiveReport.Outcome outcome = PhiveReport.run(xml, profile, traceId, MAPPER);
+                return new ValidationOutcome(outcome.valid(), rootElement, outcome.results());
+            }
+            case "jvm:kosit" -> {
+                KositReport.Outcome outcome = KositReport.run(xml, profile, traceId, MAPPER);
+                return new ValidationOutcome(outcome.valid(), rootElement, outcome.results());
+            }
+            default -> {
+                // jvm:saxon falls back to well-formedness-only for
+                // now; T-031 will add Saxon-driven Schematron once
+                // the rust-side rule pack is ready to consume it.
+                return new ValidationOutcome(true, rootElement, results);
+            }
         }
     }
 
@@ -308,6 +442,14 @@ public final class ValidatorSidecar {
                     "net.sf.saxon.s9api.Processor",
                     "SAXON",
                     "Saxon-HE 12.9"
+                );
+                case "jvm:verapdf" -> new BackendConfig(
+                    backend,
+                    "validator-verapdf",
+                    "org.verapdf:verapdf-library:1.27.1",
+                    "org.verapdf.pdfa.Foundries",
+                    "VERAPDF",
+                    "veraPDF library 1.27.1 (PDF/A reference verifier)"
                 );
                 default -> throw new IllegalArgumentException("unsupported backend " + backend);
             };

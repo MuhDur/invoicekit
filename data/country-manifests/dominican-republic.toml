@@ -1,0 +1,109 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-792 country feasibility manifest: Dominican Republic.
+#
+# The Dominican Republic's DGII (Direccion General de Impuestos
+# Internos) operates Facturacion Electronica with phased mandatory
+# rollout: large taxpayers since 2024, medium since 2025, small
+# from 2026 onward.
+
+schema_version = "1.0"
+country = "DO"
+country_name = "Dominican Republic"
+program = "Facturacion Electronica DGII (e-CF)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-792-manifest-dominican-republic-luu"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "DGII — Facturacion Electronica portal"
+url = "https://dgii.gov.do/cicloContribuyente/facturacion/facturacionElectronica/Paginas/default.aspx"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Ley 32-23 sobre Facturacion Electronica"
+url = "https://www.dgii.gov.do/legislacion/leyesTributarias/Documents/2023/Ley%2032-23.pdf"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Norma General 06-2018 (e-CF technical specification)"
+url = "https://dgii.gov.do/legislacion/normasGenerales/Documents/2018/06-2018.pdf"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "requires_local_tax_id"
+notes = """
+DGII operates a test environment (ecf.dgii.gov.do/testecf) that
+requires a Dominican RNC (Registro Nacional de Contribuyentes)
+and a DGII-recognised digital certificate. Foreign-only providers
+must work through a Dominican proveedor de servicios that holds
+the RNC.
+"""
+endpoint = "https://ecf.dgii.gov.do/testecf/emisorreceptor/api/recepcion"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_DO_DGII_CERT"
+
+[production]
+endpoint = "https://ecf.dgii.gov.do/produccion/emisorreceptor/api/recepcion"
+production_credentials_env_var = "INVOICEKIT_PROD_DO_DGII_CERT"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every e-CF must be signed with a XAdES-BES signature using a
+certificate issued by a DGII-recognised CA (Camara TIC, BHD).
+The certificate carries the issuer's RNC. Signature is XML-DSig
+over a canonical e-CF body defined in Norma General 06-2018.
+"""
+smart_card_requirement = "common"
+hsm_requirement = "recommended_for_high_volume"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses without a Dominican establishment must
+register for ITBIS (Impuesto sobre Transferencias de Bienes
+Industrializados y Servicios) by appointing a Dominican
+representante fiscal who holds the RNC. B2C digital-services
+providers can register under the new foreign digital-services
+regime introduced under Ley 32-23.
+"""
+
+[validator]
+backend = "jvm:saxon"
+backend_notes = """
+DGII e-CF uses a proprietary XML schema (Factura Credito Fiscal,
+Factura Consumo, Nota Credito, Nota Debito, etc) validated via
+Saxon-HE. The business-rule layer (BR-DO-*) covers RNC checksum,
+ITBIS rate enumeration (18% standard, 16% reduced for selected
+goods), trackId format, and per-comprobante-type series
+authorisation. Signature verification delegates to
+validator-kosit.
+"""
+
+[interop]
+formats = ["DGII e-CF (proprietary XML, Norma 06-2018)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+e-CF is national-format-only; Peppol envelopes are NOT accepted.
+There is no PEPPOL PINT-DO profile.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/dominican-republic"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/dominican-republic"
+
+[follow_ups]
+items = [
+    "Track the phased mandate calendar (large 2024-05, medium 2025-05, small 2026-05) for hosted-layer onboarding prompts",
+    "Pin a Dominican proveedor de servicios partner",
+    "Add the Aprobacion Comercial flow for the buyer-side acknowledgement",
+]

@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+# T-1403 reference Spring Boot demo: CI gate.
+#
+# Build sequence:
+#   1. cargo build -p invoicekit-ffi -> libinvoicekit_ffi.so
+#   2. mvn install bindings/java -> invoicekit-java JAR (MRJAR
+#      with the Java 22 FfmEngineClient)
+#   3. mvn test examples/spring-boot -> 6 MockMvc smoke rows
+#
+# Java 22 is required so the FFM native client compiles + loads.
+
+name: demo-spring-boot
+
+on:
+  push:
+    paths:
+      - "examples/spring-boot/**"
+      - "bindings/java/**"
+      - "crates/invoicekit-ffi/**"
+      - "crates/invoicekit-engine/**"
+      - ".github/workflows/demo-spring-boot.yml"
+  pull_request:
+    paths:
+      - "examples/spring-boot/**"
+      - "bindings/java/**"
+      - "crates/invoicekit-ffi/**"
+      - "crates/invoicekit-engine/**"
+      - ".github/workflows/demo-spring-boot.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: demo smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "22"
+          cache: maven
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build invoicekit-ffi cdylib
+        run: cargo build -p invoicekit-ffi --locked
+
+      - name: Install invoicekit-java SDK to local Maven cache
+        run: mvn -B -ntp install -DskipTests -f bindings/java/pom.xml
+
+      - name: Run demo smoke (6 MockMvc rows)
+        working-directory: examples/spring-boot
+        env:
+          INVOICEKIT_FFI_LIB: ${{ github.workspace }}/target/debug/libinvoicekit_ffi.so
+        run: mvn -B -ntp test

@@ -1,0 +1,133 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-778 country feasibility manifest: India.
+#
+# Phase 2.5 prerequisite for `crates/report-in-irp`. India's GST
+# e-invoicing model is a CTC clearance system: every B2B invoice
+# above the turnover threshold must be registered at one of the
+# GSTN-authorised Invoice Registration Portals (IRPs) which return
+# an Invoice Reference Number (IRN) plus a signed QR code.
+
+schema_version = "1.0"
+country = "IN"
+country_name = "India"
+program = "GST e-Invoicing (IRP / GSTN)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-778-manifest-india-fvk"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "Goods and Services Tax Network — e-Invoice portal"
+url = "https://einvoice1.gst.gov.in/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "e-Invoice API documentation (NIC IRP master)"
+url = "https://einv-apisandbox.nic.in/"
+kind = "api_documentation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "GST Council notification on e-invoicing thresholds"
+url = "https://www.cbic.gov.in/htdocs-cbec/gst/notifications-igst"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "e-Invoice schema (INV-01 / Schema-1.1)"
+url = "https://einvoice1.gst.gov.in/Documents/eInvoice_schema.pdf"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "List of authorised IRPs"
+url = "https://einvoice1.gst.gov.in/Others/IRPs"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "requires_local_tax_id"
+notes = """
+The NIC sandbox at einv-apisandbox.nic.in is publicly reachable
+but every API call needs a sandbox GSTIN (Goods and Services Tax
+Identification Number) issued to a registered Indian taxpayer.
+NIC publishes a fixed set of sandbox GSTINs that any developer
+can request, however production-mirroring tests require a real
+GSTIN bound to a Permanent Account Number (PAN) issued by the
+Income Tax Department. Foreign providers must enroll through a
+Tax Return Preparer (TRP) or a GST Suvidha Provider (GSP) which
+multiplexes API access for many sellers.
+"""
+endpoint = "https://einv-apisandbox.nic.in/eivital/v1.04/Invoice"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_IN_IRP_TOKEN"
+
+[production]
+endpoint = "https://einvoice1.gst.gov.in/eivital/v1.04/Invoice"
+production_credentials_env_var = "INVOICEKIT_PROD_IN_IRP_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+The IRP returns each cleared invoice with a JSON Web Signature
+(JWS) using the IRP's own RSA key — the seller does NOT sign the
+outbound submission. Authentication is via an OAuth-style Auth
+Token (valid 6 hours) bound to either the seller's GSTIN or the
+GSP/ASP's GSTIN-on-behalf-of-seller. Class-3 Digital Signature
+Certificates issued by India CCA-licensed Certifying Authorities
+are required for the offline mode where invoices are batch-signed
+locally before upload.
+"""
+smart_card_requirement = "required_for_offline_mode"
+hsm_requirement = "recommended_for_gsp_keys"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign sellers cannot register for GST directly; they must
+appoint an Indian-resident representative (an Indian-resident
+agent under Section 14 of the IGST Act for OIDAR services, or a
+GSP / GST Practitioner more generally). The representative holds
+the GSTIN that the IRP authentication binds to. Most B2B import
+flow uses Reverse Charge Mechanism (RCM) at the buyer side, which
+removes the e-invoicing obligation from the foreign seller.
+"""
+
+[validator]
+backend = "rest:nic-irp"
+backend_notes = """
+The IRP is the authoritative validator; its response carries
+rule-level diagnostics with codes from the GSTN error registry
+(2xxx HSN validation, 3xxx GSTIN validation, etc). The rust side
+runs a minimal pre-validator (GSTIN checksum, HSN code presence,
+mandatory-field check) before the REST call to avoid trivially
+malformed submissions consuming rate-limit quota.
+"""
+
+[interop]
+formats = ["INV-01 JSON (Schema-1.1)", "PEPPOL BIS Billing 3.0 (mapping documented)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+The IRP today only accepts the proprietary INV-01 JSON envelope.
+Cross-border invoices destined for India that arrive in Peppol
+BIS Billing 3.0 must be translated to INV-01 by the GSP or by
+InvoiceKit's hosted layer before clearance. There is no PEPPOL
+PINT-IN profile as of the manifest date.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/india"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/india"
+
+[follow_ups]
+items = [
+    "Track GSTN's annual e-invoicing turnover threshold reductions (currently INR 5 crore; expected to fall to INR 1 crore by 2027)",
+    "Select an Indian GSP partner with the lowest per-envelope pricing tier for the hosted layer",
+    "Open a follow-up to evaluate the IRP's E-Way Bill cross-system flow (separate but tightly coupled to e-invoicing)",
+]

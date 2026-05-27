@@ -1,0 +1,125 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-779 country feasibility manifest: Mexico.
+#
+# Phase 2.5 prerequisite for `crates/report-mx-cfdi`. Mexico's
+# CFDI 4.0 (Comprobante Fiscal Digital por Internet) is one of the
+# oldest mandatory CTC clearance systems globally: every invoice
+# must be stamped by a SAT-authorised PAC (Proveedor Autorizado de
+# Certificacion) before being delivered.
+
+schema_version = "1.0"
+country = "MX"
+country_name = "Mexico"
+program = "CFDI 4.0 (SAT / PAC clearance)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-779-manifest-mexico-ep5"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "Servicio de Administracion Tributaria — CFDI portal"
+url = "https://www.sat.gob.mx/empresas/comprobantes-fiscales"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Anexo 20 (CFDI 4.0 technical specification)"
+url = "https://www.sat.gob.mx/normatividad/35025/version-en-vigor-de-los-anexos-de-la-rmf-vigente"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Catalog of authorised PACs"
+url = "https://www.sat.gob.mx/aplicacion/operacion/74883/proveedores-autorizados-de-certificacion-de-cfdi"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Codigo Fiscal de la Federacion (Article 29 — CFDI)"
+url = "https://www.diputados.gob.mx/LeyesBiblio/pdf/CFF.pdf"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "partner_gated"
+notes = """
+The SAT does not operate a public sandbox for CFDI stamping.
+Sandboxes are run by individual PACs for their integrators; each
+PAC issues a sandbox RFC (Registro Federal de Contribuyentes) and
+sample CSDs (Certificados de Sello Digital). Common open
+sandboxes ship with the major PACs (Solucion Factible, Edicom,
+PrediCo, FacturaXM, FoneFact). The CFDI 4.0 XSD itself can be
+validated offline with the schema published in Anexo 20.
+"""
+endpoint = "https://sandbox.solucionfactible.com/ws/services/Timbrado"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_MX_PAC_TOKEN"
+
+[production]
+endpoint = "https://servicios.solucionfactible.com/ws/services/Timbrado"
+production_credentials_env_var = "INVOICEKIT_PROD_MX_PAC_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every CFDI invoice must be signed by the issuing taxpayer using a
+CSD (Certificado de Sello Digital) issued by the SAT, derived
+from the taxpayer's e.firma (FIEL) — the foundational SAT-issued
+certificate. The PAC then re-stamps the invoice with its own
+qualifying certificate and adds the SAT's Timbre Fiscal Digital.
+Both signatures are XML-DSig over a canonical CFDI representation
+defined in Anexo 20. Smart-card-backed keys are not standard;
+software tokens are the dominant deployment.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "recommended_for_high_volume"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign sellers without a Mexican establishment must register as
+foreign taxpayers under Mexico's digital services tax regime (for
+B2C digital services) or appoint a Mexican legal representative
+(representante legal) registered with the SAT. Inbound B2B
+transactions where the foreign seller does not invoice in CFDI
+typically flow as buyer-side Comprobante de Recepcion de Pagos.
+"""
+
+[validator]
+backend = "jvm:saxon"
+backend_notes = """
+CFDI 4.0 validates against the Anexo 20 XSD using the
+validator-saxon sidecar. The business-rule layer (BR-MX-*) covers
+RFC checksum, postal-code-to-state alignment, payment-method
+catalog validation, and CFDI-Use-Code restrictions. The SAT's
+own Timbre Fiscal Digital is verified through validator-kosit
+(XML-DSig) and a check that the PAC's certificate is on the
+current authorised list.
+"""
+
+[interop]
+formats = ["CFDI 4.0 (Comprobante)", "CFDI 4.0 (Pago)", "CFDI 4.0 (Nomina)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+CFDI is a national-only format; Peppol envelopes are NOT
+accepted at the SAT clearance gate. Cross-border B2B traffic
+typically uses the CFDI 4.0 'Receptor extranjero' marker for
+foreign buyers, or flows entirely outside CFDI when the seller
+is foreign.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/mexico"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/mexico"
+
+[follow_ups]
+items = [
+    "Select two Mexican PAC partners (primary + fallback) and document per-stamping pricing",
+    "Track the SAT's annual Catalog publication cadence (Catalogos de CFDI: c_RegimenFiscal, c_FormaPago, etc) and add to codelists drift watch",
+    "Open a follow-up bead to handle the Carta Porte 3.0 complement when freight scenarios become a target",
+]

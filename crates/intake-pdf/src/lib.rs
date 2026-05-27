@@ -33,10 +33,12 @@
 //!    1/72 inch), origin at the lower-left of the page. The OCR
 //!    aligner consumes the same coordinate system.
 
+mod factur_x;
 mod text;
 
 use thiserror::Error;
 
+pub use factur_x::{extract_factur_x_xml, FACTUR_X_ATTACHMENT_NAMES};
 pub use text::{extract_pdf_text, PageText, StructuredText, TextFragment};
 
 /// Errors returned by [`extract_pdf_text`].

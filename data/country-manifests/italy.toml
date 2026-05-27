@@ -1,0 +1,117 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-773 country feasibility manifest: Italy.
+
+schema_version = "1.0"
+country = "IT"
+country_name = "Italy"
+program = "FatturaPA via SDI (Sistema di Interscambio, Agenzia delle Entrate)"
+retrieved_at = "2026-05-27"
+maintainer = "RainyBeaver"
+bead = "invoices-t-773-manifest-italy-hab"
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "Agenzia delle Entrate FatturaPA homepage"
+url = "https://www.fatturapa.gov.it/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "FatturaPA technical specification (current version)"
+url = "https://www.fatturapa.gov.it/it/norme-e-regole/documentazione-fattura-elettronica/formato-fatturapa/"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "SDI integration guide"
+url = "https://www.fatturapa.gov.it/it/sistemainterscambio/"
+kind = "api_documentation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Italian e-invoicing law (Legge di Bilancio 2018)"
+url = "https://www.normattiva.it/"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "requires_local_tax_id"
+notes = """
+SDI's test environment is open but every request must reference a
+valid Italian Partita IVA (VAT number) or Codice Fiscale.
+Foreign-only providers cannot register a Partita IVA without
+either a local establishment or a fiscal representative (see
+[fiscal_rep] below). For InvoiceKit's hosted layer this means the
+Italian fiscal representative's Partita IVA is what bootstraps
+the sandbox account.
+"""
+endpoint = "https://testservizi.fatturapa.gov.it/"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_IT_SDI_TOKEN"
+
+[production]
+endpoint = "https://servizi.fatturapa.gov.it/"
+production_credentials_env_var = "INVOICEKIT_PROD_IT_SDI_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every FatturaPA XML must carry a Cades-BES (or PAdES for the
+PDF embed scenario) signature produced under an Italian
+qualified electronic signature service. The signing certificate
+must chain to a Trust Service Provider listed on the AgID-
+maintained Italian trust list. The key may be held in (a) a
+smart card / signature USB token issued by a Italian TSP, or
+(b) an HSM-backed remote signature service.
+"""
+smart_card_requirement = "common_in_practice"
+hsm_requirement = "required_for_production"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign sellers without an Italian establishment must appoint
+an Italian fiscal representative who holds the Partita IVA and
+the qualified signing identity. Since 2024, EU sellers can also
+opt into the EU One-Stop Shop flow but the FatturaPA channel
+itself still requires the fiscal representative for invoice
+signing.
+"""
+
+[validator]
+backend = "jvm:saxon"
+backend_notes = """
+FatturaPA is a custom XML schema (not UBL) with strict XSD +
+XPath assertions. validator-saxon executes the XSD + Schematron
+that AgID publishes; a native Rust validator is not on the
+near-term roadmap because the XSD is regularly refreshed by the
+regulator and Saxon's XSLT 3.0 support is the documented
+oracle.
+"""
+
+[interop]
+formats = ["FatturaPA"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+Italy mandates FatturaPA for all domestic B2B and B2G invoices.
+Peppol BIS is not accepted at the SDI gate today (SDI itself is
+not a Peppol access point). Italy IS an OpenPeppol member and
+PINT support is on the multi-year roadmap, but until then a
+cross-border Peppol invoice to an Italian recipient must be
+re-rendered into FatturaPA by either the Italian fiscal
+representative or a market intermediary.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/italy"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/italy"
+
+[follow_ups]
+items = [
+    "Cache the AgID Trust List periodically so signature verification can run offline (depends on T-006 source-watch)",
+    "When SDI publishes a PINT-bridging endpoint, flip interop.peppol_pint_accepted",
+]

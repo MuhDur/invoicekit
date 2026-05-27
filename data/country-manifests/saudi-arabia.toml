@@ -1,0 +1,116 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-771 country feasibility manifest: Saudi Arabia (ZATCA Fatoora).
+
+schema_version = "1.0"
+country = "SA"
+country_name = "Saudi Arabia"
+program = "ZATCA Fatoora (E-Invoicing)"
+retrieved_at = "2026-05-27"
+maintainer = "RainyBeaver"
+bead = "invoices-t-771-manifest-saudi-arabia-g0b"
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "ZATCA E-Invoicing program homepage"
+url = "https://zatca.gov.sa/en/E-Invoicing/Pages/default.aspx"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "ZATCA Fatoora developer portal"
+url = "https://fatoora.zatca.gov.sa/"
+kind = "api_documentation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Saudi e-invoicing regulation (Royal Decree M/113)"
+url = "https://laws.boe.gov.sa/"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "ZATCA Fatoora Phase 2 integration specification"
+url = "https://zatca.gov.sa/en/E-Invoicing/Introduction/Guidelines/Pages/E-invoicing-detailed-guideline.aspx"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "public"
+notes = """
+ZATCA's Fatoora sandbox is available to any developer without a
+NDA, but every clearance request must carry a cryptographically
+signed envelope produced by a ZATCA-issued cryptographic
+identity. The first-time onboarding flow issues a sandbox identity
+in exchange for a CSR; production identities are issued under the
+same flow but tied to a real Saudi commercial registration (CR
+number) and a sealed declaration of compliance.
+"""
+endpoint = "https://gw-fatoora.zatca.gov.sa/e-invoicing/developer-portal"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_SA_ZATCA_TOKEN"
+
+[production]
+endpoint = "https://gw-fatoora.zatca.gov.sa/e-invoicing/core"
+production_credentials_env_var = "INVOICEKIT_PROD_SA_ZATCA_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every cleared invoice carries a XAdES-B-B (or XAdES-B-T for Phase 2
+integration) digital signature produced by the seller's
+ZATCA-issued cryptographic identity. Identity keys MUST be held in
+an FIPS 140-2 Level 2 or equivalent HSM for production; software
+keys are accepted only in the sandbox.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "required_for_production"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Non-resident sellers without a Saudi commercial registration must
+either (a) appoint a Saudi tax representative who holds the CR
+that maps to the ZATCA identity, or (b) operate under the
+non-resident VAT registration flow that ZATCA opened in 2024 for
+e-commerce platforms.
+"""
+
+[validator]
+backend = "jvm:saxon"
+backend_notes = """
+ZATCA's e-invoice schema is UBL 2.1 with ZATCA-specific business
+rules and a mandatory XAdES signature. The structural validation
+(XSD + XPath assertions from the ZATCA implementation guide) runs
+in validator-saxon today. A native Rust validator could ship once
+T-031's EN 16931 validator generalizes to non-EU UBL profiles, but
+the Saudi-specific QR-code-embedded TLV checks and the
+cryptographic signature verification will continue to live in a
+dedicated rule pack.
+"""
+
+[interop]
+formats = ["UBL 2.1 (ZATCA profile)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+Saudi Arabia mandates the ZATCA-specific UBL profile for any
+domestic invoice issued by a VAT-registered seller. Peppol BIS and
+PINT envelopes are not accepted at the clearance gate.
+Cross-border invoices to Saudi recipients can still flow as
+PDF/A-3 + embedded UBL, but the ZATCA QR-code requirement only
+binds the seller side of the transaction.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/saudi-arabia"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/saudi-arabia"
+
+[follow_ups]
+items = [
+    "Wire ZATCA cryptographic identity issuance into the hosted layer's KMS bootstrap (depends on T-131)",
+    "Ship a Saudi-specific rulepack that grades XAdES signature presence + QR-code TLV well-formedness",
+    "Once T-031 generalizes the EN 16931 validator, swap validator.backend to the ZATCA-specific rulepack",
+]

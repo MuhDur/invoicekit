@@ -1,0 +1,147 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-770 country feasibility manifest: Poland.
+#
+# Phase 2.5 prerequisite for the Poland-specific Track 8 crate
+# (`crates/report-pl-ksef`). Every field here gates a downstream
+# implementation decision; rule of thumb is that anything declared
+# `unknown` here is a hard stop on the country crate's roadmap until
+# resolved.
+#
+# Provenance: every URL below was the documented public entry point
+# at the manifest's `retrieved_at`. The source-watch bot (T-006) is
+# expected to re-fetch these endpoints daily and open a drift issue
+# when an upstream URL moves or its content hash changes.
+
+schema_version = "1.0"
+country = "PL"
+country_name = "Poland"
+program = "KSeF (Krajowy System e-Faktur)"
+retrieved_at = "2026-05-27"
+maintainer = "RainyBeaver"
+bead = "invoices-t-770-manifest-poland-vbb"
+
+# Signature over the canonical TOML body, computed by the
+# tools/release-checks/test_country_manifests.py gate. Schema
+# `blake3:identity` mirrors the rulepack/codelists convention.
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+# Authoritative regulator publications + the corresponding stable
+# program URLs the source-watch bot pings nightly.
+[[sources.entry]]
+name = "Ministerstwo Finansow — KSeF program homepage"
+url = "https://www.podatki.gov.pl/ksef/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "KSeF technical specification (FA(2) schema)"
+url = "https://www.gov.pl/web/finanse/krajowy-system-e-faktur"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "KSeF API documentation"
+url = "https://ksef.mf.gov.pl/api/"
+kind = "api_documentation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Polish e-invoicing law (Ustawa o zmianie ustawy VAT)"
+url = "https://isap.sejm.gov.pl/"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+# Sandbox availability classification per the bead's strict gate.
+# values: "public" | "partner_gated" | "requires_local_tax_id" | "none"
+availability = "requires_local_tax_id"
+notes = """
+KSeF test environment (https://ksef-test.mf.gov.pl) is accessible
+without contractual barriers, but every request needs an
+authentication token bound to a NIP (Polish tax identifier).
+Foreign-only providers cannot get a NIP without a local presence.
+For InvoiceKit's hosted layer this means a Polish fiscal
+representative (see [fiscal_rep] below) issues the NIP that the
+sandbox traffic authenticates against; for self-hosted customers,
+each tenant supplies their own NIP.
+"""
+endpoint = "https://ksef-test.mf.gov.pl/api/"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_PL_KSEF_TOKEN"
+
+[production]
+endpoint = "https://ksef.mf.gov.pl/api/"
+production_credentials_env_var = "INVOICEKIT_PROD_PL_KSEF_TOKEN"
+
+[trust]
+# Qualified electronic seal / HSM / smart-card requirements.
+# values: "qes_required" | "qes_optional" | "none"
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+KSeF accepts authentication via (a) a Qualified Electronic Seal
+(QES) issued by a Polish or EU-recognised trust service provider
+listed under eIDAS, (b) a Trusted Profile (Profil Zaufany)
+attached to the NIP, or (c) an API token issued by KSeF itself
+after one of (a)/(b) has bootstrapped the account. The token
+flow is the operational path InvoiceKit's hosted layer takes;
+the QES is only required at first-time enrollment.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "recommended_for_seal_keys"
+
+[fiscal_rep]
+# Local fiscal representative / in-country PAC / ASP requirements.
+# `required_for` values: ["foreign_sellers", "all_taxable_persons", "none"]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign sellers without a Polish establishment must either
+(a) register for VAT in Poland and obtain a NIP themselves
+(possible since 2023's One-Stop Shop reforms), or
+(b) appoint a Polish fiscal representative who carries the NIP
+and signs invoices on their behalf. The fiscal representative
+must be VAT-registered in Poland and acknowledge joint liability.
+"""
+
+[validator]
+# Validator backend selected for this country.
+# values: "rust_native" | "jvm:<backend>" | "rest:<provider>" | "partner" | "cli" | "none"
+backend = "jvm:saxon"
+backend_notes = """
+KSeF accepts only the FA(2) XML schema. The structural validation
+runs in the validator-saxon sidecar against the official XSD; the
+business-rule layer (BR-* in the Polish-specific rule pack) lands
+in the same sidecar via Schematron once T-031's EN 16931 validator
+is generalized to non-EU profiles. Until then `jvm:saxon` is the
+minimum-viable choice that gets us XSD conformance.
+"""
+
+[interop]
+# Format families InvoiceKit can satisfy for this country today.
+formats = ["FA(2)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+KSeF is a national clearance system that mandates its own FA(2)
+schema. Peppol BIS / PINT envelopes are not currently accepted at
+the clearance gate, though Poland has signaled future Peppol
+interoperability via the OpenPeppol Polish member. Cross-border
+B2B invoices to Poland continue to flow through email or PDF
+attachment until that bridge lands.
+"""
+
+[fixtures]
+# Pointer to the bead-specific baseline fixture set + sandbox
+# cassettes T-074a recorded during the sandbox-availability check.
+fixture_directory = "conformance-corpus/country/poland"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/poland"
+
+[follow_ups]
+# Open work the manifest discovers but doesn't itself resolve.
+items = [
+    "Wait for OpenPeppol Polish member's BIS/PINT interop announcement to revisit interop.peppol_bis_accepted",
+    "Once T-031 generalizes the EN 16931 validator, swap validator.backend from jvm:saxon to a Polish-specific rulepack",
+    "When the hosted layer's KMS integration lands (T-131), wire the QES + Trusted Profile bootstrap into the auth flow",
+]

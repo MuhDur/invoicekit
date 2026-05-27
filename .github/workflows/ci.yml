@@ -110,6 +110,27 @@ jobs:
       - run: docker build -f services/validator-saxon/Dockerfile -t invoicekit/validator-saxon:ci .
       - run: python3 services/validator-smoke.py
 
+  validator-jvm-tests:
+    name: validator JVM unit tests (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [phive, kosit, saxon]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      # 7psv: mvn test under each profile exercises the
+      # PhiveReport / KositReport reflection wrappers. The phive
+      # profile is the one that proves a known-bad Peppol invoice
+      # emits at least one BR-* finding from the EN 16931 oracle.
+      - run: mvn -B -ntp -P${{ matrix.profile }} test
+        working-directory: services/validator-common
+
   abi-golden:
     name: engine ABI golden suite
     runs-on: ubuntu-latest
@@ -219,3 +240,126 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check bans licenses sources advisories
+
+  # T-055: byte-stable PDF rendering across platforms.
+  # Each runner renders the T-050 hello-world invoice (release
+  # build for determinism) and uploads the bytes as an artifact;
+  # the `render-byte-stable-compare` job downloads both artifacts
+  # and asserts they are byte-equal. The Typst font loader is
+  # already locked down to embedded fonts only, but a future
+  # accidental flip of `include_system_fonts(true)` would trip
+  # this gate because system fonts differ between Linux and
+  # macOS.
+  render-byte-stable-build:
+    name: byte-stable render (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x86_64
+          - os: macos-latest
+            label: macos-aarch64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the byte-stable render artifact
+        run: |
+          mkdir -p target/byte-stable
+          cargo run --release --quiet -p invoicekit-render-pdf \
+            --example render_hello_world > target/byte-stable/hello.pdf
+      - uses: actions/upload-artifact@v4
+        with:
+          name: render-byte-stable-${{ matrix.label }}
+          path: target/byte-stable/hello.pdf
+          if-no-files-found: error
+          retention-days: 14
+
+  render-byte-stable-compare:
+    name: byte-stable render — Linux vs macOS comparison
+    needs: render-byte-stable-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: render-byte-stable-*
+          path: artefacts/
+      - name: Assert Linux and macOS PDFs are byte-equal
+        run: |
+          set -euo pipefail
+          linux="artefacts/render-byte-stable-linux-x86_64/hello.pdf"
+          macos="artefacts/render-byte-stable-macos-aarch64/hello.pdf"
+          if [ ! -f "$linux" ]; then
+            echo "missing Linux artifact at $linux" >&2
+            ls -R artefacts/ >&2
+            exit 1
+          fi
+          if [ ! -f "$macos" ]; then
+            echo "missing macOS artifact at $macos" >&2
+            ls -R artefacts/ >&2
+            exit 1
+          fi
+          linux_sha=$(sha256sum "$linux" | cut -d' ' -f1)
+          macos_sha=$(sha256sum "$macos" | cut -d' ' -f1)
+          echo "linux sha256:  $linux_sha"
+          echo "macos sha256:  $macos_sha"
+          if [ "$linux_sha" != "$macos_sha" ]; then
+            echo "byte drift between platforms — see the T-055 runbook." >&2
+            cmp "$linux" "$macos" || true
+            exit 1
+          fi
+
+  # 9cty: workspace coverage measurement gate. Reports per-crate
+  # line coverage on every PR and fails when a foundation crate
+  # drops below its floor (see scripts/coverage-thresholds.json).
+  # plans/COVERAGE.md documents the ramp toward the universal 90%
+  # target. Coverage runs only on Ubuntu — cargo-llvm-cov on macOS
+  # is flaky on shared runners.
+  coverage:
+    name: workspace coverage gate
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Run workspace coverage
+        run: |
+          cargo llvm-cov --workspace --locked \
+            --ignore-filename-regex '(^|/)(bindings|services|examples)/' \
+            --lcov --output-path coverage.lcov
+          cargo llvm-cov report \
+            --ignore-filename-regex '(^|/)(bindings|services|examples)/' \
+            --json --output-path coverage-summary.json
+      - name: Enforce coverage floors
+        id: floors
+        run: |
+          {
+            echo "## Workspace coverage"
+            echo
+            scripts/check-coverage.sh coverage-summary.json scripts/coverage-thresholds.json
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload lcov artefact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: coverage.lcov
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload JSON summary artefact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-summary
+          path: coverage-summary.json
+          if-no-files-found: error
+          retention-days: 14

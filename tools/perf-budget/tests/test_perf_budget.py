@@ -7,6 +7,7 @@ false-positive scenario that T-007's acceptance criterion calls out.
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -21,13 +22,27 @@ def make_estimates(criterion_dir: Path, op: str, mean_ns: float) -> None:
     estimates_dir = criterion_dir / op / "new"
     estimates_dir.mkdir(parents=True, exist_ok=True)
     payload = {"mean": {"point_estimate": float(mean_ns)}}
-    (estimates_dir / "estimates.json").write_text(json.dumps(payload))
+    (estimates_dir / "estimates.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
 
 
 def write_budget(path: Path, op: str, threshold_pct: float, *, default: float = 10.0) -> None:
     path.write_text(
         f"default_max_regression_pct = {default}\n\n"
-        f"[operations.{op}]\nmax_regression_pct = {threshold_pct}\n"
+        f"[operations.{op}]\nmax_regression_pct = {threshold_pct}\n",
+        encoding="utf-8",
+    )
+
+
+def run_perf_budget_cli(*args: str) -> subprocess.CompletedProcess[str]:
+    """Run the CLI entrypoint so process exit-code behavior is covered."""
+    return subprocess.run(
+        [sys.executable, str(TOOL / "perf_budget.py"), *args],
+        check=False,
+        text=True,
+        capture_output=True,
+        timeout=10,
     )
 
 
@@ -121,6 +136,163 @@ def test_missing_current_measurement_fails(tmp_path: Path) -> None:
     assert exit_code == perf_budget.EXIT_REGRESSION
 
 
+def test_malformed_budget_exits_with_invalid_input_code(tmp_path: Path) -> None:
+    """Malformed budget.toml is invalid input, not a regression failure."""
+    current = tmp_path / "current"
+    current.mkdir()
+    budget = tmp_path / "budget.toml"
+    budget.write_text("[operations.ir-round-trip\n", encoding="utf-8")
+
+    completed = run_perf_budget_cli(
+        "--current", str(current),
+        "--budget", str(budget),
+    )
+
+    assert completed.returncode == perf_budget.EXIT_INVALID_INPUT
+    assert "budget file is not valid TOML" in completed.stderr
+
+
+def test_non_table_operations_budget_exits_with_invalid_input_code(
+    tmp_path: Path,
+) -> None:
+    """Wrong-shaped budget operations data is invalid input."""
+    current = tmp_path / "current"
+    current.mkdir()
+    budget = tmp_path / "budget.toml"
+    budget.write_text("operations = []\n", encoding="utf-8")
+
+    completed = run_perf_budget_cli(
+        "--current", str(current),
+        "--budget", str(budget),
+    )
+
+    assert completed.returncode == perf_budget.EXIT_INVALID_INPUT
+    assert "budget file: `operations` must be a table" in completed.stderr
+
+
+def test_malformed_estimate_json_exits_with_invalid_input_code(tmp_path: Path) -> None:
+    """Malformed Criterion estimates are invalid input, not a regression failure."""
+    current = tmp_path / "current"
+    estimates_dir = current / "ir-round-trip" / "new"
+    estimates_dir.mkdir(parents=True)
+    (estimates_dir / "estimates.json").write_text("{not-json", encoding="utf-8")
+    budget = tmp_path / "budget.toml"
+    write_budget(budget, "ir-round-trip", 10.0)
+
+    completed = run_perf_budget_cli(
+        "--current", str(current),
+        "--budget", str(budget),
+    )
+
+    assert completed.returncode == perf_budget.EXIT_INVALID_INPUT
+    assert "malformed criterion JSON" in completed.stderr
+
+
+def test_wrong_shape_estimate_json_exits_with_invalid_input_code(
+    tmp_path: Path,
+) -> None:
+    """Valid JSON with the wrong shape is invalid input, not a traceback."""
+    current = tmp_path / "current"
+    estimates_dir = current / "ir-round-trip" / "new"
+    estimates_dir.mkdir(parents=True)
+    (estimates_dir / "estimates.json").write_text("[]", encoding="utf-8")
+    budget = tmp_path / "budget.toml"
+    write_budget(budget, "ir-round-trip", 10.0)
+
+    completed = run_perf_budget_cli(
+        "--current", str(current),
+        "--budget", str(budget),
+    )
+
+    assert completed.returncode == perf_budget.EXIT_INVALID_INPUT
+    assert "must be an object" in completed.stderr
+
+
+def test_budget_path_is_directory_exits_with_invalid_input_code(
+    tmp_path: Path,
+) -> None:
+    """gox1: --budget pointing at a directory is invalid input (code 2),
+    not a traceback that the OS reports as exit code 1.
+    """
+    current = tmp_path / "current"
+    current.mkdir()
+    budget_dir = tmp_path / "budget-dir"
+    budget_dir.mkdir()
+
+    completed = run_perf_budget_cli(
+        "--current", str(current),
+        "--budget", str(budget_dir),
+    )
+
+    assert completed.returncode == perf_budget.EXIT_INVALID_INPUT
+    assert "budget file path is a directory" in completed.stderr
+
+
+def test_negative_default_threshold_exits_with_invalid_input_code(
+    tmp_path: Path,
+) -> None:
+    """gox1: a non-positive `default_max_regression_pct` silently disables
+    every per-operation gate that inherits it. Reject it as invalid input.
+    """
+    current = tmp_path / "current"
+    current.mkdir()
+    budget = tmp_path / "budget.toml"
+    budget.write_text(
+        "default_max_regression_pct = -1\n[operations.x]\n",
+        encoding="utf-8",
+    )
+
+    completed = run_perf_budget_cli(
+        "--current", str(current),
+        "--budget", str(budget),
+    )
+
+    assert completed.returncode == perf_budget.EXIT_INVALID_INPUT
+    assert "`default_max_regression_pct` must be > 0" in completed.stderr
+
+
+def test_zero_default_threshold_exits_with_invalid_input_code(
+    tmp_path: Path,
+) -> None:
+    """gox1: a zero default is just as silent — reject the same way per-op
+    thresholds are rejected at zero.
+    """
+    current = tmp_path / "current"
+    current.mkdir()
+    budget = tmp_path / "budget.toml"
+    budget.write_text("default_max_regression_pct = 0\n", encoding="utf-8")
+
+    completed = run_perf_budget_cli(
+        "--current", str(current),
+        "--budget", str(budget),
+    )
+
+    assert completed.returncode == perf_budget.EXIT_INVALID_INPUT
+    assert "`default_max_regression_pct` must be > 0" in completed.stderr
+
+
+def test_unwritable_summary_out_exits_with_invalid_input_code(
+    tmp_path: Path,
+) -> None:
+    """gox1: --summary-out pointing at an uncreatable path used to leak a
+    FileNotFoundError traceback and exit 1. Now it surfaces as code 2.
+    """
+    current = tmp_path / "current"
+    current.mkdir()
+    budget = tmp_path / "budget.toml"
+    write_budget(budget, "ir-round-trip", 10.0)
+    bad_summary = tmp_path / "nonexistent-dir" / "summary.md"
+
+    completed = run_perf_budget_cli(
+        "--current", str(current),
+        "--budget", str(budget),
+        "--summary-out", str(bad_summary),
+    )
+
+    assert completed.returncode == perf_budget.EXIT_INVALID_INPUT
+    assert "--summary-out path is not writable" in completed.stderr
+
+
 def test_summary_is_markdown_table(tmp_path: Path) -> None:
     """The summary written for the PR comment is a recognizable markdown table."""
     baseline = tmp_path / "baseline"
@@ -141,7 +313,7 @@ def test_summary_is_markdown_table(tmp_path: Path) -> None:
     )
     assert exit_code == perf_budget.EXIT_OK
 
-    summary = summary_out.read_text()
+    summary = summary_out.read_text(encoding="utf-8")
     assert summary.startswith("## Performance regression budget")
     assert "| `ir-round-trip` |" in summary
     assert "ok" in summary

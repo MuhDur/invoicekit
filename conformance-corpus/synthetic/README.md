@@ -7,3 +7,22 @@ Synthetic fixtures are fictional and public. Each fixture directory must include
 `metadata.json` validated by `tools/conformance-corpus/validate_fixture_metadata.py`.
 The `examples/` directory contains small T-120 samples that prove the metadata
 contract before the larger generated corpus lands.
+
+The `cii-d16b-profiled/` directory contains the active `invoices-h4b3`
+synthetic CII corpus. The older `cii-d16b/` corpus is retained as retired
+legacy parser-regression data only; it is not profile-conformance coverage.
+Regenerate it with:
+
+```bash
+cargo run -p invoicekit-format-cii --example generate_cii_corpus
+```
+
+The `ubl-2-1/` directory contains the `invoices-bbqm` synthetic UBL 2.1
+corpus. Regenerate it with:
+
+```bash
+cargo run -p invoicekit-format-ubl --example generate_ubl_corpus
+```
+
+Both generators create missing files, accept identical existing files, and
+fail instead of overwriting changed fixture data.

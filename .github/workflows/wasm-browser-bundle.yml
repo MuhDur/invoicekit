@@ -1,0 +1,60 @@
+name: WASM browser bundle
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "bindings/wasm-browser-npm/**"
+      - "crates/invoicekit-wasm/**"
+      - "crates/invoicekit-engine/**"
+      - ".github/workflows/wasm-browser-bundle.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "bindings/wasm-browser-npm/**"
+      - "crates/invoicekit-wasm/**"
+      - "crates/invoicekit-engine/**"
+      - ".github/workflows/wasm-browser-bundle.yml"
+
+concurrency:
+  group: wasm-browser-bundle-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build-and-smoke:
+    name: '@invoicekit/wasm wasm-pack build + size gate + smoke'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bindings/wasm-browser-npm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Install package dependencies (bun)
+        run: bun install --frozen-lockfile || bun install
+
+      - name: Build all three wasm-pack targets
+        run: bun run build
+
+      - name: Assert every bundle is under 5 MB
+        run: bun run check-size
+
+      - name: Smoke test the nodejs bundle (engine ABI round-trip)
+        run: bun test tests/smoke.test.mjs
+
+      - name: Verify package.json declares Apache 2.0
+        run: jq -e '.license == "Apache-2.0"' package.json

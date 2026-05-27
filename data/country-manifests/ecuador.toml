@@ -1,0 +1,116 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-790 country feasibility manifest: Ecuador.
+#
+# Ecuador's SRI (Servicio de Rentas Internas) operates the
+# Comprobantes Electronicos system: every B2B and most B2C
+# documents must be cleared by SRI before delivery.
+
+schema_version = "1.0"
+country = "EC"
+country_name = "Ecuador"
+program = "Comprobantes Electronicos SRI"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-790-manifest-ecuador-wa3"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "SRI — Comprobantes electronicos portal"
+url = "https://www.sri.gob.ec/web/intersri/comprobantes-electronicos"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Resolucion NAC-DGERCGC18-00000233 (regulatory framework)"
+url = "https://www.sri.gob.ec/o/sri-portlet-biblioteca-alfresco-internet/descargar/65eed1e4-7d76-4f5a-bccc-bc18bb31bfaa/NAC-DGERCGC18-00000233.pdf"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "SRI XML schema (ficha tecnica)"
+url = "https://www.sri.gob.ec/web/intersri/ficha-tecnica-comprobantes-electronicos"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "List of authorised CAs (Entidades de Certificacion)"
+url = "https://www.arcotel.gob.ec/entidades-de-certificacion-de-informacion-y-servicios-relacionados/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "requires_local_tax_id"
+notes = """
+SRI operates a public test environment (celcer.sri.gob.ec)
+accessible to any taxpayer with an Ecuadorian RUC (Registro Unico
+de Contribuyentes) and a digital signature certificate. Foreign-
+only providers cannot obtain a RUC without a Ecuadorian legal
+representative; the typical path is through a partner that holds
+the RUC.
+"""
+endpoint = "https://celcer.sri.gob.ec/comprobantes-electronicos-ws/RecepcionComprobantesOffline"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_EC_SRI_CERT"
+
+[production]
+endpoint = "https://cel.sri.gob.ec/comprobantes-electronicos-ws/RecepcionComprobantesOffline"
+production_credentials_env_var = "INVOICEKIT_PROD_EC_SRI_CERT"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every comprobante must be signed with a XAdES-BES detached
+signature using a certificate issued by an ARCOTEL-authorised
+Entidad de Certificacion (Security Data, BCE, ANFAC). The
+certificate carries the issuer's RUC in the subject. Signature
+is XML-DSig over the canonical document body defined in the SRI
+ficha tecnica.
+"""
+smart_card_requirement = "common"
+hsm_requirement = "recommended_for_high_volume"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses without an Ecuadorian establishment must
+register for IVA in Ecuador by appointing a representante legal
+who holds the RUC and digital certificate. Distance-sales B2C
+flow can register under the IVA foreign digital-services regime
+introduced in 2020.
+"""
+
+[validator]
+backend = "jvm:saxon"
+backend_notes = """
+SRI comprobantes use a proprietary XML schema (factura, nota de
+credito, retencion, etc) validated via Saxon-HE in
+validator-saxon. The business-rule layer (BR-EC-*) covers RUC
+checksum, IVA rate enumeration (12% standard, 0% reduced),
+clave de acceso (49-digit document identifier) format, and per-
+comprobante-type series authorisation. Signature verification
+delegates to validator-kosit.
+"""
+
+[interop]
+formats = ["SRI proprietary XML (factura, nota credito, nota debito, retencion, guia remision)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+SRI comprobantes are national-format-only; Peppol envelopes are
+NOT accepted. There is no PEPPOL PINT-EC profile.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/ecuador"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/ecuador"
+
+[follow_ups]
+items = [
+    "Track SRI's ficha tecnica version as it evolves (currently 2.x in force)",
+    "Open follow-up for the Liquidacion de Compras de Bienes y Servicios (self-invoicing) flow",
+    "Pin a Ecuadorian Entidad de Certificacion partner for the hosted layer's RUC-holding entity",
+]

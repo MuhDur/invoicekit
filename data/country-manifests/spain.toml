@@ -1,0 +1,138 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-775 country feasibility manifest: Spain.
+#
+# Phase 2.5 prerequisite for `crates/report-es-verifactu` and the
+# B2G `crates/report-es-facturae` adapter. Spain runs two parallel
+# regimes: Facturae for invoices to the public administration
+# (mandatory since 2015), and VeriFactu / SII reporting for B2B
+# transactions (rolling out under the Crea y Crece law and the
+# Royal Decree 1007/2023 SIF technical regulation).
+
+schema_version = "1.0"
+country = "ES"
+country_name = "Spain"
+program = "Facturae (B2G) + VeriFactu / SIF (B2B reporting)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-775-manifest-spain-q5j"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "Agencia Tributaria — VeriFactu / SIF homepage"
+url = "https://sede.agenciatributaria.gob.es/Sede/iva/sistemas-informaticos-facturacion-verifactu.html"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Real Decreto 1007/2023 (SIF technical regulation)"
+url = "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2023-24840"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Facturae 3.2.2 schema and supporting documents"
+url = "https://www.facturae.gob.es/formato/Paginas/version-3-2-2.aspx"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "FACe (public-administration general entry point)"
+url = "https://face.gob.es/es"
+kind = "api_documentation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "SII reporting service (Suministro Inmediato de Informacion)"
+url = "https://sede.agenciatributaria.gob.es/Sede/iva/suministro-inmediato-informacion-sii.html"
+kind = "api_documentation"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "requires_local_tax_id"
+notes = """
+The AEAT (Agencia Estatal de Administracion Tributaria) operates a
+public pre-production environment for VeriFactu and SII that any
+Spanish-registered taxpayer can access using a qualified electronic
+certificate bound to a NIF (Numero de Identificacion Fiscal). FACe
+similarly exposes a sandbox at face-pre.redsara.es. Foreign-only
+providers cannot enroll without either obtaining a Spanish NIF or
+appointing a fiscal representative who holds one. For InvoiceKit's
+hosted layer this implies a Spanish fiscal-rep arrangement; for
+self-hosted customers, each tenant supplies their own NIF and
+certificate.
+"""
+endpoint = "https://prewww1.aeat.es/wlpl/SSII-FACT/ws/fe/SiiFactFEV1SOAP"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_ES_AEAT_CERT"
+
+[production]
+endpoint = "https://www1.agenciatributaria.gob.es/wlpl/SSII-FACT/ws/fe/SiiFactFEV1SOAP"
+production_credentials_env_var = "INVOICEKIT_PROD_ES_AEAT_CERT"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every VeriFactu submission and every Facturae invoice to FACe must
+carry a XAdES signature produced with a qualified electronic
+certificate issued by a Spanish or EU-recognised trust service
+provider on the eIDAS Trusted List. FNMT (Fabrica Nacional de
+Moneda y Timbre) is the canonical Spanish issuer; alternatives
+include AC Camerfirma, ACCV, and other listed Spanish QTSPs.
+Software-token certificates are accepted; HSM-backed keys are
+required only for processing volumes above the Crea y Crece
+high-throughput tier.
+"""
+smart_card_requirement = "optional"
+hsm_requirement = "recommended_for_high_volume"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses without a Spanish establishment that need to
+issue invoices to Spanish customers under Facturae or report under
+VeriFactu must appoint a fiscal representative (representante
+fiscal) holding a NIF and a qualified certificate. The
+representative carries joint liability for VAT obligations and
+typically signs on behalf of the foreign seller. Businesses based
+in another EU member state can alternatively register for Spanish
+VAT directly under the One-Stop Shop / IOSS frameworks for
+distance sales.
+"""
+
+[validator]
+backend = "jvm:saxon"
+backend_notes = """
+Facturae 3.2.2 ships an XSD plus a SOAP envelope schema; VeriFactu
+ships its own XSD for the SIF record stream. Both validate via
+Saxon-HE through the validator-saxon sidecar today. The XAdES
+signature verification is delegated to validator-kosit. The
+Spanish business-rule layer (BR-ES-*) lives in the rulepack and
+will move to a dedicated `rest:aeat` shim once the AEAT publishes
+a public SOAP endpoint that returns rule-level diagnostics.
+"""
+
+[interop]
+formats = ["Facturae 3.2.2", "VeriFactu / SIF record"]
+peppol_bis_accepted = true
+peppol_pint_accepted = false
+notes = """
+FACe accepts Peppol BIS Billing 3.0 envelopes alongside Facturae
+since the 2024 expansion of the public-administration access
+point. Domestic B2B flow under VeriFactu does NOT accept Peppol
+envelopes today — submissions must be in the SIF record format.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/spain"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/spain"
+
+[follow_ups]
+items = [
+    "Track the VeriFactu mandatory-rollout date (currently 2026-07-01 for SMEs, 2025-07-01 for larger taxpayers) so the hosted layer can prompt onboarding",
+    "Re-evaluate validator.backend to add a `rest:aeat` shim once AEAT publishes rule-level diagnostics",
+    "Confirm Peppol PINT support status with FACe administrators when the OpenPeppol Spanish member updates",
+]

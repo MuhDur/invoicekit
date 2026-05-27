@@ -1,0 +1,127 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-787 country feasibility manifest: Colombia.
+#
+# Colombia's DIAN (Direccion de Impuestos y Aduanas Nacionales)
+# operates a mandatory CTC e-invoicing system based on UBL 2.1.
+# Every B2B and most B2C invoices must be cleared by DIAN before
+# delivery to the buyer.
+
+schema_version = "1.0"
+country = "CO"
+country_name = "Colombia"
+program = "Facturacion Electronica DIAN (UBL 2.1 con CUFE)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-787-manifest-colombia-vmr"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "DIAN — Factura Electronica portal"
+url = "https://www.dian.gov.co/impuestos/facturaelectronica/Paginas/default.aspx"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Resolucion DIAN 042 de 2020 (facturacion electronica technical regulation)"
+url = "https://www.dian.gov.co/normatividad/Normatividad/Resoluci%C3%B3n%20000042%20de%2005-05-2020.pdf"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Anexo Tecnico 1.9 (DIAN UBL 2.1 specification)"
+url = "https://www.dian.gov.co/impuestos/facturaelectronica/Documents/Anexo_tecnico_factura_electronica_vr_1_9.pdf"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "List of authorised software providers (Proveedores Tecnologicos)"
+url = "https://www.dian.gov.co/impuestos/facturaelectronica/proveedoresTecnologicos/Paginas/default.aspx"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "requires_local_tax_id"
+notes = """
+DIAN runs a public habilitacion (sandbox) environment at
+catalogo-vpfe-hab.dian.gov.co accessible to any taxpayer with
+a NIT (Numero de Identificacion Tributaria) and a DIAN-issued
+software ID. Foreign-only providers cannot complete habilitacion
+without either obtaining a NIT or appointing a Colombian
+proveedor tecnologico. The certification process for proveedores
+tecnologicos takes 4-8 weeks and is a documented multi-step
+audit.
+"""
+endpoint = "https://catalogo-vpfe-hab.dian.gov.co/Document/SendBillSync"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_CO_DIAN_CERT"
+
+[production]
+endpoint = "https://catalogo-vpfe.dian.gov.co/Document/SendBillSync"
+production_credentials_env_var = "INVOICEKIT_PROD_CO_DIAN_CERT"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every DIAN UBL submission must be signed with a XAdES-EPES
+detached signature using a certificate from a Colombian CA
+authorised under Decreto 1747 de 2000 (Certicamara, Andes SCD,
+GSE, etc). The certificate carries the issuer's NIT in the
+otherName extension per the Colombian certification framework.
+The signed envelope includes a CUFE (Codigo Unico de Factura
+Electronica) computed as a SHA-384 hash of the document body
+plus DIAN-issued resolution metadata.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "common_for_proveedores_tecnologicos"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses without a Colombian establishment must
+register for IVA (Impuesto al Valor Agregado) in Colombia by
+appointing a representante legal who holds a NIT, or work
+through a proveedor tecnologico. The recent IVA reform for
+foreign digital-services providers allows direct registration
+under the Special Regime for Foreign Digital Services (RST) for
+B2C transactions, but B2B invoicing still requires Colombian
+representation.
+"""
+
+[validator]
+backend = "rust_native"
+backend_notes = """
+DIAN UBL is a UBL 2.1 derivative with Colombia-specific
+extensions for CUFE generation, DIAN resolution metadata, and
+per-document-type folio ranges. Structural XSD validation runs
+in the shared rust-native UBL validator; the DIAN business rules
+(BR-CO-*) live in the rulepack runtime. Signature verification
+delegates to validator-kosit. DIAN also returns its own
+ApplicationResponse acknowledgement with rule-level diagnostics
+that are mirrored into the rust validator's output for parity.
+"""
+
+[interop]
+formats = ["DIAN UBL 2.1 (Anexo Tecnico 1.9)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+DIAN UBL is a national derivative that does not interoperate
+with Peppol BIS. Cross-border senders targeting Colombian buyers
+must translate to DIAN UBL before submission. There is no
+PEPPOL PINT-CO profile.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/colombia"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/colombia"
+
+[follow_ups]
+items = [
+    "Track DIAN's Documento Soporte Electronico (DSE) rollout for self-invoicing scenarios",
+    "Pin Anexo Tecnico version as DIAN publishes 2.0 (currently 1.9 in force)",
+    "Open a follow-up for Nomina Electronica (electronic payroll) integration when in scope",
+]
