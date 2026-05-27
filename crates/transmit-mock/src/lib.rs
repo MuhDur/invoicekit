@@ -535,11 +535,13 @@ impl CassetteRecorder {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScrubScope {
+    /// Request paths.
+    Path,
     /// Request and response bodies.
     Body,
     /// Header values.
     Headers,
-    /// Bodies and header values.
+    /// Request paths, bodies, and header values.
     All,
 }
 
@@ -670,9 +672,11 @@ impl Scrubber {
         for interaction in &mut out.interactions {
             for rule in self.rules.iter().filter(|rule| rule.applies_to(country)) {
                 match rule.scope {
+                    ScrubScope::Path => scrub_path(interaction, rule),
                     ScrubScope::Body => scrub_bodies(interaction, rule),
                     ScrubScope::Headers => scrub_headers(interaction, rule),
                     ScrubScope::All => {
+                        scrub_path(interaction, rule);
                         scrub_bodies(interaction, rule);
                         scrub_headers(interaction, rule);
                     }
@@ -689,8 +693,8 @@ impl Scrubber {
 ///
 /// This deliberately errs on the side of false positives for CI use. It
 /// catches country-prefixed tax IDs such as `DE123456789`, IBAN-like
-/// account numbers, and email addresses in request/response bodies and
-/// header values.
+/// account numbers, and email addresses in request paths, request/response
+/// bodies, and header values.
 ///
 /// # Examples
 ///
@@ -727,7 +731,8 @@ pub fn count_unscrubbed_pii_patterns(cassette: &Cassette) -> usize {
         .interactions
         .iter()
         .map(|interaction| {
-            count_text_pii_patterns(&interaction.request.body)
+            count_text_pii_patterns(&interaction.request.path)
+                + count_text_pii_patterns(&interaction.request.body)
                 + count_text_pii_patterns(&interaction.response.body)
                 + count_header_pii_patterns(&interaction.request.headers)
                 + count_header_pii_patterns(&interaction.response.headers)
@@ -739,9 +744,9 @@ pub fn count_unscrubbed_pii_patterns(cassette: &Cassette) -> usize {
 ///
 /// # Errors
 ///
-/// Returns [`CassetteError::UnscrubbedPii`] when bodies or headers still
-/// contain values that look like tax identifiers, IBANs, or email
-/// addresses.
+/// Returns [`CassetteError::UnscrubbedPii`] when request paths, bodies, or
+/// headers still contain values that look like tax identifiers, IBANs, or
+/// email addresses.
 ///
 /// # Examples
 ///
@@ -935,6 +940,13 @@ pub fn body_fingerprint(body: &[u8]) -> String {
 /// ```
 pub fn scenario_metadata_schema() -> Result<serde_json::Value, CassetteError> {
     Ok(serde_json::from_str(SCENARIO_METADATA_SCHEMA_JSON)?)
+}
+
+fn scrub_path(interaction: &mut CassetteInteraction, rule: &ScrubRule) {
+    interaction.request.path = interaction
+        .request
+        .path
+        .replace(rule.find.as_str(), rule.replacement.as_str());
 }
 
 fn scrub_bodies(interaction: &mut CassetteInteraction, rule: &ScrubRule) {
@@ -1149,6 +1161,34 @@ mod tests {
     }
 
     #[test]
+    fn pii_scan_reports_unscrubbed_request_path() {
+        let cassette = path_pii_cassette();
+
+        assert_eq!(count_unscrubbed_pii_patterns(&cassette), 1);
+        assert!(assert_no_unscrubbed_pii_patterns(&cassette).is_err());
+    }
+
+    #[test]
+    fn scrubber_removes_path_personal_data_with_all_scope() {
+        let cassette = path_pii_cassette();
+        let scrubber = Scrubber::new(vec![ScrubRule::new(
+            "*",
+            "DE123456789",
+            "[VAT-DE-1]",
+            ScrubScope::All,
+        )
+        .unwrap()]);
+
+        let redacted = scrubber.scrub_cassette("DE", &cassette);
+
+        assert_eq!(
+            first_interaction(&redacted).request.path,
+            "/taxpayer/[VAT-DE-1]"
+        );
+        assert_eq!(count_unscrubbed_pii_patterns(&redacted), 0);
+    }
+
+    #[test]
     fn pii_scan_passes_after_all_sensitive_values_are_scrubbed() {
         let cassette = sample_cassette();
         let scrubber = Scrubber::new(vec![
@@ -1246,6 +1286,24 @@ mod tests {
 
     fn sample_cassette_bytes() -> Vec<u8> {
         sample_cassette().to_vcr_bytes().unwrap()
+    }
+
+    fn path_pii_cassette() -> super::Cassette {
+        let scenario = ScenarioMetadata::new(
+            "synthetic/path-pii",
+            "Synthetic path PII case",
+            "DE",
+            "mock",
+            ScenarioSource::Synthetic,
+            "default-de",
+        )
+        .unwrap();
+        let mut recorder = CassetteRecorder::new(scenario);
+        recorder.record(
+            RecordedRequest::new("GET", "/taxpayer/DE123456789", BTreeMap::new(), "{}").unwrap(),
+            RecordedResponse::new(200, BTreeMap::new(), "{}").unwrap(),
+        );
+        recorder.finish()
     }
 
     fn first_interaction(cassette: &super::Cassette) -> &super::CassetteInteraction {
