@@ -459,16 +459,49 @@ pub struct PaymentInstruction {
 }
 
 /// Polymorphic jurisdiction or profile extension payload.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+///
+/// # URN scheme casing (ebaq)
+///
+/// RFC 8141 declares the URN scheme name case-insensitive. Real producers
+/// in the wild (notably some legacy XML exporters) emit `URN:` or `Urn:`.
+/// Both [`JurisdictionExtension::new`] and the [`Deserialize`] implementation
+/// accept any casing of the scheme prefix and normalise it to the canonical
+/// lowercase `urn:` so equality checks remain stable.
+///
+/// The namespace identifier and namespace-specific string are preserved
+/// verbatim. Rule-pack URN registries stay as shipped — Peppol's UNCL1001
+/// codes are lowercase by definition, ZUGFeRD profile URNs are mixed case,
+/// and changing those bytes would break canonical signing payloads.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct JurisdictionExtension {
-    /// Uniform resource name for the extension schema.
+    /// Uniform resource name for the extension schema (canonical lowercase
+    /// `urn:` prefix).
     pub urn: String,
     /// Extension payload validated by the country or profile registry.
     pub payload: Value,
 }
 
+impl<'de> Deserialize<'de> for JurisdictionExtension {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Raw {
+            urn: String,
+            payload: Value,
+        }
+        let raw = Raw::deserialize(deserializer)?;
+        Ok(Self {
+            urn: Self::canonicalise_urn(raw.urn),
+            payload: raw.payload,
+        })
+    }
+}
+
 impl JurisdictionExtension {
-    /// Builds a polymorphic extension.
+    /// Builds a polymorphic extension. Normalises the URN scheme prefix to
+    /// the canonical lowercase `urn:` per RFC 8141.
     ///
     /// # Errors
     ///
@@ -476,7 +509,7 @@ impl JurisdictionExtension {
     /// URN and [`IrError::InvalidExtensionPayload`] when `payload` is null.
     pub fn new(urn: impl Into<String>, payload: Value) -> Result<Self, IrError> {
         let extension = Self {
-            urn: urn.into(),
+            urn: Self::canonicalise_urn(urn.into()),
             payload,
         };
         extension.validate()?;
@@ -489,13 +522,38 @@ impl JurisdictionExtension {
     ///
     /// Returns an [`IrError`] for invalid URNs or null payloads.
     pub fn validate(&self) -> Result<(), IrError> {
-        if !self.urn.starts_with("urn:") || self.urn.trim().len() <= "urn:".len() {
+        let trimmed = self.urn.trim();
+        if !Self::has_urn_scheme(trimmed) || trimmed.len() <= "urn:".len() {
             return Err(IrError::InvalidExtensionUrn(self.urn.clone()));
         }
         if self.payload.is_null() {
             return Err(IrError::InvalidExtensionPayload(self.urn.clone()));
         }
         Ok(())
+    }
+
+    /// True when `value` starts with the URN scheme prefix in any casing.
+    fn has_urn_scheme(value: &str) -> bool {
+        let bytes = value.as_bytes();
+        bytes.len() >= 4
+            && bytes[0].eq_ignore_ascii_case(&b'u')
+            && bytes[1].eq_ignore_ascii_case(&b'r')
+            && bytes[2].eq_ignore_ascii_case(&b'n')
+            && bytes[3] == b':'
+    }
+
+    /// Lower-cases the `urn:` scheme prefix and leaves everything after the
+    /// first colon untouched. Returns `urn` unchanged when it does not begin
+    /// with the URN scheme (validation handles rejection downstream).
+    fn canonicalise_urn(urn: String) -> String {
+        if Self::has_urn_scheme(&urn) && urn.as_bytes()[..3].iter().any(u8::is_ascii_uppercase) {
+            let mut canonical = String::with_capacity(urn.len());
+            canonical.push_str("urn:");
+            canonical.push_str(&urn[4..]);
+            canonical
+        } else {
+            urn
+        }
     }
 }
 
@@ -1268,6 +1326,68 @@ mod tests {
 
         let err = JurisdictionExtension::new("sa-zatca", json!({})).unwrap_err();
         assert!(matches!(err, IrError::InvalidExtensionUrn(_)));
+    }
+
+    // ebaq: RFC 8141 case-insensitive scheme handling
+    //
+    // The URN scheme name is case-insensitive per RFC 8141. We accept any
+    // casing of the scheme prefix on construction *and* on deserialisation,
+    // canonicalise to lowercase `urn:` so equality holds, and leave the
+    // namespace identifier and namespace-specific string untouched.
+
+    #[test]
+    fn ebaq_extension_new_accepts_uppercase_scheme() {
+        let extension =
+            JurisdictionExtension::new("URN:invoicekit:ext:sa:zatca:2.0", json!({"qr": "x"}))
+                .unwrap();
+        assert_eq!(extension.urn, "urn:invoicekit:ext:sa:zatca:2.0");
+    }
+
+    #[test]
+    fn ebaq_extension_new_accepts_mixed_case_scheme() {
+        let extension =
+            JurisdictionExtension::new("Urn:invoicekit:ext:de:xrechnung:3.0", json!({"id": 1}))
+                .unwrap();
+        assert_eq!(extension.urn, "urn:invoicekit:ext:de:xrechnung:3.0");
+
+        let extension =
+            JurisdictionExtension::new("uRN:peppol:bis:billing:3.0", json!({"id": 2})).unwrap();
+        assert_eq!(extension.urn, "urn:peppol:bis:billing:3.0");
+    }
+
+    #[test]
+    fn ebaq_extension_new_preserves_nid_nss_casing() {
+        // Registries below the scheme are case-sensitive in practice.
+        // Mixed-case ZUGFeRD profile identifiers must round-trip byte-for-byte.
+        let extension = JurisdictionExtension::new(
+            "URN:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:BASICWL",
+            json!({"profile": "BASIC WL"}),
+        )
+        .unwrap();
+        assert_eq!(
+            extension.urn,
+            "urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:BASICWL"
+        );
+    }
+
+    #[test]
+    fn ebaq_extension_deserialize_canonicalises_scheme() {
+        let raw = json!({
+            "urn": "URN:invoicekit:ext:fr:ctc:1.0",
+            "payload": {"k": "v"}
+        });
+        let extension: JurisdictionExtension = serde_json::from_value(raw).unwrap();
+        assert_eq!(extension.urn, "urn:invoicekit:ext:fr:ctc:1.0");
+        extension.validate().unwrap();
+    }
+
+    #[test]
+    fn ebaq_extension_lowercase_scheme_is_left_alone() {
+        // The fast path: an already-lowercase URN must not allocate a new
+        // string. Functional check: bytes-equal to the input.
+        let input = "urn:invoicekit:ext:sa:zatca:2.0";
+        let extension = JurisdictionExtension::new(input, json!({})).unwrap();
+        assert_eq!(extension.urn, input);
     }
 
     #[test]

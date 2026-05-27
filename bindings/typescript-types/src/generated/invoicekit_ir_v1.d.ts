@@ -314,12 +314,26 @@ extensions?: JurisdictionExtension[]
 /**
  * Polymorphic jurisdiction or profile extension payload.
  * 
+ *  # URN scheme casing (ebaq)
+ * 
+ *  RFC 8141 declares the URN scheme name case-insensitive. Real producers
+ *  in the wild (notably some legacy XML exporters) emit `URN:` or `Urn:`.
+ *  Both [`JurisdictionExtension::new`] and the [`Deserialize`] implementation
+ *  accept any casing of the scheme prefix and normalise it to the canonical
+ *  lowercase `urn:` so equality checks remain stable.
+ * 
+ *  The namespace identifier and namespace-specific string are preserved
+ *  verbatim. Rule-pack URN registries stay as shipped — Peppol's UNCL1001
+ *  codes are lowercase by definition, ZUGFeRD profile URNs are mixed case,
+ *  and changing those bytes would break canonical signing payloads.
+ * 
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "JurisdictionExtension".
  */
 export interface JurisdictionExtension {
 /**
- * Uniform resource name for the extension schema.
+ * Uniform resource name for the extension schema (canonical lowercase
+ *  `urn:` prefix).
  */
 urn: string
 /**
