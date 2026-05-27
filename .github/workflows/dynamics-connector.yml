@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+name: Dynamics connector
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: dynamics-connector-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  static-conformance:
+    name: Business Central package shape
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 -m pip install pytest
+      - run: python3 -m pytest extensions/invoicekit-bc/tests -q
+
+  bccontainerhelper:
+    name: Business Central AL tests (${{ matrix.bc_version }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        bc_version: [16, 17]
+    env:
+      BC_AUTH_CONTEXT: ${{ secrets.BC_AUTH_CONTEXT }}
+      BC_CONTAINER_LICENSE: ${{ secrets.BC_CONTAINER_LICENSE }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Explain skipped host test
+        if: ${{ env.BC_AUTH_CONTEXT == '' || env.BC_CONTAINER_LICENSE == '' }}
+        shell: pwsh
+        run: |
+          Write-Host "Business Central container credentials are not configured."
+          Write-Host "Static package conformance ran in the companion job."
+      - name: Install BcContainerHelper
+        if: ${{ env.BC_AUTH_CONTEXT != '' && env.BC_CONTAINER_LICENSE != '' }}
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module BcContainerHelper -Force
+      - name: Run AL tests in Business Central container
+        if: ${{ env.BC_AUTH_CONTEXT != '' && env.BC_CONTAINER_LICENSE != '' }}
+        shell: pwsh
+        run: |
+          Import-Module BcContainerHelper
+          $containerName = "invoicekit-bc-${{ matrix.bc_version }}"
+          $artifactUrl = Get-BCArtifactUrl -type Sandbox -country w1 -version "${{ matrix.bc_version }}"
+          New-BcContainer `
+            -accept_eula `
+            -accept_outdated `
+            -containerName $containerName `
+            -artifactUrl $artifactUrl `
+            -auth NavUserPassword `
+            -includeTestToolkit `
+            -licenseFile $env:BC_CONTAINER_LICENSE `
+            -updateHosts
+          Compile-AppInBcContainer `
+            -containerName $containerName `
+            -appProjectFolder "$env:GITHUB_WORKSPACE\extensions\invoicekit-bc"
+          Run-TestsInBcContainer `
+            -containerName $containerName `
+            -extensionId "b75bbd3d-645b-48d4-9b43-5e6f181f6d0f"

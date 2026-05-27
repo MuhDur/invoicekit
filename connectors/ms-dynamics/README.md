@@ -1,10 +1,39 @@
 # connectors/ms-dynamics
 
-ERP connector scaffold — not a Cargo workspace member.
+Microsoft Dynamics 365 Business Central connector for InvoiceKit.
 
-This directory is reserved for the ms-dynamics connector per `plans/PLAN.md`
-§4.1 / Track 15. It will be implemented in its native runtime
-(Python / .NET / SAP B1 SDK / etc.) and call InvoiceKit through the
-appropriate native or REST binding.
+The implementation lives in `extensions/invoicekit-bc/` as an AL extension.
+It adds an InvoiceKit setup page, extends the Sales Invoice page with a
+`Send via InvoiceKit` action, posts invoice JSON to the InvoiceKit sidecar
+`/v1/transmit` endpoint, and records the returned submission id plus
+evidence bundle URL on the sales invoice.
 
-Scaffolded by bead **invoices-t-001-cargo-workspace-xos**.
+## Local checks
+
+Run the static package conformance checks from the repository root:
+
+```bash
+python3 -m pytest extensions/invoicekit-bc/tests -q
+```
+
+The full Business Central test run is wired in
+`.github/workflows/dynamics-connector.yml` through `BcContainerHelper`.
+It is conditional because it requires operator-provisioned Business Central
+container credentials and a Windows container-capable runner.
+
+## Package layout
+
+- `extensions/invoicekit-bc/app.json` — AppSource package manifest.
+- `extensions/invoicekit-bc/src/InvoiceKitSetup.*.al` — sidecar URL and API key setup.
+- `extensions/invoicekit-bc/src/SalesInvoiceInvoiceKit.PageExt.al` — Sales Invoice action.
+- `extensions/invoicekit-bc/src/InvoiceKitSidecarClient.Codeunit.al` — sidecar HTTP client.
+- `extensions/invoicekit-bc/test/InvoiceKitSidecar.Tests.Codeunit.al` — AL test codeunit.
+
+## Install and uninstall behavior
+
+Installing the extension creates its own setup table and adds extension fields
+to Sales Header. It does not modify base Business Central tables outside the
+normal AL extension field mechanism. Uninstalling the extension removes the
+InvoiceKit objects and leaves native sales invoices intact; operators that want
+to retain the submission id and evidence URL should export those extension
+fields before uninstalling.
