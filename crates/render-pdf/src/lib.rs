@@ -228,23 +228,69 @@ struct InMemoryWorld {
     library: LazyHash<Library>,
     book: LazyHash<FontBook>,
     fonts: Vec<FontSlot>,
+    /// T-055 pinned fonts (`crates/render-pdf/fonts/**`). These
+    /// sit after `fonts` in the `FontBook` index order, so
+    /// `World::font(idx)` consults them when `idx >= fonts.len()`.
+    extra_fonts: Vec<Font>,
+}
+
+/// T-055 impl: every byte of every font we may load is shipped
+/// inside this binary. The macro expands to `(&'static [u8], &str)`
+/// pairs the loader consumes via `Font::iter(Bytes::new(*))`.
+/// Adding a font is a three-step diff: drop the .ttf under
+/// `crates/render-pdf/fonts/<family>/`, add its license file, and
+/// append an entry here.
+macro_rules! pinned_fonts {
+    () => {
+        &[(
+            include_bytes!("../fonts/dejavu/DejaVuSansMono.ttf") as &[u8],
+            "DejaVu Sans Mono Regular (Bitstream Vera + DejaVu, public-domain + free)",
+        )]
+    };
 }
 
 impl InMemoryWorld {
     fn new(source: &str) -> Self {
         let main = FileId::new(None, VirtualPath::new("invoice.typ"));
+
+        // Step 1: typst-kit's embed-fonts catalogue (Libertinus
+        // Serif, NCM, IBM Plex Sans, DejaVu Sans Mono, etc.) —
+        // system fonts stay off so the byte-stable cross-platform
+        // gate (T-055) keeps working.
         let mut font_searcher = Fonts::searcher();
-        let fonts = font_searcher
+        let kit_fonts = font_searcher
             .include_system_fonts(false)
             .include_embedded_fonts(true)
             .search();
+        let mut book = kit_fonts.book;
+        let fonts = kit_fonts.fonts;
+
+        // Step 2: layer our pinned fonts on top of the embedded
+        // catalogue. The pinned set ships under
+        // `crates/render-pdf/fonts/<family>/` with a sibling
+        // LICENSE.txt per family; the `pinned_fonts!` macro lists
+        // the per-family `include_bytes!` calls. Anything in the
+        // pinned set is appended after the typst-kit catalogue —
+        // a typst-kit face with the same name still wins by
+        // FontBook iteration order, which is the right precedence
+        // for the existing T-050 hello-world template that asks
+        // for Libertinus Serif by name.
+        let mut extra_fonts: Vec<Font> = Vec::new();
+        for (raw, _label) in pinned_fonts!().iter().copied() {
+            let bytes = Bytes::new(raw);
+            for font in Font::iter(bytes) {
+                book.push(font.info().clone());
+                extra_fonts.push(font);
+            }
+        }
 
         Self {
             main,
             source: Source::new(main, source.to_owned()),
             library: LazyHash::new(Library::default()),
-            book: LazyHash::new(fonts.book),
-            fonts: fonts.fonts,
+            book: LazyHash::new(book),
+            fonts,
+            extra_fonts,
         }
     }
 }
@@ -279,7 +325,13 @@ impl World for InMemoryWorld {
     }
 
     fn font(&self, index: usize) -> Option<Font> {
-        self.fonts.get(index)?.get()
+        // T-055 pinned-font tail: `book` is populated in the
+        // same order — typst-kit's slots first, then every
+        // pinned font — so the offset arithmetic is exact.
+        self.fonts.get(index).map_or_else(
+            || self.extra_fonts.get(index - self.fonts.len()).cloned(),
+            FontSlot::get,
+        )
     }
 
     fn today(&self, _offset: Option<i64>) -> Option<Datetime> {
@@ -415,6 +467,23 @@ mod tests {
         // which is impossible when system-font discovery picks
         // up `/usr/share/fonts` on Linux but `~/Library/Fonts`
         // on macOS.
+    }
+
+    /// T-055 impl: a template that explicitly asks for a font
+    /// only the pinned set supplies (`DejaVu Sans Mono`) must
+    /// render. The hello-world template's Libertinus Serif
+    /// comes from typst-kit's embedded catalogue; this test
+    /// proves the pinned-font layering is wired up the right way.
+    #[test]
+    fn t_055_pinned_dejavu_sans_mono_is_loaded() {
+        let request = RenderRequest::new(
+            "#set page(width: 40mm, height: 20mm)\n\
+             #set text(font: \"DejaVu Sans Mono\", size: 8pt)\n\
+             Pinned-font",
+            "invoicekit:t-055:pinned-dejavu",
+        );
+        let pdf = render_trusted_typst_pdf(request).expect("pinned DejaVu must render");
+        assert!(pdf.starts_with(b"%PDF-"));
     }
 
     #[test]
