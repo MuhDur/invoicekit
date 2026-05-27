@@ -241,6 +241,76 @@ jobs:
         with:
           command: check bans licenses sources advisories
 
+  # T-055: byte-stable PDF rendering across platforms.
+  # Each runner renders the T-050 hello-world invoice (release
+  # build for determinism) and uploads the bytes as an artifact;
+  # the `render-byte-stable-compare` job downloads both artifacts
+  # and asserts they are byte-equal. The Typst font loader is
+  # already locked down to embedded fonts only, but a future
+  # accidental flip of `include_system_fonts(true)` would trip
+  # this gate because system fonts differ between Linux and
+  # macOS.
+  render-byte-stable-build:
+    name: byte-stable render (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x86_64
+          - os: macos-latest
+            label: macos-aarch64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the byte-stable render artifact
+        run: |
+          mkdir -p target/byte-stable
+          cargo run --release --quiet -p invoicekit-render-pdf \
+            --example render_hello_world > target/byte-stable/hello.pdf
+      - uses: actions/upload-artifact@v4
+        with:
+          name: render-byte-stable-${{ matrix.label }}
+          path: target/byte-stable/hello.pdf
+          if-no-files-found: error
+          retention-days: 14
+
+  render-byte-stable-compare:
+    name: byte-stable render — Linux vs macOS comparison
+    needs: render-byte-stable-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: render-byte-stable-*
+          path: artefacts/
+      - name: Assert Linux and macOS PDFs are byte-equal
+        run: |
+          set -euo pipefail
+          linux="artefacts/render-byte-stable-linux-x86_64/hello.pdf"
+          macos="artefacts/render-byte-stable-macos-aarch64/hello.pdf"
+          if [ ! -f "$linux" ]; then
+            echo "missing Linux artifact at $linux" >&2
+            ls -R artefacts/ >&2
+            exit 1
+          fi
+          if [ ! -f "$macos" ]; then
+            echo "missing macOS artifact at $macos" >&2
+            ls -R artefacts/ >&2
+            exit 1
+          fi
+          linux_sha=$(sha256sum "$linux" | cut -d' ' -f1)
+          macos_sha=$(sha256sum "$macos" | cut -d' ' -f1)
+          echo "linux sha256:  $linux_sha"
+          echo "macos sha256:  $macos_sha"
+          if [ "$linux_sha" != "$macos_sha" ]; then
+            echo "byte drift between platforms — see the T-055 runbook." >&2
+            cmp "$linux" "$macos" || true
+            exit 1
+          fi
+
   # 9cty: workspace coverage measurement gate. Reports per-crate
   # line coverage on every PR and fails when a foundation crate
   # drops below its floor (see scripts/coverage-thresholds.json).
