@@ -1970,6 +1970,12 @@ version = "0.0.0"
 [[package]]
 name = "invoicekit-transmit-mock"
 version = "0.0.0"
+dependencies = [
+ "blake3",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-transmit-peppol"
