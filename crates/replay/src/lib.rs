@@ -101,9 +101,15 @@ pub enum ArtefactDelta {
         /// Re-emitted payload length.
         observed_size: u64,
     },
-    /// The replayer did not emit a payload for this artefact
-    /// id. Typical when the replayer is intentionally narrow
-    /// (e.g. re-render only the PDF).
+    /// The replayer returned `None` for an artefact the bundle
+    /// records and the operator did not exclude via
+    /// [`ReplayOptions::ignore`] — i.e. the engine failed to
+    /// reproduce a selected output. Counts as a diff (see
+    /// [`ArtefactDelta::is_diff`]) so the audit signal isn't
+    /// lost. A replayer that wants to declare "I never replay
+    /// this kind" should have the operator add the id to
+    /// `ignore` instead — that path filters before reaching
+    /// `NotReplayed`.
     NotReplayed,
     /// The replayer emitted an artefact whose id is not in the
     /// recorded bundle. Surfaces engine drift toward emitting
@@ -123,19 +129,39 @@ impl ArtefactDelta {
         matches!(self, Self::ByteEqual { .. })
     }
     /// True when this delta indicates the replayer disagreed
-    /// with the recorded bundle (drift / unexpected / missing
-    /// where one was expected).
+    /// with the recorded bundle.
+    ///
+    /// Counts as a diff:
+    ///
+    /// * `Drifted` — re-emitted bytes differ.
+    /// * `Unexpected` — replayer emitted an artefact the bundle
+    ///   does not record.
+    /// * `NotReplayed` — the bundle recorded this artefact AND
+    ///   it passed the include/ignore filter, but the replayer
+    ///   returned `None`. Operator-ignored artefacts never
+    ///   produce a `NotReplayed` delta (they're filtered out
+    ///   before [`replay`] records them), so any `NotReplayed`
+    ///   in the report means the engine failed to reproduce a
+    ///   selected output — which is exactly the audit signal
+    ///   T-085 is meant to surface.
     #[must_use]
     pub const fn is_diff(&self) -> bool {
-        matches!(self, Self::Drifted { .. } | Self::Unexpected { .. })
+        matches!(
+            self,
+            Self::Drifted { .. } | Self::Unexpected { .. } | Self::NotReplayed
+        )
     }
 }
 
 /// Aggregate replay report.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ReplayReport {
-    /// True iff every artefact that was replayed is byte-equal
-    /// (or skipped); any diff pulls this to false.
+    /// True iff every selected artefact replays byte-equal.
+    /// Any [`ArtefactDelta::Drifted`] / [`ArtefactDelta::Unexpected`]
+    /// / [`ArtefactDelta::NotReplayed`] pulls this to false —
+    /// "the engine failed to reproduce a selected output" is
+    /// the audit signal T-085 surfaces and must never read as
+    /// `ok`.
     pub ok: bool,
     /// Per-artefact verdicts keyed by id, in lexicographic
     /// order so the JSON output is stable across runs.
@@ -173,10 +199,17 @@ pub trait PipelineReplayer {
     /// the bundle as input.
     ///
     /// Return `Ok(Some(bytes))` to surface those bytes for
-    /// diff; `Ok(None)` to declare "I don't replay this kind"
-    /// (which the library maps to [`ArtefactDelta::NotReplayed`]);
-    /// `Err` for transport / engine errors that should fail
-    /// the whole replay.
+    /// diff; `Ok(None)` for "the engine failed to reproduce
+    /// this output" (recorded as [`ArtefactDelta::NotReplayed`]
+    /// — counts as a diff, since the replayer was asked to
+    /// reproduce a selected artefact and didn't); `Err` for
+    /// transport / engine errors that should fail the whole
+    /// replay.
+    ///
+    /// A replayer that intentionally doesn't reproduce a given
+    /// kind should instruct the operator to pass the id via
+    /// [`ReplayOptions::ignore`]; the filter happens before
+    /// the replayer is consulted.
     ///
     /// # Errors
     ///
@@ -198,12 +231,17 @@ pub trait PipelineReplayer {
 
 /// Run replay and produce a [`ReplayReport`].
 ///
+/// The library calls the replayer once per *selected* artefact
+/// (anything that passes [`ReplayOptions`]'s include/ignore
+/// filter). Drift, replayer-returned `None`, and unexpected
+/// artefacts are all recorded as [`ArtefactDelta`] entries and
+/// pull [`ReplayReport::ok`] to false. Only transport-level
+/// errors from the replayer raise [`ReplayError`].
+///
 /// # Errors
 ///
 /// Returns [`ReplayError`] when the replayer's backing engine
-/// refuses on any artefact. Drift, missing payloads, and
-/// unexpected payloads do **not** raise — they're recorded as
-/// [`ArtefactDelta`] entries on the report.
+/// refuses on any artefact.
 pub fn replay(
     bundle: &EvidenceBundle,
     replayer: &dyn PipelineReplayer,
@@ -433,7 +471,12 @@ mod tests {
     }
 
     #[test]
-    fn not_replayed_records_when_replayer_returns_none() {
+    fn not_replayed_records_and_pulls_ok_to_false() {
+        // When the replayer returns `Ok(None)` for an artefact
+        // that DID pass the include/ignore filter, that is a
+        // failure to reproduce — the audit signal T-085 must
+        // surface, not silently pass. Confirms the fix for
+        // PR #156 fresh-eyes finding.
         struct PartialReplayer;
         impl PipelineReplayer for PartialReplayer {
             fn replay_artefact(
@@ -446,10 +489,49 @@ mod tests {
         }
         let bundle = sample_bundle();
         let report = replay(&bundle, &PartialReplayer, &ReplayOptions::all()).unwrap();
-        assert!(report.ok, "report: {report:?}");
+        assert!(
+            !report.ok,
+            "NotReplayed selected artefacts must fail; report: {report:?}"
+        );
         for delta in report.deltas.values() {
             assert!(matches!(delta, ArtefactDelta::NotReplayed));
+            assert!(delta.is_diff(), "NotReplayed is a diff; got {delta:?}");
         }
+        // drifted_ids() now lists the NotReplayed artefacts too.
+        let drifted: BTreeSet<&str> = report.drifted_ids().collect();
+        let expected: BTreeSet<&str> = bundle.artefacts.keys().map(String::as_str).collect();
+        assert_eq!(drifted, expected);
+    }
+
+    #[test]
+    fn operator_ignored_artefacts_do_not_appear_as_not_replayed() {
+        // The complement: when the operator explicitly ignores
+        // an artefact, it must NOT show up as NotReplayed (or
+        // anywhere in the deltas) — proving the filter happens
+        // before the NotReplayed bookkeeping. This preserves
+        // the audit signal cleanly.
+        struct PartialReplayer;
+        impl PipelineReplayer for PartialReplayer {
+            fn replay_artefact(
+                &self,
+                _bundle: &EvidenceBundle,
+                _artefact_id: &str,
+            ) -> Result<Option<Vec<u8>>, ReplayError> {
+                Ok(None)
+            }
+        }
+        let bundle = sample_bundle();
+        let report = replay(
+            &bundle,
+            &PartialReplayer,
+            &ReplayOptions::only(["canonical.json"]),
+        )
+        .unwrap();
+        // Only canonical.json was selected; only it shows up.
+        assert_eq!(report.deltas.len(), 1);
+        assert!(report.deltas.contains_key("canonical.json"));
+        // It's still NotReplayed → still a failure.
+        assert!(!report.ok);
     }
 
     #[test]
@@ -496,7 +578,12 @@ mod tests {
         };
         assert!(unexpected.is_diff());
         let not_replayed = ArtefactDelta::NotReplayed;
-        assert!(!not_replayed.is_diff());
+        assert!(not_replayed.is_diff(), "NotReplayed counts as a diff");
         assert!(!not_replayed.is_byte_equal());
+        let byte_equal = ArtefactDelta::ByteEqual {
+            blake3_hex: "abc".to_owned(),
+        };
+        assert!(byte_equal.is_byte_equal());
+        assert!(!byte_equal.is_diff());
     }
 }
