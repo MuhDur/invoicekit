@@ -8,6 +8,10 @@ export type RecentErrorSeverity = "critical" | "info" | "warning";
 
 export type RecentErrorSource = "gateway" | "retry" | "system" | "validator";
 
+export type TeamMemberRole = "admin" | "operator" | "read_only";
+
+export type TeamMemberStatus = "active" | "disabled" | "invited";
+
 export type TransmissionState = "accepted" | "archived" | "failed" | "queued" | "rejected" | "sent" | "validating";
 
 export interface RecentActivityItem {
@@ -104,6 +108,27 @@ export interface AuditEventListParams {
   readonly outcome?: AuditOutcome;
 }
 
+export interface TeamMember {
+  readonly id: string;
+  readonly email: string;
+  readonly displayName: string;
+  readonly role: TeamMemberRole;
+  readonly status: TeamMemberStatus;
+  readonly lastActiveAt?: string;
+  readonly invitedAt?: string;
+}
+
+export interface TeamMemberPage {
+  readonly items: readonly TeamMember[];
+  readonly pageInfo: TransmissionPageInfo;
+}
+
+export interface TeamMemberListParams {
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly role?: TeamMemberRole;
+}
+
 export interface TransmissionSummary {
   readonly id: string;
   readonly documentId: string;
@@ -138,6 +163,7 @@ export interface TransmissionListParams {
 export interface DashboardEngineClient {
   listAuditEvents(params?: AuditEventListParams): Promise<AuditEventPage>;
   listRecentErrors(params?: RecentErrorListParams): Promise<RecentErrorPage>;
+  listTeamMembers(params?: TeamMemberListParams): Promise<TeamMemberPage>;
   listTransmissions(params?: TransmissionListParams): Promise<TransmissionPage>;
   tenantUsage(): Promise<TenantUsage>;
   tenantOverview(): Promise<TenantOverview>;
@@ -192,6 +218,16 @@ export function createHttpDashboardClient(options: EngineRpcClientOptions = {}):
         method: "engine.list_recent_errors",
         params,
         parse: parseRecentErrorPage,
+        requestId: requestIdFactory()
+      });
+    },
+    async listTeamMembers(params = {}) {
+      return callEngineMethod({
+        endpoint,
+        fetcher,
+        method: "engine.list_team_members",
+        params,
+        parse: parseTeamMemberPage,
         requestId: requestIdFactory()
       });
     },
@@ -255,6 +291,7 @@ interface EngineMethodCall<Result> {
   readonly method:
     | "engine.list_audit_events"
     | "engine.list_recent_errors"
+    | "engine.list_team_members"
     | "engine.list_transmissions"
     | "engine.tenant_overview"
     | "engine.tenant_usage";
@@ -263,7 +300,9 @@ interface EngineMethodCall<Result> {
   readonly requestId: string;
 }
 
-async function callEngineMethod<Result extends AuditEventPage | RecentErrorPage | TenantOverview | TenantUsage | TransmissionPage>({
+async function callEngineMethod<
+  Result extends AuditEventPage | RecentErrorPage | TeamMemberPage | TenantOverview | TenantUsage | TransmissionPage
+>({
   endpoint,
   fetcher,
   method,
@@ -419,6 +458,31 @@ function parseRecentError(value: unknown): RecentError {
   };
 }
 
+function parseTeamMemberPage(value: unknown): TeamMemberPage {
+  const record = asRecord(value, "team member page");
+
+  return {
+    items: readArray(record, "items", "team member page").map(parseTeamMember),
+    pageInfo: parseTransmissionPageInfo(readRequired(record, "pageInfo", "team member page"))
+  };
+}
+
+function parseTeamMember(value: unknown): TeamMember {
+  const record = asRecord(value, "team member");
+  const lastActiveAt = readOptionalString(record, "lastActiveAt", "team member");
+  const invitedAt = readOptionalString(record, "invitedAt", "team member");
+
+  return {
+    id: readString(record, "id", "team member"),
+    email: readString(record, "email", "team member"),
+    displayName: readString(record, "displayName", "team member"),
+    role: readTeamMemberRole(record, "role", "team member"),
+    status: readTeamMemberStatus(record, "status", "team member"),
+    ...(lastActiveAt !== undefined ? { lastActiveAt } : {}),
+    ...(invitedAt !== undefined ? { invitedAt } : {})
+  };
+}
+
 function parseTenantUsage(value: unknown): TenantUsage {
   const record = asRecord(value, "tenant usage");
 
@@ -504,6 +568,20 @@ function readRequired(record: Record<string, unknown>, key: string, label: strin
 
 function readString(record: Record<string, unknown>, key: string, label: string): string {
   const value = readRequired(record, key, label);
+
+  if (typeof value !== "string") {
+    throw new EngineRpcError(`Invalid ${label}: ${key} must be a string`, { data: record });
+  }
+
+  return value;
+}
+
+function readOptionalString(record: Record<string, unknown>, key: string, label: string): string | undefined {
+  const value = record[key];
+
+  if (value === undefined) {
+    return undefined;
+  }
 
   if (typeof value !== "string") {
     throw new EngineRpcError(`Invalid ${label}: ${key} must be a string`, { data: record });
@@ -608,6 +686,26 @@ function readRecentErrorSource(record: Record<string, unknown>, key: string, lab
   }
 
   throw new EngineRpcError(`Invalid ${label}: unsupported error source`, { data: record });
+}
+
+function readTeamMemberRole(record: Record<string, unknown>, key: string, label: string): TeamMemberRole {
+  const value = readString(record, key, label);
+
+  if (value === "admin" || value === "operator" || value === "read_only") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported team member role`, { data: record });
+}
+
+function readTeamMemberStatus(record: Record<string, unknown>, key: string, label: string): TeamMemberStatus {
+  const value = readString(record, key, label);
+
+  if (value === "active" || value === "disabled" || value === "invited") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported team member status`, { data: record });
 }
 
 function readTransmissionState(record: Record<string, unknown>, key: string, label: string): TransmissionState {
