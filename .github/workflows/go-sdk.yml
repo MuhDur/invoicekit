@@ -1,0 +1,162 @@
+# SPDX-License-Identifier: Apache-2.0
+# T-107 Go SDK build + test gate.
+#
+# Two job groups:
+#
+# 1. cgo-matrix: builds libinvoicekit_ffi on each runner OS,
+#    then runs `go test ./...` with cgo enabled. Covers linux,
+#    darwin, windows so the bead's "cgo binding works on linux,
+#    darwin, windows" acceptance gate is provable.
+#
+# 2. nocgo: runs `go test ./...` with CGO_ENABLED=0 against the
+#    REST fallback. The fallback tests use an in-process
+#    httptest server so no external sidecar is required to gate
+#    the build.
+
+name: go-sdk
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "bindings/go/v*"
+    paths:
+      - "bindings/go/**"
+      - "crates/invoicekit-ffi/**"
+      - "crates/invoicekit-engine/**"
+      - ".github/workflows/go-sdk.yml"
+  pull_request:
+    paths:
+      - "bindings/go/**"
+      - "crates/invoicekit-ffi/**"
+      - "crates/invoicekit-engine/**"
+      - ".github/workflows/go-sdk.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cgo-matrix:
+    name: cgo (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build invoicekit-ffi cdylib
+        run: cargo build -p invoicekit-ffi --locked
+
+      - name: Export FFI library path (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "INVOICEKIT_FFI_LIB=${GITHUB_WORKSPACE}/target/debug/libinvoicekit_ffi.so" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=${GITHUB_WORKSPACE}/target/debug" >> "$GITHUB_ENV"
+          echo "CGO_LDFLAGS=-L${GITHUB_WORKSPACE}/target/debug -linvoicekit_ffi" >> "$GITHUB_ENV"
+
+      - name: Export FFI library path (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          echo "INVOICEKIT_FFI_LIB=${GITHUB_WORKSPACE}/target/debug/libinvoicekit_ffi.dylib" >> "$GITHUB_ENV"
+          echo "DYLD_LIBRARY_PATH=${GITHUB_WORKSPACE}/target/debug" >> "$GITHUB_ENV"
+          echo "CGO_LDFLAGS=-L${GITHUB_WORKSPACE}/target/debug -linvoicekit_ffi" >> "$GITHUB_ENV"
+
+      - name: Export FFI library path (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # On Windows the Rust toolchain produces invoicekit_ffi.dll
+          # plus invoicekit_ffi.dll.lib for linking.
+          echo "INVOICEKIT_FFI_LIB=${GITHUB_WORKSPACE}/target/debug/invoicekit_ffi.dll" >> "$GITHUB_ENV"
+          echo "PATH=${GITHUB_WORKSPACE}/target/debug;$PATH" >> "$GITHUB_ENV"
+          echo "CGO_LDFLAGS=-L${GITHUB_WORKSPACE}/target/debug -linvoicekit_ffi" >> "$GITHUB_ENV"
+
+      - name: go vet
+        env:
+          CGO_ENABLED: 1
+        run: go vet ./...
+        working-directory: bindings/go
+
+      - name: go test
+        env:
+          CGO_ENABLED: 1
+        run: go test -v -count=1 ./...
+        working-directory: bindings/go
+
+  nocgo:
+    name: REST fallback (CGO_ENABLED=0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+
+      - name: go vet (nocgo)
+        env:
+          CGO_ENABLED: 0
+        run: go vet ./...
+        working-directory: bindings/go
+
+      - name: go test (nocgo, httptest-mocked REST fallback)
+        env:
+          CGO_ENABLED: 0
+        run: go test -v -count=1 ./...
+        working-directory: bindings/go
+
+  publish:
+    name: tag check (Go module publish gate)
+    needs: [cgo-matrix, nocgo]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/bindings/go/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Go modules are "published" by pushing a semver tag of the
+      # form `bindings/go/vX.Y.Z`. pkg.go.dev fetches the module
+      # via the standard proxy on first download. This job is the
+      # gate: it asserts the tag follows the expected shape and
+      # that the bindings/go subtree builds without cgo at the
+      # tagged commit.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+
+      - name: Validate semver tag shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
+            echo "::error::tag $tag must be semver vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          echo "tag $tag is semver-shaped"
+
+      - name: Verify nocgo build at the tagged commit
+        env:
+          CGO_ENABLED: 0
+        run: go build ./...
+        working-directory: bindings/go
+
+      - name: Print pkg.go.dev URL
+        shell: bash
+        run: |
+          echo "::notice::Tag pushed. pkg.go.dev will pick up the module at github.com/MuhDur/invoicekit/bindings/go@${GITHUB_REF_NAME} within ~30 minutes."
