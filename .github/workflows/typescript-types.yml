@@ -37,3 +37,122 @@ jobs:
         run: |
           set -euo pipefail
           jq -e '.license == "Apache-2.0"' package.json
+      - name: Build dist for install-matrix downstream job
+        run: bunx tsc -p tsconfig.json
+      - name: Pack tarball
+        run: bun pm pack
+      - name: Upload packed tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: invoicekit-types-tarball
+          path: bindings/typescript-types/*.tgz
+          retention-days: 1
+          if-no-files-found: error
+
+  install-matrix:
+    name: install + import (${{ matrix.toolchain }})
+    needs: generate-and-check
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain:
+          - npm
+          - pnpm
+          - bun
+          - deno
+          - node-yarn
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download packed tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: invoicekit-types-tarball
+          path: tarball/
+      - name: Pin tarball path
+        id: tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          path=$(ls tarball/*.tgz | head -n 1)
+          echo "path=$(realpath "$path")" >> "$GITHUB_OUTPUT"
+
+      - if: matrix.toolchain == 'npm'
+        uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - if: matrix.toolchain == 'npm'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p smoke-npm && cd smoke-npm
+          npm init -y >/dev/null
+          npm install "${{ steps.tarball.outputs.path }}"
+          cp ../bindings/typescript-types/tests/install-smoke/smoke.mjs ./smoke.mjs
+          node smoke.mjs
+
+      - if: matrix.toolchain == 'pnpm'
+        uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - if: matrix.toolchain == 'pnpm'
+        uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - if: matrix.toolchain == 'pnpm'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p smoke-pnpm && cd smoke-pnpm
+          pnpm init >/dev/null
+          pnpm add "${{ steps.tarball.outputs.path }}"
+          cp ../bindings/typescript-types/tests/install-smoke/smoke.mjs ./smoke.mjs
+          node smoke.mjs
+
+      - if: matrix.toolchain == 'node-yarn'
+        uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - if: matrix.toolchain == 'node-yarn'
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          mkdir -p smoke-yarn && cd smoke-yarn
+          # yarn 4 (Berry) refuses tarball protocol without a
+          # plugin install; pin yarn 1.x for the install-from-
+          # tgz smoke — that's the older but still widely used
+          # consumer setup we want to cover.
+          npm install -g yarn@1.22.22
+          yarn init -y >/dev/null
+          yarn add file:"${{ steps.tarball.outputs.path }}"
+          cp ../bindings/typescript-types/tests/install-smoke/smoke.mjs ./smoke.mjs
+          node smoke.mjs
+
+      - if: matrix.toolchain == 'bun'
+        uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - if: matrix.toolchain == 'bun'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p smoke-bun && cd smoke-bun
+          echo '{"name":"smoke-bun","version":"0.0.0","type":"module"}' > package.json
+          bun add "${{ steps.tarball.outputs.path }}"
+          cp ../bindings/typescript-types/tests/install-smoke/smoke.mjs ./smoke.mjs
+          bun smoke.mjs
+
+      - if: matrix.toolchain == 'deno'
+        uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - if: matrix.toolchain == 'deno'
+        uses: denoland/setup-deno@v2
+        with: { deno-version: v2.x }
+      - if: matrix.toolchain == 'deno'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Deno's npm: specifier needs a node_modules tree;
+          # `npm install` of the tarball creates one, then we
+          # point Deno at it via --node-modules-dir=auto.
+          mkdir -p smoke-deno && cd smoke-deno
+          npm init -y >/dev/null
+          npm install "${{ steps.tarball.outputs.path }}"
+          cp ../bindings/typescript-types/tests/install-smoke/smoke.deno.mjs ./smoke.mjs
+          deno run --allow-read --allow-env --node-modules-dir=auto smoke.mjs
