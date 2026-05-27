@@ -1,10 +1,11 @@
 import { Link, Outlet, createRootRoute, createRoute, createRouter, useRouterState } from "@tanstack/react-router";
 import { Suspense } from "react";
-import { Activity, AlertTriangle, BarChart3, Gauge, Inbox, Settings } from "lucide-react";
+import { Activity, AlertTriangle, BarChart3, Gauge, Inbox, Settings, Users } from "lucide-react";
 import { AuditRoute } from "../routes/audit";
 import { DocumentsRoute } from "../routes/documents";
 import { ErrorsRoute } from "../routes/errors";
 import { OverviewRoute } from "../routes/overview";
+import { TeamRoute } from "../routes/team";
 import { UsageRoute } from "../routes/usage";
 
 function AppShell() {
@@ -14,6 +15,7 @@ function AppShell() {
   const documentsActive = pathname.startsWith("/documents");
   const usageActive = pathname.startsWith("/usage");
   const errorsActive = pathname.startsWith("/errors");
+  const teamActive = pathname.startsWith("/settings/team");
 
   return (
     <div className="app-shell">
@@ -45,6 +47,10 @@ function AppShell() {
           <Link className="nav-item" data-active={errorsActive ? true : undefined} to="/errors">
             <AlertTriangle size={18} aria-hidden="true" />
             Errors
+          </Link>
+          <Link className="nav-item" data-active={teamActive ? true : undefined} to="/settings/team">
+            <Users size={18} aria-hidden="true" />
+            Team
           </Link>
           <span className="nav-item nav-item-disabled">
             <Settings size={18} aria-hidden="true" />
@@ -102,13 +108,20 @@ const errorsRoute = createRoute({
   component: ErrorsRoute
 });
 
+const teamRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings/team",
+  component: TeamRoute
+});
+
 const routeTree = rootRoute.addChildren([
   overviewIndexRoute,
   overviewRoute,
   documentsRoute,
   auditRoute,
   usageRoute,
-  errorsRoute
+  errorsRoute,
+  teamRoute
 ]);
 
 export const router = createRouter({
