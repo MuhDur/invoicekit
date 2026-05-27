@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The InvoiceKit Authors
-
-//! `invoicekit-cli` — InvoiceKit workspace member.
+//! `invoicekit-cli` — InvoiceKit workspace command-line surface.
 //!
-//! See [`plans/PLAN.md`](../../plans/PLAN.md) for the architectural role of
-//! this crate. The exported API below is the stable workspace-identity
-//! helper every InvoiceKit crate carries; downstream beads layer their
-//! domain logic on top of it without touching this surface.
+//! Houses every `invoicekit <subcommand>` runner as a reusable library
+//! function so both the published `invoicekit` binary and the per-
+//! subcommand thin-shim binaries dispatch through the same code path.
+//! See [`plans/PLAN.md`](../../plans/PLAN.md) for the architectural role
+//! of this crate.
+
+pub mod commands;
 
 /// Canonical Cargo package name of this crate.
 ///
