@@ -17,6 +17,9 @@ from urllib.parse import urlparse
 REPO = Path(__file__).resolve().parents[2]
 CORPUS_ROOT = REPO / "conformance-corpus"
 SCHEMA_PATH = CORPUS_ROOT / "fixture-metadata.schema.json"
+ARTIFACT_SUFFIXES = frozenset({".json", ".xml", ".pdf"})
+IGNORED_ARTIFACT_PATHS = frozenset({Path("fixture-metadata.schema.json")})
+IGNORED_ARTIFACT_DIRS = frozenset({"generators"})
 
 
 class MetadataError(ValueError):
@@ -149,9 +152,11 @@ def _parse_datetime(value: str, path: str) -> datetime:
 
 def validate_artifact(metadata: dict[str, Any], metadata_path: Path) -> None:
     artifact = metadata["artifact"]
-    relative_path = Path(artifact["path"])
-    if relative_path.is_absolute() or ".." in relative_path.parts:
-        raise MetadataError(f"{metadata_path}: artifact.path must stay inside the fixture directory")
+    relative_path = validate_contained_relative_path(
+        artifact["path"],
+        metadata_path,
+        "artifact.path",
+    )
 
     artifact_path = metadata_path.parent / relative_path
     if not artifact_path.is_file():
@@ -173,12 +178,72 @@ def validate_artifact(metadata: dict[str, Any], metadata_path: Path) -> None:
         )
 
 
+def validate_contained_relative_path(value: str, metadata_path: Path, field_name: str) -> Path:
+    relative_path = Path(value)
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise MetadataError(f"{metadata_path}: {field_name} must stay inside the fixture directory")
+    return relative_path
+
+
+def validate_optional_reference_path(
+    metadata: dict[str, Any],
+    metadata_path: Path,
+    object_name: str,
+    field_name: str,
+) -> None:
+    container = metadata[object_name]
+    if field_name not in container:
+        return
+    relative_path = validate_contained_relative_path(
+        container[field_name],
+        metadata_path,
+        f"{object_name}.{field_name}",
+    )
+    reference_path = metadata_path.parent / relative_path
+    if not reference_path.is_file():
+        raise MetadataError(
+            f"{metadata_path}: {object_name}.{field_name} file not found: {relative_path}"
+        )
+
+
+def validate_metadata_coverage(corpus_root: Path, metadata_files: list[Path]) -> None:
+    metadata_by_dir = {path.parent.resolve(): load_json(path) for path in metadata_files}
+    for artifact_path in iter_artifact_files(corpus_root):
+        metadata_path = artifact_path.parent / "metadata.json"
+        metadata = metadata_by_dir.get(artifact_path.parent.resolve())
+        if metadata is None:
+            raise MetadataError(f"{artifact_path}: missing sibling metadata.json")
+
+        declared_path = artifact_path.parent / Path(metadata["artifact"]["path"])
+        if declared_path.resolve() != artifact_path.resolve():
+            raise MetadataError(
+                f"{metadata_path}: artifact.path does not reference {artifact_path.name}"
+            )
+
+
+def iter_artifact_files(corpus_root: Path) -> list[Path]:
+    artifacts: list[Path] = []
+    for path in sorted(item for item in corpus_root.rglob("*") if item.is_file()):
+        relative = path.relative_to(corpus_root)
+        if relative in IGNORED_ARTIFACT_PATHS:
+            continue
+        if relative.name in {"README.md", "metadata.json"}:
+            continue
+        if relative.parts and relative.parts[0] in IGNORED_ARTIFACT_DIRS:
+            continue
+        if path.suffix in ARTIFACT_SUFFIXES:
+            artifacts.append(path)
+    return artifacts
+
+
 def validate_policy_semantics(metadata: dict[str, Any], metadata_path: Path) -> None:
     partition = metadata["corpus_partition"]
     publication = metadata["publication"]
     license_info = metadata["license"]
     provenance = metadata["provenance"]
     pii = metadata["pii"]
+    validate_optional_reference_path(metadata, metadata_path, "license", "evidence_path")
+    validate_optional_reference_path(metadata, metadata_path, "pii", "redaction_report_path")
 
     if publication == "public":
         if license_info["redistribution"] != "public-ok":
@@ -240,6 +305,7 @@ def validate_all(corpus_root: Path = CORPUS_ROOT, schema_path: Path = SCHEMA_PAT
         raise MetadataError(f"{corpus_root}: no metadata.json files found")
     for metadata_path in metadata_files:
         validate_metadata_file(metadata_path, schema)
+    validate_metadata_coverage(corpus_root, metadata_files)
     return metadata_files
 
 
