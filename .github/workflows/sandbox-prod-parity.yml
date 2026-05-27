@@ -1,0 +1,81 @@
+name: Sandbox/production parity
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/sandbox-prod-parity/**"
+      - "data/sandbox-prod-parity/**"
+      - ".github/workflows/sandbox-prod-parity.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/sandbox-prod-parity/**"
+      - "data/sandbox-prod-parity/**"
+      - ".github/workflows/sandbox-prod-parity.yml"
+  schedule:
+    # 04:13 UTC nightly. Off-peak, after both the source-watch and
+    # sandbox-drift crons (03:17 and 03:47), so triage sees them in
+    # order: source diffs → sandbox drift → sandbox-vs-prod parity.
+    - cron: "13 4 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: sandbox-prod-parity-${{ github.workflow }}-${{ github.ref }}-${{ github.event.schedule }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  tests:
+    name: sandbox-prod-parity tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pytest
+        run: pip install pytest
+      - name: Run sandbox-prod-parity tests
+        run: pytest tools/sandbox-prod-parity/tests -q
+      - name: Verify config.toml loads cleanly on every PR
+        run: |
+          python3 tools/sandbox-prod-parity/parity_diff.py \
+            --config data/sandbox-prod-parity/config.toml \
+            --repo-root . \
+            --report-mode stdout
+
+  nightly:
+    name: nightly sandbox-vs-production parity
+    runs-on: ubuntu-latest
+    needs: tests
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    env:
+      # Both sandbox and production credentials are required for any
+      # pair to actually run. The consent_signed_at gate in
+      # config.toml is the second required ingredient — both must be
+      # in place per pair, or the canary records "skipped" and moves
+      # on without touching either endpoint.
+      INVOICEKIT_SANDBOX_IT_SDI_TOKEN: ${{ secrets.INVOICEKIT_SANDBOX_IT_SDI_TOKEN }}
+      INVOICEKIT_SANDBOX_FR_CHORUS_TOKEN: ${{ secrets.INVOICEKIT_SANDBOX_FR_CHORUS_TOKEN }}
+      INVOICEKIT_SANDBOX_ES_VERIFACTU_TOKEN: ${{ secrets.INVOICEKIT_SANDBOX_ES_VERIFACTU_TOKEN }}
+      INVOICEKIT_PROD_IT_SDI_TOKEN: ${{ secrets.INVOICEKIT_PROD_IT_SDI_TOKEN }}
+      INVOICEKIT_PROD_FR_CHORUS_TOKEN: ${{ secrets.INVOICEKIT_PROD_FR_CHORUS_TOKEN }}
+      INVOICEKIT_PROD_ES_VERIFACTU_TOKEN: ${{ secrets.INVOICEKIT_PROD_ES_VERIFACTU_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run sandbox-vs-production parity check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 tools/sandbox-prod-parity/parity_diff.py \
+            --config data/sandbox-prod-parity/config.toml \
+            --repo-root . \
+            --report-mode github-issue
