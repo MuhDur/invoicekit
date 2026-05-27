@@ -1,0 +1,119 @@
+{
+  "$schema": "https://gobl.org/draft-0/bill/invoice",
+  "type": "invoice",
+  "id": "adv-single-line",
+  "code": "ADV-single-line",
+  "issue_date": "2026-05-27",
+  "due_date": "2026-06-26",
+  "currency": "EUR",
+  "supplier": {
+    "id": "supplier-1",
+    "name": "supplier 1 GmbH",
+    "tax_id": {
+      "country": "DE",
+      "code": "DE000000001",
+      "scheme": "vat"
+    },
+    "addresses": [
+      {
+        "street": "supplier Street 1",
+        "locality": "Berlin",
+        "region": null,
+        "code": "10001",
+        "country": "DE"
+      }
+    ],
+    "people": [
+      {
+        "name": "supplier contact"
+      }
+    ]
+  },
+  "customer": {
+    "id": "customer-2",
+    "name": "customer 2 GmbH",
+    "tax_id": {
+      "country": "FR",
+      "code": "DE000000002",
+      "scheme": "vat"
+    },
+    "addresses": [
+      {
+        "street": "customer Street 2",
+        "locality": "Berlin",
+        "region": null,
+        "code": "10002",
+        "country": "FR"
+      }
+    ],
+    "people": [
+      {
+        "name": "customer contact"
+      }
+    ]
+  },
+  "payment": {
+    "terms": {
+      "description": "Net 30",
+      "due_date": "2026-06-26"
+    },
+    "instructions": [
+      {
+        "kind": "iban_bic",
+        "account": "DE89370400440532013000",
+        "reference": "RF0001"
+      }
+    ]
+  },
+  "lines": [
+    {
+      "i": 1,
+      "code": "L1",
+      "quantity": "1",
+      "item": {
+        "name": "Single line item",
+        "price": "50.00",
+        "unit": "EA"
+      },
+      "sum": "50.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "sum": "50.00",
+    "total": "50.00",
+    "total_with_tax": "59.50",
+    "payable": "59.50",
+    "tax": {
+      "categories": [
+        {
+          "code": "S",
+          "rates": [
+            {
+              "key": "standard",
+              "amount": "9.50",
+              "base": "50.00",
+              "percent": "19.00"
+            }
+          ]
+        }
+      ],
+      "sum": "9.50"
+    }
+  },
+  "meta": {
+    "tenant_id": "tenant-adversarial",
+    "trace_id": "trace-adversarial",
+    "source_system": null
+  },
+  "t122_variation": {
+    "scenario": "single-line",
+    "variation": 2,
+    "serializer": "format-gobl"
+  }
+}

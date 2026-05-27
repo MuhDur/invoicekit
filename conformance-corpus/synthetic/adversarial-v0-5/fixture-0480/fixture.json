@@ -1,0 +1,147 @@
+{
+  "$schema": "https://gobl.org/draft-0/bill/invoice",
+  "type": "invoice",
+  "id": "adv-mixed-vat-rates",
+  "code": "ADV-mixed-vat-rates",
+  "issue_date": "2026-05-27",
+  "due_date": "2026-06-26",
+  "currency": "EUR",
+  "supplier": {
+    "id": "supplier-1",
+    "name": "supplier 1 GmbH",
+    "tax_id": {
+      "country": "DE",
+      "code": "DE000000001",
+      "scheme": "vat"
+    },
+    "addresses": [
+      {
+        "street": "supplier Street 1",
+        "locality": "Berlin",
+        "region": null,
+        "code": "10001",
+        "country": "DE"
+      }
+    ],
+    "people": [
+      {
+        "name": "supplier contact"
+      }
+    ]
+  },
+  "customer": {
+    "id": "customer-2",
+    "name": "customer 2 GmbH",
+    "tax_id": {
+      "country": "FR",
+      "code": "DE000000002",
+      "scheme": "vat"
+    },
+    "addresses": [
+      {
+        "street": "customer Street 2",
+        "locality": "Berlin",
+        "region": null,
+        "code": "10002",
+        "country": "FR"
+      }
+    ],
+    "people": [
+      {
+        "name": "customer contact"
+      }
+    ]
+  },
+  "payment": {
+    "terms": {
+      "description": "Net 30",
+      "due_date": "2026-06-26"
+    },
+    "instructions": [
+      {
+        "kind": "iban_bic",
+        "account": "DE89370400440532013000",
+        "reference": "RF0001"
+      }
+    ]
+  },
+  "lines": [
+    {
+      "i": 1,
+      "code": "L1",
+      "quantity": "1",
+      "item": {
+        "name": "Standard-rate widget",
+        "price": "100.00",
+        "unit": "EA"
+      },
+      "sum": "100.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 2,
+      "code": "L2",
+      "quantity": "1",
+      "item": {
+        "name": "Zero-rate exported widget",
+        "price": "50.00",
+        "unit": "EA"
+      },
+      "sum": "50.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "Z"
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "sum": "150.00",
+    "total": "150.00",
+    "total_with_tax": "169.00",
+    "payable": "169.00",
+    "tax": {
+      "categories": [
+        {
+          "code": "S",
+          "rates": [
+            {
+              "key": "standard",
+              "amount": "19.00",
+              "base": "100.00",
+              "percent": "19.00"
+            }
+          ]
+        },
+        {
+          "code": "Z",
+          "rates": [
+            {
+              "key": "standard",
+              "amount": "0",
+              "base": "50.00",
+              "percent": "0"
+            }
+          ]
+        }
+      ],
+      "sum": "19.00"
+    }
+  },
+  "meta": {
+    "tenant_id": "tenant-adversarial",
+    "trace_id": "trace-adversarial",
+    "source_system": null
+  },
+  "t122_variation": {
+    "scenario": "mixed-vat-rates",
+    "variation": 11,
+    "serializer": "format-gobl"
+  }
+}
