@@ -13,9 +13,15 @@ publish = false
 [lib]
 name = "invoicekit_binding_python"
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+extension-module = ["pyo3/extension-module"]
 
 [dependencies]
 invoicekit-engine = { path = "../../crates/invoicekit-engine", version = "0.0.0" }
+pyo3 = { version = "0.28.3", features = ["abi3-py310"] }
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
