@@ -1,6 +1,7 @@
 import { Link, Outlet, createRootRoute, createRoute, createRouter, useRouterState } from "@tanstack/react-router";
 import { Suspense } from "react";
-import { Activity, AlertTriangle, BarChart3, Gauge, Inbox, Settings, Users } from "lucide-react";
+import { Activity, AlertTriangle, BarChart3, Gauge, Inbox, KeyRound, Settings, Users } from "lucide-react";
+import { ApiKeysRoute } from "../routes/api-keys";
 import { AuditRoute } from "../routes/audit";
 import { DocumentsRoute } from "../routes/documents";
 import { ErrorsRoute } from "../routes/errors";
@@ -16,6 +17,7 @@ function AppShell() {
   const usageActive = pathname.startsWith("/usage");
   const errorsActive = pathname.startsWith("/errors");
   const teamActive = pathname.startsWith("/settings/team");
+  const apiKeysActive = pathname.startsWith("/settings/api-keys");
 
   return (
     <div className="app-shell">
@@ -51,6 +53,10 @@ function AppShell() {
           <Link className="nav-item" data-active={teamActive ? true : undefined} to="/settings/team">
             <Users size={18} aria-hidden="true" />
             Team
+          </Link>
+          <Link className="nav-item" data-active={apiKeysActive ? true : undefined} to="/settings/api-keys">
+            <KeyRound size={18} aria-hidden="true" />
+            API keys
           </Link>
           <span className="nav-item nav-item-disabled">
             <Settings size={18} aria-hidden="true" />
@@ -114,6 +120,12 @@ const teamRoute = createRoute({
   component: TeamRoute
 });
 
+const apiKeysRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings/api-keys",
+  component: ApiKeysRoute
+});
+
 const routeTree = rootRoute.addChildren([
   overviewIndexRoute,
   overviewRoute,
@@ -121,7 +133,8 @@ const routeTree = rootRoute.addChildren([
   auditRoute,
   usageRoute,
   errorsRoute,
-  teamRoute
+  teamRoute,
+  apiKeysRoute
 ]);
 
 export const router = createRouter({
