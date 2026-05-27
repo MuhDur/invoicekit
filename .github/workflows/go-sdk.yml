@@ -82,9 +82,12 @@ jobs:
         shell: bash
         run: |
           # On Windows the Rust toolchain produces invoicekit_ffi.dll
-          # plus invoicekit_ffi.dll.lib for linking.
+          # plus invoicekit_ffi.dll.lib for linking. cgo on Windows
+          # needs gcc; the GitHub-hosted runner ships mingw-w64 at
+          # C:\mingw64\bin which we add to PATH.
           echo "INVOICEKIT_FFI_LIB=${GITHUB_WORKSPACE}/target/debug/invoicekit_ffi.dll" >> "$GITHUB_ENV"
-          echo "PATH=${GITHUB_WORKSPACE}/target/debug;$PATH" >> "$GITHUB_ENV"
+          echo "${GITHUB_WORKSPACE}/target/debug" >> "$GITHUB_PATH"
+          echo "C:\\mingw64\\bin" >> "$GITHUB_PATH"
           echo "CGO_LDFLAGS=-L${GITHUB_WORKSPACE}/target/debug -linvoicekit_ffi" >> "$GITHUB_ENV"
 
       - name: go vet
