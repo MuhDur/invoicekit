@@ -1,0 +1,87 @@
+name: Capabilities CLI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: capabilities-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  capabilities-cli:
+    name: invoicekit capabilities CLI smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install jsonschema
+        run: pip install pytest jsonschema
+      - name: Validate bundled matrix against committed schema
+        run: pytest tools/release-checks/test_capabilities_matrix.py -q
+      - name: Build the published `invoicekit` binary
+        run: cargo build -p invoicekit-cli --bin invoicekit --locked
+      - name: Exercise capabilities subcommand (JSON output, exact match)
+        run: |
+          set -euo pipefail
+          OUT=$(./target/debug/invoicekit capabilities \
+            --from=DE --to=FR --date=2027-01-01 --scenario=B2B)
+          echo "$OUT"
+          echo "$OUT" | python3 -c "
+          import json, sys
+          d = json.loads(sys.stdin.read())
+          assert d['status'] == 'ok', f'expected status=ok, got {d[\"status\"]}'
+          assert len(d['matched']) >= 1, 'expected at least one match'
+          assert d['matched'][0]['route_from'] == 'DE'
+          assert d['matched'][0]['route_to'] == 'FR'
+          "
+      - name: Exercise capabilities subcommand (downgrade path)
+        run: |
+          set -euo pipefail
+          OUT=$(./target/debug/invoicekit capabilities \
+            --from=NL --to=NL --date=2027-01-01 --scenario=B2B)
+          echo "$OUT"
+          echo "$OUT" | python3 -c "
+          import json, sys
+          d = json.loads(sys.stdin.read())
+          assert d['status'] == 'downgraded', f'expected downgraded, got {d[\"status\"]}'
+          assert any('auto-downgraded' in w for w in d['warnings'])
+          "
+      - name: Exercise capabilities subcommand (no_data path)
+        run: |
+          set -euo pipefail
+          # Choose a route the bundled matrix intentionally does not cover.
+          OUT=$(./target/debug/invoicekit capabilities \
+            --from=ZA --to=KE --date=2027-01-01 --scenario=B2B)
+          echo "$OUT"
+          echo "$OUT" | python3 -c "
+          import json, sys
+          d = json.loads(sys.stdin.read())
+          assert d['status'] == 'no_data', f'expected no_data, got {d[\"status\"]}'
+          assert d['matched'] == []
+          "
+      - name: Exercise capabilities subcommand (pretty output)
+        run: |
+          set -euo pipefail
+          ./target/debug/invoicekit capabilities \
+            --from=DE --to=DE --date=2027-01-01 --scenario=B2G \
+            --format=pretty | tee /tmp/pretty.txt
+          grep -q "Route   : DE -> DE" /tmp/pretty.txt
+          grep -q "Status  : Ok" /tmp/pretty.txt
+          grep -q "xrechnung-3.0" /tmp/pretty.txt
+      - name: Reject malformed CLI input (exit 2)
+        run: |
+          set +e
+          ./target/debug/invoicekit capabilities --from=DEU --to=FR --date=2027-01-01 --scenario=B2B
+          test $? -eq 2 || (echo "expected exit 2 for ISO-3 country code" && exit 1)

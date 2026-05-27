@@ -1650,7 +1650,9 @@ version = "0.0.0"
 dependencies = [
  "invoicekit-ir",
  "invoicekit-migration",
+ "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -1799,6 +1801,7 @@ dependencies = [
  "postgres",
  "proptest",
  "rusqlite",
+ "rust_decimal",
  "serde",
  "serde_json",
  "sha2 0.10.9",
