@@ -1,0 +1,78 @@
+name: Sandbox drift canary
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/sandbox-drift/**"
+      - "data/sandbox-drift/**"
+      - ".github/workflows/sandbox-drift.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/sandbox-drift/**"
+      - "data/sandbox-drift/**"
+      - ".github/workflows/sandbox-drift.yml"
+  schedule:
+    # 03:47 UTC nightly. Off-peak, just after the source-watch cron
+    # (03:17) so a drift triage issue lands alongside any source-list
+    # diff issues from the same night.
+    - cron: "47 3 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: sandbox-drift-${{ github.workflow }}-${{ github.ref }}-${{ github.event.schedule }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  tests:
+    name: sandbox-drift tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pytest
+        run: pip install pytest
+      - name: Run sandbox-drift tests
+        run: pytest tools/sandbox-drift/tests -q
+      - name: Verify config.toml is loadable on every PR
+        run: |
+          python3 tools/sandbox-drift/sandbox_drift.py \
+            --config data/sandbox-drift/config.toml \
+            --repo-root . \
+            --report-mode stdout
+
+  nightly:
+    name: nightly drift canary
+    runs-on: ubuntu-latest
+    needs: tests
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    env:
+      # Pass through every documented sandbox credential. Each one is
+      # optional; the canary's "skipped: no credentials" branch is
+      # what handles the unset case. Credentials are owned by the
+      # principal and rotated independently of this workflow.
+      INVOICEKIT_SANDBOX_IT_SDI_TOKEN: ${{ secrets.INVOICEKIT_SANDBOX_IT_SDI_TOKEN }}
+      INVOICEKIT_SANDBOX_FR_CHORUS_TOKEN: ${{ secrets.INVOICEKIT_SANDBOX_FR_CHORUS_TOKEN }}
+      INVOICEKIT_SANDBOX_ES_VERIFACTU_TOKEN: ${{ secrets.INVOICEKIT_SANDBOX_ES_VERIFACTU_TOKEN }}
+      INVOICEKIT_SANDBOX_SA_ZATCA_TOKEN: ${{ secrets.INVOICEKIT_SANDBOX_SA_ZATCA_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run nightly sandbox drift canary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 tools/sandbox-drift/sandbox_drift.py \
+            --config data/sandbox-drift/config.toml \
+            --repo-root . \
+            --report-mode github-issue
