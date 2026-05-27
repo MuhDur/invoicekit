@@ -1,0 +1,7 @@
+# cargo-fuzz runtime output: corpus accumulates during fuzz runs and
+# artifacts hold crash reproductions. CI uploads any crash artifacts as
+# job artifacts; the committed seed corpus lives in
+# /conformance-corpus/fuzz/<target>/.
+corpus/
+artifacts/
+target/

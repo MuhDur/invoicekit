@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# This Cargo manifest is intentionally a separate workspace (note
+# `[workspace]`) so the libfuzzer-sys dependency does not bleed into the
+# main workspace's lockfile resolution. cargo-fuzz invokes `cargo +nightly`
+# from this directory; CI never builds these targets through the parent
+# workspace.
+
+[package]
+name = "invoicekit-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+invoicekit-canonical = { path = "../crates/canonical" }
+invoicekit-ir = { path = "../crates/ir" }
+invoicekit-format-ubl = { path = "../crates/format-ubl" }
+serde_json = "1"
+
+[workspace]
+
+[[bin]]
+name = "canonicalize_json"
+path = "fuzz_targets/canonicalize_json.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "canonicalize_xml"
+path = "fuzz_targets/canonicalize_xml.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "ir_try_from_value"
+path = "fuzz_targets/ir_try_from_value.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "ubl_from_xml"
+path = "fuzz_targets/ubl_from_xml.rs"
+test = false
+doc = false
