@@ -62,6 +62,7 @@ members = [
   "crates/report-za-sars",
   # crates/ — reconciliation, evidence, archive, verification, replay, migration
   "crates/reconcile",
+  "crates/envelope-encryption",
   "crates/evidence",
   "crates/archive",
   "crates/verify",
