@@ -29,32 +29,32 @@ const PROFILES: &[Profile] = &[
     Profile {
         name: "Factur-X MINIMUM",
         scenario: "profile-factur-x-minimum",
-        context_id: "urn:factur-x.eu:1p0:minimum",
+        guideline_id: "urn:factur-x.eu:1p0:minimum",
     },
     Profile {
         name: "Factur-X BASIC WL",
         scenario: "profile-factur-x-basic-wl",
-        context_id: "urn:factur-x.eu:1p0:basic-wl",
+        guideline_id: "urn:factur-x.eu:1p0:basicwl",
     },
     Profile {
         name: "Factur-X BASIC",
         scenario: "profile-factur-x-basic",
-        context_id: "urn:factur-x.eu:1p0:basic",
+        guideline_id: "urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic",
     },
     Profile {
         name: "Factur-X EN 16931",
         scenario: "profile-factur-x-en16931",
-        context_id: "urn:factur-x.eu:1p0:en16931",
+        guideline_id: "urn:cen.eu:en16931:2017",
     },
     Profile {
         name: "Factur-X EXTENDED",
         scenario: "profile-factur-x-extended",
-        context_id: "urn:factur-x.eu:1p0:extended",
+        guideline_id: "urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended",
     },
     Profile {
         name: "XRechnung CII",
         scenario: "profile-xrechnung",
-        context_id: "urn:xoev-de:kosit:xrechnung_3.0:cii",
+        guideline_id: "urn:cen.eu:en16931:2017#compliant#urn:xoev-de:kosit:standard:xrechnung_3.0",
     },
 ];
 
@@ -123,7 +123,7 @@ const VAT_CATEGORIES: &[VatCategory] = &[
 struct Profile {
     name: &'static str,
     scenario: &'static str,
-    context_id: &'static str,
+    guideline_id: &'static str,
 }
 
 #[derive(Clone, Copy)]
@@ -171,7 +171,7 @@ struct Amounts {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let root = repo_root()?;
-    let corpus_root = root.join("conformance-corpus/synthetic/cii-d16b");
+    let corpus_root = root.join("conformance-corpus/synthetic/cii-d16b-profiled");
     for number in 1..=FIXTURE_COUNT {
         let fixture = fixture(number)?;
         write_fixture(&corpus_root, &fixture)?;
@@ -396,7 +396,7 @@ fn document(config: &FixtureConfig) -> Result<CommercialDocument, Box<dyn Error>
         attachments: Vec::new(),
         references: Vec::new(),
         notes: notes(config),
-        extensions: vec![cii_document_fields(config)?],
+        extensions: extensions(config)?,
         meta: DocumentMeta {
             tenant_id: format!("tenant-cii-{:04}", config.number),
             trace_id: format!("trace-cii-{:04}", config.number),
@@ -520,11 +520,23 @@ fn cii_document_fields(config: &FixtureConfig) -> Result<JurisdictionExtension, 
         json!({
             "buyer_reference": format!("BUYER-REF-CII-{:04}", config.number),
             "business_process_context_ids": [
-                config.profile.context_id,
-                "urn:cen.eu:en16931:2017",
+                "urn:invoicekit:conformance:process:cii-d16b",
             ],
         }),
     )?)
+}
+
+fn extensions(config: &FixtureConfig) -> Result<Vec<JurisdictionExtension>, Box<dyn Error>> {
+    let mut extensions = vec![cii_document_fields(config)?];
+    if config.profile.guideline_id != "urn:cen.eu:en16931:2017" {
+        extensions.push(JurisdictionExtension::new(
+            mapping::CII_PROFILE_CONTEXT_EXTENSION_URN,
+            json!({
+                "guideline_context_ids": [config.profile.guideline_id],
+            }),
+        )?);
+    }
+    Ok(extensions)
 }
 
 fn party(

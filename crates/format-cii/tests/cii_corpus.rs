@@ -75,7 +75,7 @@ fn committed_cii_corpus_covers_required_scenarios() {
 
 fn fixture_paths() -> Vec<PathBuf> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../conformance-corpus/synthetic/cii-d16b");
+        .join("../../conformance-corpus/synthetic/cii-d16b-profiled");
     let mut paths = fs::read_dir(root)
         .unwrap()
         .map(|entry| entry.unwrap().path().join("fixture.xml"))

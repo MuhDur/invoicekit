@@ -24,6 +24,10 @@ pub const CII_D16B_SCHEMA_COMMIT: &str = "b6c9e06a59812fb1a83585da40923b3678a649
 /// InvoiceKit operational metadata.
 pub const CII_DOCUMENT_FIELDS_EXTENSION_URN: &str = "urn:invoicekit:cii:d16b:document-fields";
 
+/// CII profile-context extension URN for guideline identifiers carried by
+/// `GuidelineSpecifiedDocumentContextParameter`.
+pub const CII_PROFILE_CONTEXT_EXTENSION_URN: &str = "urn:invoicekit:cii:d16b:profile-context";
+
 /// Application context parameter ID used to carry InvoiceKit operational
 /// metadata inside CII without overloading CII business fields.
 pub const INVOICEKIT_CII_METADATA_EXTENSION_URN: &str = "urn:invoicekit:cii:extension:metadata:v1";
@@ -55,6 +59,12 @@ pub const NAMED_MAPPING_DECISIONS: &[CiiMappingDecision] = &[
         class: "cii_document_field_extension",
         representation: "CommercialDocument.extensions[urn:invoicekit:cii:d16b:document-fields].business_process_context_ids[]",
         rationale: "Business-process context is repeatable and identifies business processes; it is never trace_id.",
+    },
+    CiiMappingDecision {
+        element: "ExchangedDocumentContextType/GuidelineSpecifiedDocumentContextParameter",
+        class: "profile_extension_payload",
+        representation: "CommercialDocument.extensions[urn:invoicekit:cii:d16b:profile-context].guideline_context_ids[]",
+        rationale: "Guideline context declares the CII profile or CIUS; it is never a business-process context.",
     },
     CiiMappingDecision {
         element: "ExchangedDocumentContextType/ApplicationSpecifiedDocumentContextParameter[ID=urn:invoicekit:cii:extension:metadata:v1]",

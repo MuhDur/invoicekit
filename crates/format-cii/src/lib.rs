@@ -312,6 +312,7 @@ struct ParseState {
     metadata_source_system: Option<String>,
     cii_buyer_reference: Option<String>,
     cii_business_process_context_ids: Vec<String>,
+    cii_guideline_context_ids: Vec<String>,
     current_context_parameter: Option<DocumentContextParameterBuilder>,
     supplier: PartyBuilder,
     customer: PartyBuilder,
@@ -660,6 +661,11 @@ impl ParseState {
                     self.cii_business_process_context_ids.push(id);
                 }
             }
+            DocumentContextKind::Guideline => {
+                if let Some(id) = parameter.id.filter(|id| id != CORE_GUIDELINE_ID) {
+                    self.cii_guideline_context_ids.push(id);
+                }
+            }
             DocumentContextKind::Application => {
                 if parameter.id.as_deref() == Some(mapping::INVOICEKIT_CII_METADATA_EXTENSION_URN) {
                     if let Some(value) = parameter.value {
@@ -713,6 +719,12 @@ impl ParseState {
             extensions.push(JurisdictionExtension::new(
                 mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN,
                 Value::Object(cii_document_fields),
+            )?);
+        }
+        if !self.cii_guideline_context_ids.is_empty() {
+            extensions.push(JurisdictionExtension::new(
+                mapping::CII_PROFILE_CONTEXT_EXTENSION_URN,
+                json_object_array("guideline_context_ids", self.cii_guideline_context_ids),
             )?);
         }
         let due_date = self.due_date.map(DateOnly::new).transpose()?;
@@ -786,6 +798,7 @@ impl ParseState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DocumentContextKind {
     BusinessProcess,
+    Guideline,
     Application,
 }
 
@@ -793,6 +806,7 @@ impl DocumentContextKind {
     fn from_element(name: &str) -> Option<Self> {
         match name {
             "BusinessProcessSpecifiedDocumentContextParameter" => Some(Self::BusinessProcess),
+            "GuidelineSpecifiedDocumentContextParameter" => Some(Self::Guideline),
             "ApplicationSpecifiedDocumentContextParameter" => Some(Self::Application),
             _ => None,
         }
@@ -801,6 +815,7 @@ impl DocumentContextKind {
     const fn element_name(self) -> &'static str {
         match self {
             Self::BusinessProcess => "BusinessProcessSpecifiedDocumentContextParameter",
+            Self::Guideline => "GuidelineSpecifiedDocumentContextParameter",
             Self::Application => "ApplicationSpecifiedDocumentContextParameter",
         }
     }
@@ -1016,23 +1031,7 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
     xml.push_str(r#"" xmlns:ram=""#);
     write_xml_attr(CII_RAM_NAMESPACE_URI, &mut xml);
     xml.push_str(r#"">"#);
-    xml.push_str("<rsm:ExchangedDocumentContext>");
-    for value in cii_document_field_values(document, "business_process_context_ids") {
-        write_context_parameter(
-            &mut xml,
-            "ram:BusinessProcessSpecifiedDocumentContextParameter",
-            value,
-            None,
-        );
-    }
-    write_invoicekit_metadata_context_parameter(&mut xml, &document.meta)?;
-    write_context_parameter(
-        &mut xml,
-        "ram:GuidelineSpecifiedDocumentContextParameter",
-        CORE_GUIDELINE_ID,
-        None,
-    );
-    xml.push_str("</rsm:ExchangedDocumentContext>");
+    write_document_context(&mut xml, document)?;
 
     xml.push_str("<rsm:ExchangedDocument>");
     write_text_element(
@@ -1109,6 +1108,39 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
     Ok(xml)
 }
 
+fn write_document_context(xml: &mut String, document: &CommercialDocument) -> Result<(), CiiError> {
+    xml.push_str("<rsm:ExchangedDocumentContext>");
+    for value in cii_document_field_values(document, "business_process_context_ids") {
+        write_context_parameter(
+            xml,
+            "ram:BusinessProcessSpecifiedDocumentContextParameter",
+            value,
+            None,
+        );
+    }
+    write_invoicekit_metadata_context_parameter(xml, &document.meta)?;
+    let guideline_context_ids = profile_context_values(document, "guideline_context_ids");
+    if guideline_context_ids.is_empty() {
+        write_context_parameter(
+            xml,
+            "ram:GuidelineSpecifiedDocumentContextParameter",
+            CORE_GUIDELINE_ID,
+            None,
+        );
+    } else {
+        for value in guideline_context_ids {
+            write_context_parameter(
+                xml,
+                "ram:GuidelineSpecifiedDocumentContextParameter",
+                value,
+                None,
+            );
+        }
+    }
+    xml.push_str("</rsm:ExchangedDocumentContext>");
+    Ok(())
+}
+
 fn write_context_parameter(xml: &mut String, container: &str, id: &str, value: Option<&str>) {
     xml.push('<');
     xml.push_str(container);
@@ -1159,6 +1191,26 @@ fn cii_document_field_values<'a>(document: &'a CommercialDocument, key: &str) ->
         .and_then(Value::as_array)
         .map(|items| items.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default()
+}
+
+fn profile_context_values<'a>(document: &'a CommercialDocument, key: &str) -> Vec<&'a str> {
+    document
+        .extensions
+        .iter()
+        .find(|extension| extension.urn == mapping::CII_PROFILE_CONTEXT_EXTENSION_URN)
+        .and_then(|extension| extension.payload.get(key))
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default()
+}
+
+fn json_object_array(key: &str, values: Vec<String>) -> Value {
+    let mut payload = Map::new();
+    payload.insert(
+        key.to_owned(),
+        Value::Array(values.into_iter().map(Value::String).collect()),
+    );
+    Value::Object(payload)
 }
 
 fn write_party(xml: &mut String, container: &str, party: &Party) -> Result<(), CiiError> {
@@ -1703,8 +1755,29 @@ mod tests {
     }
 
     #[test]
+    fn serializer_emits_profile_guideline_context() {
+        let mut document = fixture(DocumentType::Invoice, 24);
+        document.extensions.push(
+            JurisdictionExtension::new(
+                mapping::CII_PROFILE_CONTEXT_EXTENSION_URN,
+                json!({
+                    "guideline_context_ids": [
+                        "urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic"
+                    ]
+                }),
+            )
+            .unwrap(),
+        );
+
+        let xml = to_xml(&document).unwrap();
+        assert!(xml.contains("GuidelineSpecifiedDocumentContextParameter"));
+        assert!(xml.contains("urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic"));
+        assert_eq!(from_xml(&xml).unwrap(), document);
+    }
+
+    #[test]
     fn mapping_decisions_name_standard_field_boundaries() {
-        assert_eq!(mapping::NAMED_MAPPING_DECISIONS.len(), 3);
+        assert_eq!(mapping::NAMED_MAPPING_DECISIONS.len(), 4);
         assert!(mapping::NAMED_MAPPING_DECISIONS.iter().any(|decision| {
             decision.element == "HeaderTradeAgreementType/BuyerReference"
                 && decision.class == "cii_document_field_extension"
@@ -1718,6 +1791,15 @@ mod tests {
                 && decision
                     .representation
                     .contains("business_process_context_ids[]")
+        }));
+        assert!(mapping::NAMED_MAPPING_DECISIONS.iter().any(|decision| {
+            decision.element
+                == "ExchangedDocumentContextType/GuidelineSpecifiedDocumentContextParameter"
+                && decision.class == "profile_extension_payload"
+                && decision.representation.contains("guideline_context_ids[]")
+                && decision
+                    .rationale
+                    .contains("never a business-process context")
         }));
     }
 
