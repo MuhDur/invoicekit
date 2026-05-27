@@ -254,12 +254,41 @@ public final class ValidatorSidecar {
 
     private static ValidationOutcome validateXml(BackendConfig config, String xml, JsonNode params) {
         ArrayNode results = MAPPER.createArrayNode();
+        String rootElement;
         try {
-            String rootElement = parseRootElement(xml);
-            return new ValidationOutcome(true, rootElement, results);
+            rootElement = parseRootElement(xml);
         } catch (ParserConfigurationException | SAXException | IOException ex) {
             results.add(wellFormednessFinding(config, params, ex));
             return new ValidationOutcome(false, null, results);
+        }
+
+        // 7psv: dispatch to the real domain validator (KoSIT or
+        // phive) when the request asks for a non-smoke profile.
+        // The smoke contract (profile="contract-smoke") stays on
+        // the well-formedness-only path so the p95 latency gate
+        // and the existing services/validator-smoke.py harness
+        // continue to work unchanged.
+        String profile = params.path("profile").asText("contract-smoke");
+        String traceId = params.path("trace_id").asText(null);
+        if ("contract-smoke".equals(profile)) {
+            return new ValidationOutcome(true, rootElement, results);
+        }
+
+        switch (config.backend()) {
+            case "jvm:phive" -> {
+                PhiveReport.Outcome outcome = PhiveReport.run(xml, profile, traceId, MAPPER);
+                return new ValidationOutcome(outcome.valid(), rootElement, outcome.results());
+            }
+            case "jvm:kosit" -> {
+                KositReport.Outcome outcome = KositReport.run(xml, profile, traceId, MAPPER);
+                return new ValidationOutcome(outcome.valid(), rootElement, outcome.results());
+            }
+            default -> {
+                // jvm:saxon falls back to well-formedness-only for
+                // now; T-031 will add Saxon-driven Schematron once
+                // the rust-side rule pack is ready to consume it.
+                return new ValidationOutcome(true, rootElement, results);
+            }
         }
     }
 

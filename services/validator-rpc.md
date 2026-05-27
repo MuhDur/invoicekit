@@ -21,6 +21,31 @@ gate. Full domain rule invocation through KoSIT, phive, and Saxon is owned by th
 downstream validator-parity beads and must not be inferred from this contract
 smoke harness alone.
 
+### Profile-driven dispatch (7psv)
+
+The sidecar picks one of two paths based on `params.profile`:
+
+- `params.profile = "contract-smoke"` (or absent) — XML
+  well-formedness only. This preserves the T-030 contract surface
+  and the `services/validator-smoke.py` p95 latency gate.
+- Any other profile — the sidecar dispatches to its backend's
+  real rule engine: `jvm:phive` calls
+  `com.helger.phive.peppol.PeppolValidation.initStandard(...)`
+  and runs the latest Peppol BIS Billing 3.0 EN 16931 Schematron
+  pipeline; `jvm:kosit` calls
+  `de.kosit.validationtool.api.DefaultCheck.checkInput(...)`
+  against the scenarios bundle at the path in the
+  `INVOICEKIT_VALIDATOR_KOSIT_SCENARIOS` env var; `jvm:saxon`
+  currently still falls back to well-formedness pending T-031
+  generalisation.
+
+Findings from either backend land in `result.results[]` shaped as
+`{rule_id, severity, term, location, message, citation,
+suggested_fix, trace}`. `rule_id` carries the oracle's native
+identifier (`BR-CO-15`, `BR-04`, etc) so the rust side can map
+each finding back to its EN 16931 / Peppol business term without
+re-interpreting the Schematron output.
+
 ## Request
 
 ```json
