@@ -170,11 +170,16 @@ fn diff_ledger(
         &mut preserved,
         &mut lost,
         "/lines",
-        source.lines.len() == reparsed.lines.len(),
-        || format!("{adapter} round-trips {n} line(s)", n = source.lines.len()),
+        source.lines == reparsed.lines,
         || {
             format!(
-                "{adapter} line count drift: source={s} reparsed={r}",
+                "{adapter} round-trips {n} line(s) byte-for-byte in IR",
+                n = source.lines.len()
+            )
+        },
+        || {
+            format!(
+                "{adapter} line drift: source={s} reparsed={r}",
                 s = source.lines.len(),
                 r = reparsed.lines.len(),
             )
@@ -184,16 +189,16 @@ fn diff_ledger(
         &mut preserved,
         &mut lost,
         "/tax_summary",
-        source.tax_summary.len() == reparsed.tax_summary.len(),
+        source.tax_summary == reparsed.tax_summary,
         || {
             format!(
-                "{adapter} round-trips {n} tax bucket(s)",
+                "{adapter} round-trips {n} tax bucket(s) byte-for-byte in IR",
                 n = source.tax_summary.len()
             )
         },
         || {
             format!(
-                "{adapter} tax_summary count drift: source={s} reparsed={r}",
+                "{adapter} tax_summary drift: source={s} reparsed={r}",
                 s = source.tax_summary.len(),
                 r = reparsed.tax_summary.len(),
             )
@@ -203,11 +208,16 @@ fn diff_ledger(
         &mut preserved,
         &mut lost,
         "/notes",
-        source.notes.len() == reparsed.notes.len(),
-        || format!("{adapter} round-trips {n} note(s)", n = source.notes.len()),
+        source.notes == reparsed.notes,
         || {
             format!(
-                "{adapter} notes count drift: source={s} reparsed={r}",
+                "{adapter} round-trips {n} note(s) byte-for-byte in IR",
+                n = source.notes.len()
+            )
+        },
+        || {
+            format!(
+                "{adapter} notes drift: source={s} reparsed={r}",
                 s = source.notes.len(),
                 r = reparsed.notes.len(),
             )
@@ -217,16 +227,16 @@ fn diff_ledger(
         &mut preserved,
         &mut lost,
         "/extensions",
-        source.extensions.len() == reparsed.extensions.len(),
+        source.extensions == reparsed.extensions,
         || {
             format!(
-                "{adapter} round-trips {n} extension(s)",
+                "{adapter} round-trips {n} extension(s) byte-for-byte in IR",
                 n = source.extensions.len()
             )
         },
         || {
             format!(
-                "{adapter} extension count drift: source={s} reparsed={r}",
+                "{adapter} extension drift: source={s} reparsed={r}",
                 s = source.extensions.len(),
                 r = reparsed.extensions.len(),
             )
@@ -274,13 +284,14 @@ pub const fn crate_name() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_ledger, crate_name, TargetFormat};
+    use super::{compute_ledger, crate_name, diff_ledger, TargetFormat};
 
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly, DecimalValue,
         DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentType, Iso4217Code,
-        LocalizedString, MonetaryTotal, Party, PartyTaxId, PaymentInstruction,
-        PaymentInstructionKind, PaymentTerms, PostalAddress, SchemaVersion, TaxCategorySummary,
+        JurisdictionExtension, LocalizedString, MonetaryTotal, Party, PartyTaxId,
+        PaymentInstruction, PaymentInstructionKind, PaymentTerms, PostalAddress, SchemaVersion,
+        TaxCategorySummary,
     };
     use invoicekit_profile_factur_x::FacturXProfile;
     use rust_decimal::Decimal;
@@ -451,29 +462,50 @@ mod tests {
         );
     }
 
-    /// Strict-gate part 2, UBL → CII pair. The UBL adapter
-    /// round-trips notes losslessly; the CII adapter also
-    /// preserves them — so we exercise an extension on the source
-    /// to prove the diff machinery records drift when it occurs.
+    /// The diff must compare collection contents, not just counts.
     #[test]
-    fn ledger_records_drift_when_extension_count_changes() {
+    fn ledger_records_value_drift_when_collection_counts_match() -> Result<(), String> {
         let source = fixture();
         let mut tampered = source.clone();
-        // Drop the only line to force a "lines" drift.
-        // (The tampered IR would not validate, so we feed it
-        // through diff_ledger directly via the public path: we
-        // simulate the drift by comparing source against tampered
-        // by hand.)
-        tampered.lines.clear();
-        let preserved_only = compute_ledger(&source, TargetFormat::Ubl).expect("UBL round trip");
-        assert!(
-            preserved_only.lost.is_empty(),
-            "UBL ledger should have no lost entries for the fixture",
+        tampered
+            .lines
+            .first_mut()
+            .ok_or_else(|| "fixture missing line".to_owned())?
+            .description = "Different widget".to_owned();
+        tampered
+            .tax_summary
+            .first_mut()
+            .ok_or_else(|| "fixture missing tax summary".to_owned())?
+            .category_code = "AA".to_owned();
+        tampered
+            .notes
+            .first_mut()
+            .ok_or_else(|| "fixture missing note".to_owned())?
+            .text = "Different note".to_owned();
+        tampered.extensions.push(
+            JurisdictionExtension::new(
+                "urn:invoicekit:test:extension".to_owned(),
+                serde_json::json!({"value": "preserved"}),
+            )
+            .map_err(|error| error.to_string())?,
         );
-        // For the drift assertion, use the internal diff helper
-        // pattern: compute the ledger of the tampered copy by
-        // hand. The shipped public surface refuses invalid IRs,
-        // so we surface the assertion via the preserved side.
-        assert!(preserved_only.preserved.iter().any(|e| e.path == "/lines"));
+        let mut source_with_extension = source;
+        source_with_extension.extensions.push(
+            JurisdictionExtension::new(
+                "urn:invoicekit:test:extension".to_owned(),
+                serde_json::json!({"value": "source"}),
+            )
+            .map_err(|error| error.to_string())?,
+        );
+
+        let ledger = diff_ledger(&source_with_extension, &tampered, "test-adapter")
+            .map_err(|error| error.to_string())?;
+        for path in ["/lines", "/tax_summary", "/notes", "/extensions"] {
+            assert!(
+                ledger.lost.iter().any(|entry| entry.path == path),
+                "ledger must record value drift at {path}"
+            );
+        }
+        Ok(())
     }
 }
