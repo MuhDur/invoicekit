@@ -450,11 +450,11 @@
       ]
     },
     "JurisdictionExtension": {
-      "description": "Polymorphic jurisdiction or profile extension payload.",
+      "description": "Polymorphic jurisdiction or profile extension payload.\n\n # URN scheme casing (ebaq)\n\n RFC 8141 declares the URN scheme name case-insensitive. Real producers\n in the wild (notably some legacy XML exporters) emit `URN:` or `Urn:`.\n Both [`JurisdictionExtension::new`] and the [`Deserialize`] implementation\n accept any casing of the scheme prefix and normalise it to the canonical\n lowercase `urn:` so equality checks remain stable.\n\n The namespace identifier and namespace-specific string are preserved\n verbatim. Rule-pack URN registries stay as shipped — Peppol's UNCL1001\n codes are lowercase by definition, ZUGFeRD profile URNs are mixed case,\n and changing those bytes would break canonical signing payloads.",
       "type": "object",
       "properties": {
         "urn": {
-          "description": "Uniform resource name for the extension schema.",
+          "description": "Uniform resource name for the extension schema (canonical lowercase\n `urn:` prefix).",
           "type": "string"
         },
         "payload": {
