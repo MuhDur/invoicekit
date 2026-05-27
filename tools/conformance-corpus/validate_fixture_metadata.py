@@ -19,7 +19,7 @@ CORPUS_ROOT = REPO / "conformance-corpus"
 SCHEMA_PATH = CORPUS_ROOT / "fixture-metadata.schema.json"
 ARTIFACT_SUFFIXES = frozenset({".json", ".xml", ".pdf"})
 IGNORED_ARTIFACT_PATHS = frozenset({Path("fixture-metadata.schema.json")})
-IGNORED_ARTIFACT_DIRS = frozenset({"generators"})
+IGNORED_ARTIFACT_DIRS = frozenset({"generators", "fuzz"})
 REFERENCE_PATH_FIELDS = (
     ("license", "evidence_path"),
     ("pii", "redaction_report_path"),
