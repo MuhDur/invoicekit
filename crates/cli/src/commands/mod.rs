@@ -7,4 +7,5 @@
 //! `invoicekit <subcommand>` invocation and any per-subcommand helper
 //! binary (e.g. `invoicekit-cli --bin migrate-archive`).
 
+pub mod capabilities;
 pub mod migrate_archive;

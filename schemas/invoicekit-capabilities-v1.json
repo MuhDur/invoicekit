@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://invoicekit.io/schemas/capabilities/v1",
+  "title": "InvoiceKit Capability Matrix",
+  "description": "Per-route, per-scenario, per-date capability advertisements for sending compliant electronic invoices. Each entry describes which profiles/transports are accepted, sourced from named jurisdictional manifests, with an explicit confidence rating and a validity window. Consumers must honor `stale_after_days` and downgrade results when a query date falls inside a stale window.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "description": "Frozen schema version of this manifest. Bumped only with a real migration."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp when this matrix was assembled from its sources."
+    },
+    "stale_after_days": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of days after `source.fetched_at` an entry is considered stale. Stale entries are still returned but flagged."
+    },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/CapabilityEntry" }
+    }
+  },
+  "required": ["schema_version", "generated_at", "stale_after_days", "entries"],
+  "$defs": {
+    "CapabilityEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "route_from": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}$",
+          "description": "ISO 3166-1 alpha-2 of the sender's country."
+        },
+        "route_to": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}$",
+          "description": "ISO 3166-1 alpha-2 of the recipient's country."
+        },
+        "scenario": {
+          "type": "string",
+          "enum": ["B2B", "B2C", "B2G"],
+          "description": "Commercial scenario."
+        },
+        "valid_from": {
+          "type": "string",
+          "format": "date"
+        },
+        "valid_until": {
+          "type": ["string", "null"],
+          "format": "date"
+        },
+        "profiles": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/AcceptedProfile" }
+        },
+        "source": { "$ref": "#/$defs/SourceProvenance" }
+      },
+      "required": ["route_from", "route_to", "scenario", "valid_from", "profiles", "source"]
+    },
+    "AcceptedProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable identifier of the accepted profile (e.g. 'xrechnung-3.0', 'peppol-bis-3.0', 'factur-x-1.0.06')."
+        },
+        "format": {
+          "type": "string",
+          "enum": ["UBL", "CII", "Factur-X", "XRechnung", "Peppol BIS", "Peppol PINT", "FatturaPA", "Chorus Pro"]
+        },
+        "transport": {
+          "type": "string",
+          "enum": ["peppol", "email", "portal", "as4-direct", "manual"]
+        }
+      },
+      "required": ["id", "format", "transport"]
+    },
+    "SourceProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "url": { "type": "string", "format": "uri" },
+        "fetched_at": { "type": "string", "format": "date-time" },
+        "confidence": {
+          "type": "string",
+          "enum": ["authoritative", "high", "medium", "low"],
+          "description": "Confidence in the source. 'authoritative' = official regulator publication; 'low' = community-maintained or inferred."
+        }
+      },
+      "required": ["name", "fetched_at", "confidence"]
+    }
+  }
+}
