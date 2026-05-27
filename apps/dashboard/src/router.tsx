@@ -1,11 +1,13 @@
 import { Link, Outlet, createRootRoute, createRoute, createRouter, useRouterState } from "@tanstack/react-router";
 import { Suspense } from "react";
 import { Activity, Gauge, Inbox, Settings } from "lucide-react";
+import { AuditRoute } from "../routes/audit";
 import { DocumentsRoute } from "../routes/documents";
 import { OverviewRoute } from "../routes/overview";
 
 function AppShell() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const auditActive = pathname.startsWith("/audit");
   const overviewActive = pathname === "/" || pathname === "/overview";
   const documentsActive = pathname.startsWith("/documents");
 
@@ -28,10 +30,10 @@ function AppShell() {
             <Inbox size={18} aria-hidden="true" />
             Documents
           </Link>
-          <span className="nav-item nav-item-disabled">
+          <Link className="nav-item" data-active={auditActive ? true : undefined} to="/audit">
             <Activity size={18} aria-hidden="true" />
-            Activity
-          </span>
+            Audit
+          </Link>
           <span className="nav-item nav-item-disabled">
             <Settings size={18} aria-hidden="true" />
             Settings
@@ -70,7 +72,13 @@ const documentsRoute = createRoute({
   component: DocumentsRoute
 });
 
-const routeTree = rootRoute.addChildren([overviewIndexRoute, overviewRoute, documentsRoute]);
+const auditRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/audit",
+  component: AuditRoute
+});
+
+const routeTree = rootRoute.addChildren([overviewIndexRoute, overviewRoute, documentsRoute, auditRoute]);
 
 export const router = createRouter({
   defaultPreload: "intent",
