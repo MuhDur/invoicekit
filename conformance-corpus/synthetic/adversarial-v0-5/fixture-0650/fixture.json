@@ -1,0 +1,952 @@
+{
+  "$schema": "https://gobl.org/draft-0/bill/invoice",
+  "type": "invoice",
+  "id": "adv-high-line-count",
+  "code": "ADV-high-line-count",
+  "issue_date": "2026-05-27",
+  "due_date": "2026-06-26",
+  "currency": "EUR",
+  "supplier": {
+    "id": "supplier-1",
+    "name": "supplier 1 GmbH",
+    "tax_id": {
+      "country": "DE",
+      "code": "DE000000001",
+      "scheme": "vat"
+    },
+    "addresses": [
+      {
+        "street": "supplier Street 1",
+        "locality": "Berlin",
+        "region": null,
+        "code": "10001",
+        "country": "DE"
+      }
+    ],
+    "people": [
+      {
+        "name": "supplier contact"
+      }
+    ]
+  },
+  "customer": {
+    "id": "customer-2",
+    "name": "customer 2 GmbH",
+    "tax_id": {
+      "country": "FR",
+      "code": "DE000000002",
+      "scheme": "vat"
+    },
+    "addresses": [
+      {
+        "street": "customer Street 2",
+        "locality": "Berlin",
+        "region": null,
+        "code": "10002",
+        "country": "FR"
+      }
+    ],
+    "people": [
+      {
+        "name": "customer contact"
+      }
+    ]
+  },
+  "payment": {
+    "terms": {
+      "description": "Net 30",
+      "due_date": "2026-06-26"
+    },
+    "instructions": [
+      {
+        "kind": "iban_bic",
+        "account": "DE89370400440532013000",
+        "reference": "RF0001"
+      }
+    ]
+  },
+  "lines": [
+    {
+      "i": 1,
+      "code": "L1",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 2,
+      "code": "L2",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 3,
+      "code": "L3",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 4,
+      "code": "L4",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 5,
+      "code": "L5",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 6,
+      "code": "L6",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 7,
+      "code": "L7",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 8,
+      "code": "L8",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 9,
+      "code": "L9",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 10,
+      "code": "L10",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 11,
+      "code": "L11",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 12,
+      "code": "L12",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 13,
+      "code": "L13",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 14,
+      "code": "L14",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 15,
+      "code": "L15",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 16,
+      "code": "L16",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 17,
+      "code": "L17",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 18,
+      "code": "L18",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 19,
+      "code": "L19",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 20,
+      "code": "L20",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 21,
+      "code": "L21",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 22,
+      "code": "L22",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 23,
+      "code": "L23",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 24,
+      "code": "L24",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 25,
+      "code": "L25",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 26,
+      "code": "L26",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 27,
+      "code": "L27",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 28,
+      "code": "L28",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 29,
+      "code": "L29",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 30,
+      "code": "L30",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 31,
+      "code": "L31",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 32,
+      "code": "L32",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 33,
+      "code": "L33",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 34,
+      "code": "L34",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 35,
+      "code": "L35",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 36,
+      "code": "L36",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 37,
+      "code": "L37",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 38,
+      "code": "L38",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 39,
+      "code": "L39",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 40,
+      "code": "L40",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 41,
+      "code": "L41",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 42,
+      "code": "L42",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 43,
+      "code": "L43",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 44,
+      "code": "L44",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 45,
+      "code": "L45",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 46,
+      "code": "L46",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 47,
+      "code": "L47",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 48,
+      "code": "L48",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 49,
+      "code": "L49",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    },
+    {
+      "i": 50,
+      "code": "L50",
+      "quantity": "1",
+      "item": {
+        "name": "Line item",
+        "price": "1.00",
+        "unit": "EA"
+      },
+      "sum": "1.00",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "sum": "50.00",
+    "total": "50.00",
+    "total_with_tax": "59.50",
+    "payable": "59.50",
+    "tax": {
+      "categories": [
+        {
+          "code": "S",
+          "rates": [
+            {
+              "key": "standard",
+              "amount": "9.50",
+              "base": "50.00",
+              "percent": "19.00"
+            }
+          ]
+        }
+      ],
+      "sum": "9.50"
+    }
+  },
+  "meta": {
+    "tenant_id": "tenant-adversarial",
+    "trace_id": "trace-adversarial",
+    "source_system": null
+  },
+  "t122_variation": {
+    "scenario": "high-line-count",
+    "variation": 4,
+    "serializer": "format-gobl"
+  }
+}

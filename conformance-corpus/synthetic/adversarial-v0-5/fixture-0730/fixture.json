@@ -1,0 +1,119 @@
+{
+  "$schema": "https://gobl.org/draft-0/bill/invoice",
+  "type": "invoice",
+  "id": "adv-unicode-stress",
+  "code": "ADV-unicode-stress",
+  "issue_date": "2026-05-27",
+  "due_date": "2026-06-26",
+  "currency": "EUR",
+  "supplier": {
+    "id": "supplier-1",
+    "name": "オフィス家具株式会社 - مكتب الأثاث",
+    "tax_id": {
+      "country": "DE",
+      "code": "DE000000001",
+      "scheme": "vat"
+    },
+    "addresses": [
+      {
+        "street": "supplier Street 1",
+        "locality": "Berlin",
+        "region": null,
+        "code": "10001",
+        "country": "DE"
+      }
+    ],
+    "people": [
+      {
+        "name": "supplier contact"
+      }
+    ]
+  },
+  "customer": {
+    "id": "customer-2",
+    "name": "customer 2 GmbH",
+    "tax_id": {
+      "country": "FR",
+      "code": "DE000000002",
+      "scheme": "vat"
+    },
+    "addresses": [
+      {
+        "street": "customer Street 2",
+        "locality": "Berlin",
+        "region": null,
+        "code": "10002",
+        "country": "FR"
+      }
+    ],
+    "people": [
+      {
+        "name": "customer contact"
+      }
+    ]
+  },
+  "payment": {
+    "terms": {
+      "description": "Net 30",
+      "due_date": "2026-06-26"
+    },
+    "instructions": [
+      {
+        "kind": "iban_bic",
+        "account": "DE89370400440532013000",
+        "reference": "RF0001"
+      }
+    ]
+  },
+  "lines": [
+    {
+      "i": 1,
+      "code": "L1",
+      "quantity": "1",
+      "item": {
+        "name": "Description with full-width CJK 日本語 + Arabic مرحبا + ZWJ emoji 👨‍👩‍👧‍👦",
+        "price": "123.45",
+        "unit": "EA"
+      },
+      "sum": "123.45",
+      "taxes": [
+        {
+          "cat": "VAT",
+          "rate": "S"
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "sum": "123.45",
+    "total": "123.45",
+    "total_with_tax": "146.91",
+    "payable": "146.91",
+    "tax": {
+      "categories": [
+        {
+          "code": "S",
+          "rates": [
+            {
+              "key": "standard",
+              "amount": "23.46",
+              "base": "123.45",
+              "percent": "19.00"
+            }
+          ]
+        }
+      ],
+      "sum": "23.46"
+    }
+  },
+  "meta": {
+    "tenant_id": "tenant-adversarial",
+    "trace_id": "trace-adversarial",
+    "source_system": null
+  },
+  "t122_variation": {
+    "scenario": "unicode-stress",
+    "variation": 0,
+    "serializer": "format-gobl"
+  }
+}
