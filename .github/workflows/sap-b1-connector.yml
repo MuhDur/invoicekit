@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+name: SAP B1 connector
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: sap-b1-connector-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  static-conformance:
+    name: SAP B1 package shape
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 -m pip install pytest
+      - run: python3 -m pytest addons/invoicekit-b1/tests -q
+
+  sap-sdk:
+    name: SAP B1 SDK package gate
+    runs-on: windows-latest
+    env:
+      SAP_B1_SDK_ROOT: ${{ secrets.SAP_B1_SDK_ROOT }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Explain skipped SDK gate
+        if: ${{ env.SAP_B1_SDK_ROOT == '' }}
+        shell: pwsh
+        run: |
+          Write-Host "SAP Business One SDK root is not configured."
+          Write-Host "Static package conformance ran in the companion job."
+      - name: Verify SAP SDK tools
+        if: ${{ env.SAP_B1_SDK_ROOT != '' }}
+        shell: pwsh
+        run: |
+          $regDataGen = Join-Path $env:SAP_B1_SDK_ROOT "Tools\AddOnRegDataGen\AddOnRegDataGen.exe"
+          if (-not (Test-Path $regDataGen)) {
+            throw "AddOnRegDataGen.exe was not found at $regDataGen"
+          }
+      - name: Build add-on against SAP SDK
+        if: ${{ env.SAP_B1_SDK_ROOT != '' }}
+        shell: pwsh
+        run: |
+          dotnet build addons/invoicekit-b1/src/InvoiceKit.B1Addon.csproj `
+            -p:SapB1SdkRoot="$env:SAP_B1_SDK_ROOT" `
+            -warnaserror

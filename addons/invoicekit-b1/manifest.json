@@ -1,0 +1,30 @@
+{
+  "id": "invoicekit-b1",
+  "name": "InvoiceKit SAP Business One Add-on",
+  "publisher": "The InvoiceKit Authors",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "sapBusinessOne": {
+    "minimumVersion": "10.0 FP2410",
+    "sdk": "SAP Business One UI API and DI API",
+    "registrationInput": "package/addon-registration.input.xml"
+  },
+  "entryPoint": "InvoiceKit.B1Addon.exe",
+  "sidecar": {
+    "defaultUrl": "http://127.0.0.1:8088",
+    "transmitEndpoint": "/v1/transmit"
+  },
+  "menu": {
+    "parent": "1280",
+    "uid": "INVOICEKIT_SEND",
+    "caption": "Send via InvoiceKit"
+  },
+  "artifacts": [
+    "src/InvoiceKit.B1Addon.csproj",
+    "src/Program.cs",
+    "src/InvoiceKitApplication.cs",
+    "src/InvoiceKitSidecarClient.cs",
+    "src/InvoiceKitSettings.cs",
+    "src/SapInvoiceSnapshot.cs"
+  ]
+}
