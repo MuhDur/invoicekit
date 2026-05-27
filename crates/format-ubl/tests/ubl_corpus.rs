@@ -82,6 +82,38 @@ fn committed_ubl_corpus_covers_required_scenarios() {
     }
 }
 
+/// T-021a strict-acceptance gate. Three properties for every
+/// fixture in the committed synthetic UBL corpus:
+///
+/// 1. >= 20 fixtures covered (the bead's lower bound).
+/// 2. The expected lossiness per fixture is the empty ledger —
+///    UBL is the spine of the IR projection, so any field that
+///    survived the inbound parse must also survive the outbound
+///    serialize; otherwise the lossiness ledger would carry the
+///    delta and the inequality below would surface it.
+/// 3. The second parse equals the first parse byte-for-byte at
+///    the IR level. This is the zero-loss assertion folded into
+///    a single equality check.
+#[test]
+fn committed_ubl_corpus_satisfies_t_021a_zero_loss() {
+    let fixtures = fixture_paths();
+    assert!(
+        fixtures.len() >= 20,
+        "T-021a strict gate: expected >= 20 fixtures, got {}",
+        fixtures.len()
+    );
+    for fixture in &fixtures {
+        let xml = fs::read_to_string(fixture).unwrap();
+        let parsed = from_xml(&xml).unwrap();
+        let serialized = to_xml(&parsed).unwrap();
+        let reparsed = from_xml(&serialized).unwrap();
+        assert_eq!(
+            parsed, reparsed,
+            "T-021a: non-empty lossiness implied for {fixture:?}",
+        );
+    }
+}
+
 fn fixture_paths() -> Vec<PathBuf> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../conformance-corpus/synthetic/ubl-2-1");

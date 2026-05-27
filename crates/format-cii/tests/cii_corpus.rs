@@ -73,6 +73,32 @@ fn committed_cii_corpus_covers_required_scenarios() {
     }
 }
 
+/// T-021a strict-acceptance gate, CII flavour. Mirrors the UBL
+/// assertion in `format-ubl/tests/ubl_corpus.rs`:
+///
+/// 1. >= 20 fixtures covered (bead lower bound).
+/// 2. Zero lossiness per fixture, asserted indirectly by IR
+///    equality across the parse -> serialize -> parse cycle.
+#[test]
+fn committed_cii_corpus_satisfies_t_021a_zero_loss() {
+    let fixtures = fixture_paths();
+    assert!(
+        fixtures.len() >= 20,
+        "T-021a strict gate: expected >= 20 CII fixtures, got {}",
+        fixtures.len()
+    );
+    for fixture in &fixtures {
+        let xml = fs::read_to_string(fixture).unwrap();
+        let parsed = from_xml(&xml).unwrap();
+        let serialized = to_xml(&parsed).unwrap();
+        let reparsed = from_xml(&serialized).unwrap();
+        assert_eq!(
+            parsed, reparsed,
+            "T-021a: non-empty lossiness implied for {fixture:?}",
+        );
+    }
+}
+
 fn fixture_paths() -> Vec<PathBuf> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../conformance-corpus/synthetic/cii-d16b-profiled");
