@@ -2184,6 +2184,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoicekit-profile-factur-x"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-format-cii",
+ "invoicekit-ir",
+ "rust_decimal",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "invoicekit-profile-peppol-bis"
 version = "0.0.0"
 dependencies = [
