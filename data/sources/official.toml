@@ -1,0 +1,82 @@
+[registry]
+version = "2026-05-27"
+generated_at = "2026-05-27T00:00:00Z"
+signature_alg = "sha256:identity"
+signature = "18f595c7bdfd2646a0124bb49cab6075afb39dba015e0d6d80a1fc10323199a5"
+
+[[sources]]
+id = "de-kosit-xrechnung"
+name = "KoSIT XRechnung Schematron releases"
+jurisdiction = "DE"
+url = "https://github.com/itplr-kosit/xrechnung-schematron/releases.atom"
+cadence = "daily"
+kind = "rulepack"
+confidence = "official-source"
+proposed_action = "Review the KoSIT XRechnung release notes, update the XRechnung rule pack manifest, and run the KoSIT parity suite before closing the follow-up."
+headers = { Accept = "application/atom+xml, application/xml;q=0.9, */*;q=0.8", "User-Agent" = "Mozilla/5.0 InvoiceKit-source-watch/0.1" }
+
+[[sources]]
+id = "it-agenzia-fatturapa"
+name = "FatturaPA technical documentation"
+jurisdiction = "IT"
+url = "https://www.fatturapa.gov.it/export/documenti/Specifiche_tecniche_del_formato_FatturaPA_V1.3.1.pdf"
+cadence = "daily"
+kind = "rulepack"
+confidence = "official-source"
+proposed_action = "Review the FatturaPA/SdI documentation change, update the Italy SDI manifest or validator fixtures, and record the effective date in the rule pack."
+headers = { Accept = "application/pdf, */*;q=0.8", "User-Agent" = "Mozilla/5.0 InvoiceKit-source-watch/0.1" }
+
+[[sources]]
+id = "pl-ksef-api"
+name = "Poland KSeF API documentation"
+jurisdiction = "PL"
+url = "https://www.gov.pl/web/kas/api-krajowego-system-e-faktur"
+cadence = "daily"
+kind = "gateway-api"
+confidence = "official-source"
+proposed_action = "Review the KSeF API version history and endpoint changes, update the Poland KSeF gateway manifest, and refresh sandbox cassettes if the API contract changed."
+headers = { Accept = "text/html, application/xhtml+xml;q=0.9, */*;q=0.8", "User-Agent" = "Mozilla/5.0 InvoiceKit-source-watch/0.1", "Accept-Language" = "en-US,en;q=0.9" }
+
+[[sources]]
+id = "sa-zatca-einvoicing"
+name = "ZATCA e-invoicing specifications"
+jurisdiction = "SA"
+url = "https://www.zatca.gov.sa/en/E-Invoicing/Pages/default.aspx"
+cadence = "daily"
+kind = "rulepack"
+confidence = "official-source"
+proposed_action = "Review the ZATCA e-invoicing specification or guideline change, update the Saudi rule pack/gateway manifest, and rerun ZATCA XML validation fixtures."
+headers = { Accept = "text/html, application/xhtml+xml;q=0.9, */*;q=0.8", "User-Agent" = "Mozilla/5.0 InvoiceKit-source-watch/0.1", "Accept-Language" = "en-US,en;q=0.9" }
+
+[[sources]]
+id = "in-gst-irp"
+name = "India GST e-Invoice IRP overview"
+jurisdiction = "IN"
+url = "https://www.nic.gov.in/project/gst-e-invoice/"
+cadence = "daily"
+kind = "gateway-api"
+confidence = "official-source"
+proposed_action = "Review the India GST e-Invoice IRP change, update the India GST gateway/source manifest, and refresh IRP sandbox assumptions or cassettes if needed."
+headers = { Accept = "text/html, application/xhtml+xml;q=0.9, */*;q=0.8", "User-Agent" = "Mozilla/5.0 InvoiceKit-source-watch/0.1", "Accept-Language" = "en-US,en;q=0.9" }
+
+[[sources]]
+id = "sg-imda-invoicenow"
+name = "Singapore IMDA InvoiceNow technical playbook"
+jurisdiction = "SG"
+url = "https://www.imda.gov.sg/how-we-can-help/nationwide-e-invoicing-framework/peppol-technical-playbook"
+cadence = "daily"
+kind = "rulepack"
+confidence = "official-source"
+proposed_action = "Review the IMDA InvoiceNow or Singapore Peppol technical change, update Singapore capability/source manifests, and check whether PINT-SG or GST InvoiceNow requirements changed."
+headers = { Accept = "text/html, application/xhtml+xml;q=0.9, */*;q=0.8" }
+
+[[sources]]
+id = "au-ato-einvoicing"
+name = "Australian Taxation Office eInvoicing"
+jurisdiction = "AU"
+url = "https://softwaredevelopers.ato.gov.au/eInvoicing"
+cadence = "daily"
+kind = "capability-source"
+confidence = "official-source"
+proposed_action = "Review the ATO eInvoicing update, update Australia capability/source manifests, and verify whether Peppol participation or government eInvoicing guidance changed."
+headers = { Accept = "text/html, application/xhtml+xml;q=0.9, */*;q=0.8", "User-Agent" = "Mozilla/5.0 InvoiceKit-source-watch/0.1", "Accept-Language" = "en-US,en;q=0.9" }
