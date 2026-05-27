@@ -75,6 +75,66 @@ Out of scope:
 - Evidence bundles (`.invoicekit`) are signed; bundle verification never
   executes shell scripts.
 
+## Release-pipeline gates (T-002 + T-133)
+
+Two distinct tag namespaces produce signed artifacts, each with its
+own gated pipeline. Both gates run **before** any build slot is
+burned, so a newly-disclosed CVE in a transitive dependency cannot
+ride a deploy.
+
+| Namespace | Pipeline | Produces |
+| --- | --- | --- |
+| `v*` | [`.github/workflows/release.yml`](.github/workflows/release.yml) | Library crates + CLI binaries (cross-target) |
+| `hosted-v*` | [`.github/workflows/hosted-release.yml`](.github/workflows/hosted-release.yml) | Hosted-layer binaries: `invoicekit-managed-api-server`, `invoicekit-signer-agent` |
+
+Both pipelines run, in order:
+
+1. `cargo audit --deny warnings` against the RustSec advisory DB.
+2. `cargo deny check` for licenses, banned crates, sources, and
+   advisories (per `deny.toml`).
+3. Strict-mode `cargo build --release --locked`.
+4. CycloneDX SBOM via `cargo cyclonedx`.
+5. Keyless cosign sign-blob over every produced artifact + SBOM.
+6. SLSA-shape provenance attestation via
+   `actions/attest-build-provenance`.
+
+Verifying a downloaded artifact:
+
+```sh
+cosign verify-blob \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github.com/MuhDur/invoicekit/.+@refs/tags/.*' \
+  --bundle invoicekit-managed-api-server.cosign.bundle \
+  invoicekit-managed-api-server
+```
+
+## SBOM consumption
+
+The CycloneDX 1.4 JSON SBOMs uploaded to each GitHub release are the
+canonical inventory of every crate baked into the corresponding
+binary. Downstream operators can feed them into Dependency-Track,
+Trivy, Grype, or their preferred SBOM scanner. The hosted-release
+pipeline uploads one SBOM per hosted binary so a scanner sees the
+exact dependency tree for the service it's about to deploy.
+
+## Advisory process
+
+When a vulnerability is confirmed:
+
+1. The maintainer opens a private GitHub Security Advisory and
+   begins the coordinated-disclosure clock.
+2. The fix lands as a normal PR against `main`, including a
+   regression test pinned in the advisory body.
+3. A patch tag is cut (`vX.Y.Z+1` for the library or `hosted-vX.Y.Z+1`
+   for the hosted layer). The release-pipeline gates re-run, so the
+   tag cannot ship if the fix accidentally regressed another
+   dependency.
+4. The advisory is published with the fix commit hash, the CVE, the
+   affected version range, and (when available) the reporter
+   acknowledgement.
+5. Downstream operators are notified via the GitHub Releases RSS
+   feed and via the `security` discussion category.
+
 ## License of this policy
 
 Apache License 2.0, same as the rest of the project.
