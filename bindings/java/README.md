@@ -1,9 +1,15 @@
 # bindings/java
 
-Non-Rust binding scaffold — not a Cargo workspace member.
+Maven package for the InvoiceKit Java SDK.
 
-This directory is reserved for the java binding per `plans/PLAN.md` §4.1.
-It will consume the stable C ABI exposed by `crates/invoicekit-ffi`
-once the implementing bead lands.
+The baseline API compiles on Java 17 and exposes the stable Engine ABI byte
+contract. Java 22 runtimes use a multi-release FFM provider to call
+`invoicekit-ffi` directly; Java 17 and Java 21 applications can fall back to a
+REST sidecar endpoint.
 
-Scaffolded by bead **invoices-t-001-cargo-workspace-xos**.
+```bash
+mvn -B verify
+```
+
+Native golden tests run when `INVOICEKIT_FFI_LIB` points at a built
+`invoicekit-ffi` shared library and the test JVM is Java 22 or newer.

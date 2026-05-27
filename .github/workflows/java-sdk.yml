@@ -1,0 +1,88 @@
+name: Java SDK
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUSTFLAGS: -D warnings
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  test:
+    name: Java ${{ matrix.java }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            java: "17"
+          - os: ubuntu-latest
+            java: "21"
+          - os: ubuntu-latest
+            java: "22"
+          - os: macos-latest
+            java: "22"
+          - os: windows-latest
+            java: "22"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p invoicekit-ffi --locked
+      - name: Export native library path
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux)
+              echo "INVOICEKIT_FFI_LIB=$GITHUB_WORKSPACE/target/debug/libinvoicekit_ffi.so" >> "$GITHUB_ENV"
+              ;;
+            macOS)
+              echo "INVOICEKIT_FFI_LIB=$GITHUB_WORKSPACE/target/debug/libinvoicekit_ffi.dylib" >> "$GITHUB_ENV"
+              ;;
+            Windows)
+              echo "INVOICEKIT_FFI_LIB=$GITHUB_WORKSPACE/target/debug/invoicekit_ffi.dll" >> "$GITHUB_ENV"
+              ;;
+          esac
+      - run: mvn -B -ntp verify
+        working-directory: bindings/java
+
+  publish:
+    name: Maven Central publish
+    runs-on: ubuntu-latest
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "22"
+          cache: maven
+          server-id: central
+          server-username: CENTRAL_USERNAME
+          server-password: CENTRAL_PASSWORD
+          gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+      - run: mvn -B -ntp -Pcentral-release -Drevision="${GITHUB_REF_NAME#v}" -DskipTests deploy
+        working-directory: bindings/java
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}

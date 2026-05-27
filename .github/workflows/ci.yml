@@ -127,7 +127,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "22"
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
@@ -159,16 +159,8 @@ jobs:
       - run: bun test bindings/node-napi/tests/engine_abi_golden.test.ts
       - run: go test .
         working-directory: bindings/go
-      - run: mkdir -p "$RUNNER_TEMP/invoicekit-java-abi-test"
-      - run: >
-          javac --add-modules jdk.incubator.foreign
-          -d "$RUNNER_TEMP/invoicekit-java-abi-test"
-          bindings/java/src/test/java/dev/invoicekit/AbiGoldenTest.java
-      - run: >
-          java --add-modules jdk.incubator.foreign
-          --enable-native-access=ALL-UNNAMED
-          -cp "$RUNNER_TEMP/invoicekit-java-abi-test"
-          AbiGoldenTest
+      - run: mvn -B -ntp test
+        working-directory: bindings/java
       - run: dotnet run --project bindings/dotnet/InvoiceKit.AbiGolden/InvoiceKit.AbiGolden.csproj
 
   typescript-templates:
