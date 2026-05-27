@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-7a2 country feasibility manifest: Kenya.
+#
+# Kenya's KRA (Kenya Revenue Authority) operates the eTIMS
+# (electronic Tax Invoice Management System): every VAT-registered
+# business must transmit each B2B invoice and B2C receipt to KRA
+# in near-real-time via a KRA-certified ETR (Electronic Tax
+# Register) or VSCU (Virtual Sales Control Unit).
+
+schema_version = "1.0"
+country = "KE"
+country_name = "Kenya"
+program = "eTIMS (electronic Tax Invoice Management System) — KRA"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-7a2-manifest-kenya-4pb"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "KRA — eTIMS portal"
+url = "https://www.kra.go.ke/business/etims/etims-introduction"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Tax Procedures Act (TIMS legal framework)"
+url = "https://www.kra.go.ke/images/publications/Tax_Procedures_Act_Cap_469B.pdf"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "eTIMS API documentation"
+url = "https://www.kra.go.ke/images/publications/eTIMS-online-API-User-guide.pdf"
+kind = "api_documentation"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "partner_gated"
+notes = """
+KRA operates an eTIMS sandbox accessible to taxpayers enrolled
+in the eTIMS programme; software vendors integrate through one
+of the certified ETR/VSCU vendors (Symptai, M-Pesa Pay Solutions,
+Posflow, NCBA Loop). Production access requires a Kenyan KRA
+PIN (Personal Identification Number) and ETIMS enrollment.
+"""
+endpoint = "https://etims-api-sbx.kra.go.ke/etims/v1/transmit"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_KE_KRA_TOKEN"
+
+[production]
+endpoint = "https://etims-api.kra.go.ke/etims/v1/transmit"
+production_credentials_env_var = "INVOICEKIT_PROD_KE_KRA_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_optional"
+qualified_seal_notes = """
+eTIMS authenticates via a per-tenant API token tied to the
+taxpayer's KRA PIN; a qualified electronic signature is not
+required for the API call itself. The trust anchor is the KRA-
+issued invoice signature (signature + verification URL + QR
+code) that the buyer can verify against KRA's central database.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "none"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses providing taxable services to Kenyan customers
+must register for VAT by appointing a Kenyan tax representative
+who holds the KRA PIN. The foreign digital-services VAT regime
+was introduced in 2021; foreign B2C providers can register
+directly under the Digital Service Tax (DST) regime.
+"""
+
+[validator]
+backend = "rest:kra-etims"
+backend_notes = """
+KRA is the authoritative validator: it accepts the eTIMS JSON
+envelope, runs server-side validation, and returns rule-level
+diagnostics. The rust side runs a minimal pre-validator (KRA
+PIN checksum, VAT rate enumeration 16% standard / 8% reduced /
+0% zero-rated, required-field presence) before the REST call.
+"""
+
+[interop]
+formats = ["KRA eTIMS JSON envelope (Kenya proprietary)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+eTIMS is national-format-only. There is no PEPPOL PINT-KE profile.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/kenya"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/kenya"
+
+[follow_ups]
+items = [
+    "Pin a Kenyan ETR/VSCU vendor partner for the hosted layer's KRA PIN-holding entity",
+    "Add support for the eTIMS Buyer Verification API for invoice-validity lookups",
+    "Track the cross-border ASYCUDA integration for import VAT scenarios",
+]

@@ -1,0 +1,111 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-797 country feasibility manifest: Vietnam.
+#
+# Vietnam's GDT (General Department of Taxation) mandates Hoa Don
+# Dien Tu (electronic invoices) for every B2B and B2C transaction
+# since 2022-07-01. The system is a hybrid clearance + reporting
+# model: invoices with verification codes (Ma cua co quan thue)
+# require GDT pre-clearance; invoices without verification codes
+# are post-reported.
+
+schema_version = "1.0"
+country = "VN"
+country_name = "Vietnam"
+program = "Hoa Don Dien Tu (HDDT) — General Department of Taxation"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-797-manifest-vietnam-oy9"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "GDT — Hoa Don Dien Tu portal"
+url = "https://hoadondientu.gdt.gov.vn/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Decree 123/2020/ND-CP (e-invoicing legal framework)"
+url = "https://thuvienphapluat.vn/van-ban/Thuong-mai/Nghi-dinh-123-2020-ND-CP-quy-dinh-hoa-don-chung-tu-455529.aspx"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Circular 78/2021/TT-BTC (HDDT technical specification)"
+url = "https://thuvienphapluat.vn/van-ban/Thue-Phi-Le-Phi/Thong-tu-78-2021-TT-BTC-quy-dinh-hoa-don-chung-tu-488161.aspx"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "partner_gated"
+notes = """
+GDT's HDDT sandbox is operated through approved service providers
+(To Chuc Cung Cap Dich Vu HDDT). The GDT does not run a public
+developer sandbox; software vendors integrate via one of the
+authorised providers (VNPT, Viettel, FPT, Misa, BKAV, Vinabox).
+Production access requires a Vietnamese tax code (Ma so thue)
+and provider enrollment.
+"""
+endpoint = "https://hoadondientu-test.gdt.gov.vn/api/v1/submit"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_VN_GDT_TOKEN"
+
+[production]
+endpoint = "https://hoadondientu.gdt.gov.vn/api/v1/submit"
+production_credentials_env_var = "INVOICEKIT_PROD_VN_GDT_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every HDDT must be signed with a XAdES-BES signature using a
+USB-token certificate (chu ky so) issued by a Vietnamese
+Ministry-of-Information-and-Communications licensed CA (VNPT-CA,
+Viettel-CA, FPT-CA, BKAV-CA, NEWCA). The certificate carries the
+issuer's Ma so thue in the otherName extension. The provider's
+own corporate certificate co-signs invoices for taxpayers using
+the provider model.
+"""
+smart_card_requirement = "common"
+hsm_requirement = "common_for_providers"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses without a Vietnamese establishment must
+register for VAT in Vietnam by appointing a Vietnamese tax
+representative who holds the Ma so thue. Foreign digital-services
+B2C providers can register under the foreign-supplier VAT regime
+established by Decree 91/2022/ND-CP.
+"""
+
+[validator]
+backend = "rest:gdt-hddt"
+backend_notes = """
+GDT is the authoritative validator: it accepts the HDDT XML
+envelope, runs server-side validation, and returns rule-level
+diagnostics. The rust side runs a minimal pre-validator (Ma so
+thue checksum, VAT rate enumeration 0/5/8/10%, invoice number
+format) before submission.
+"""
+
+[interop]
+formats = ["GDT HDDT XML (proprietary, Circular 78/2021/TT-BTC)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+HDDT is national-format-only. There is no PEPPOL PINT-VN profile.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/vietnam"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/vietnam"
+
+[follow_ups]
+items = [
+    "Select two Vietnamese providers (primary + fallback) and document per-invoice pricing",
+    "Track Decree 70/2025/ND-CP changes once published (expected H2 2025 amendments)",
+    "Add support for the buyer-side acknowledgement (Bien lai tiep nhan) flow",
+]

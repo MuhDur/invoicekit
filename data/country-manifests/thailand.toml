@@ -1,0 +1,116 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-798 country feasibility manifest: Thailand.
+#
+# Thailand's RD (Revenue Department) operates e-Tax Invoice +
+# e-Receipt under the Electronic Transactions Act 2001. The
+# system is voluntary at the moment — VAT-registered businesses
+# can opt in to e-Tax Invoice with timestamping certified by the
+# Electronic Transactions Development Agency (ETDA).
+
+schema_version = "1.0"
+country = "TH"
+country_name = "Thailand"
+program = "e-Tax Invoice + e-Receipt — Revenue Department"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-798-manifest-thailand-xue"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "Revenue Department — e-Tax Invoice portal"
+url = "https://etax.rd.go.th/etax_staticpage/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Royal Decree on Electronic Tax Invoice and Receipt"
+url = "https://www.rd.go.th/29569.html"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "ETDA Time-Stamping authority for e-Tax Invoice"
+url = "https://www.etda.or.th/th/Useful-Resource/timestamping-authority.aspx"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "e-Tax Invoice XML schema (ETDA technical specification)"
+url = "https://www.rd.go.th/etax/"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "partner_gated"
+notes = """
+Thailand's RD does not run a public e-Tax Invoice sandbox; the
+ETDA-certified Service Providers each operate their own. The
+typical onboarding path is via a Service Provider (INET, Kasikorn
+Business Tech, T-NET). Production access requires a Thai Tax ID
+(Phakkhi Hmaaylek) and registration with the RD.
+"""
+endpoint = "https://etax-sandbox.rd.go.th/api/v1/upload"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_TH_RD_TOKEN"
+
+[production]
+endpoint = "https://etax.rd.go.th/api/v1/upload"
+production_credentials_env_var = "INVOICEKIT_PROD_TH_RD_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+e-Tax Invoice documents must carry a XAdES signature using a
+certificate from an ETDA-certified CA (TDID, INET-CA, Kasikorn).
+A separate ETDA-issued time stamp (TSA) attaches to each signed
+invoice. The Service Provider's corporate certificate signs for
+taxpayers under the provider model.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "common_for_service_providers"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses without a Thai establishment must register for
+VAT in Thailand by appointing a Thai tax agent who holds the
+Phakkhi Hmaaylek. Cross-border digital-services B2C providers
+can register under the VES (Value-added Electronic Service)
+regime introduced in 2021.
+"""
+
+[validator]
+backend = "jvm:saxon"
+backend_notes = """
+e-Tax Invoice uses an XML schema (ETDA technical specification)
+validated via Saxon-HE. The business-rule layer (BR-TH-*)
+covers Phakkhi Hmaaylek format, VAT rate enumeration (7%), and
+per-document-type field validation. Signature verification
+delegates to validator-kosit; the embedded time stamp is
+verified separately against ETDA's published TSA certificate
+chain.
+"""
+
+[interop]
+formats = ["ETDA e-Tax Invoice XML (Thailand proprietary)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+e-Tax Invoice is national-format-only. There is no PEPPOL PINT-TH
+profile.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/thailand"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/thailand"
+
+[follow_ups]
+items = [
+    "Track the Revenue Department's mandatory-rollout announcements (currently voluntary)",
+    "Pin a Thai Service Provider for the hosted layer's Phakkhi Hmaaylek-holding entity",
+    "Add support for e-Withholding Tax flow alongside e-Tax Invoice",
+]

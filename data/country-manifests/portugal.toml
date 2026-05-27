@@ -1,0 +1,127 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-7a5 country feasibility manifest: Portugal.
+#
+# Portugal runs a national reporting model (SAF-T (PT) plus monthly
+# invoice transmission to AT — Autoridade Tributaria e Aduaneira)
+# in addition to Peppol BIS Billing 3.0 for cross-border B2B
+# exchange. Every domestic B2B and B2C invoice must carry a
+# QR code and an ATCUD (codigo unico do documento) derived from
+# AT-allocated series.
+
+schema_version = "1.0"
+country = "PT"
+country_name = "Portugal"
+program = "SAF-T (PT) reporting + e-Fatura + Peppol BIS (AT)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-7a5-manifest-portugal-hq4"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "AT — Portal das Financas e-Fatura"
+url = "https://faturas.portaldasfinancas.gov.pt/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Codigo do IVA (Portuguese VAT Code, with ATCUD/QR amendments)"
+url = "https://info.portaldasfinancas.gov.pt/pt/informacao_fiscal/codigos_tributarios/civa_rep/"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "SAF-T (PT) technical schema (Portaria 302/2016)"
+url = "https://info.portaldasfinancas.gov.pt/pt/apoio_contribuinte/Faturacao/saft_pt/"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "List of certified billing-software vendors (Programa Certificado)"
+url = "https://www.portaldasfinancas.gov.pt/at/html/index.html"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "public"
+notes = """
+AT operates a publicly accessible test environment for the
+e-Fatura SAF-T submission service and the ATCUD issuance API.
+Any Portuguese taxpayer with a NIF (Numero de Identificacao
+Fiscal) can enroll for sandbox access; foreign developers can
+obtain a test NIF through the AT developer programme. The
+billing-software certification path (Programa Certificado) is
+the recommended production route.
+"""
+endpoint = "https://servicos-test.portaldasfinancas.gov.pt/safe/api/v1/submitsaft"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_PT_AT_CERT"
+
+[production]
+endpoint = "https://servicos.portaldasfinancas.gov.pt/safe/api/v1/submitsaft"
+production_credentials_env_var = "INVOICEKIT_PROD_PT_AT_CERT"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Each invoice must be signed by the issuing certified billing
+software with a software-issuer private key registered with AT
+under the Programa Certificado. The signature uses RSA-2048
+over a per-document signature payload defined in Decreto-Lei
+28/2019 (signed-document hash chain). For B2G Peppol BIS
+transmissions, the access point's qualified electronic seal
+covers the envelope.
+"""
+smart_card_requirement = "common_for_taxpayers"
+hsm_requirement = "common_for_high_volume"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses without a Portuguese establishment that
+issue invoices to Portuguese customers must register for VAT by
+appointing a Portuguese fiscal representative who holds the NIF.
+EU-resident sellers can register directly under the OSS (One-
+Stop Shop) framework for distance sales. Programa Certificado
+billing software must be used by every taxpayer above the
+turnover threshold (currently EUR 50,000 per year).
+"""
+
+[validator]
+backend = "rust_native"
+backend_notes = """
+Portuguese tax invoices use a Peppol-aligned UBL profile
+(CIUS-PT) for cross-border B2B, plus the SAF-T (PT) XML for the
+periodic submission to AT. Structural XSD validation runs in
+the shared rust-native UBL validator; the Portuguese business
+rules (BR-PT-*) live in the rulepack runtime. The ATCUD
+generation logic (codigo unico do documento) and QR-code
+content per the AT technical specification are implemented in
+the rust render layer.
+"""
+
+[interop]
+formats = ["CIUS-PT (UBL 2.1 / Peppol BIS Billing 3.0)", "SAF-T (PT) XML 1.04_01"]
+peppol_bis_accepted = true
+peppol_pint_accepted = false
+notes = """
+Portugal accepts Peppol BIS Billing 3.0 envelopes for cross-
+border B2B and B2G; CIUS-PT is the Portuguese profile derived
+from Peppol BIS Billing 3.0 with PT-specific extensions. The
+SAF-T (PT) submission is a separate monthly XML report to AT
+that complements rather than replaces invoice exchange.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/portugal"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/portugal"
+
+[follow_ups]
+items = [
+    "Track AT's CIUS-PT version updates (currently aligned to Peppol BIS Billing 3.0 v3.0.17)",
+    "Pin a Portuguese certified billing-software vendor for the hosted layer's Programa Certificado registration",
+    "Add support for the Portuguese WebService SAF-T direct-upload alternative to the SOAP submission",
+]

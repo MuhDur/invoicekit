@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-7a4 country feasibility manifest: South Africa.
+#
+# South Africa's SARS (South African Revenue Service) does not
+# operate a mandatory CTC e-invoicing model today; tax invoices
+# can be electronic but follow the VAT Act Section 20 content
+# requirements without pre-clearance. SARS is in active
+# consultation on a future CTC framework targeted for 2026-2027.
+
+schema_version = "1.0"
+country = "ZA"
+country_name = "South Africa"
+program = "VAT Act Section 20 tax invoice content rules (SARS, no CTC mandate today)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-7a4-manifest-south-africa-v54"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "SARS — Value-Added Tax overview"
+url = "https://www.sars.gov.za/types-of-tax/value-added-tax/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Value-Added Tax Act 89 of 1991 (Section 20 — Tax Invoices)"
+url = "https://www.sars.gov.za/wp-content/uploads/Legal/Acts/LAPD-LPrim-Act-1991-04-Value-Added-Tax-Act.pdf"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "SARS Modernisation Programme — e-Invoicing consultation"
+url = "https://www.sars.gov.za/about/governance/modernisation/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Electronic Communications and Transactions Act 25 of 2002"
+url = "https://www.gov.za/sites/default/files/gcis_document/201409/a25-02.pdf"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "none"
+notes = """
+SARS does not operate an e-invoicing sandbox today because there
+is no clearance gate to test against. South African VAT-registered
+businesses issue tax invoices electronically by following the
+Section 20 content requirements; the invoice is reported to SARS
+only as part of the periodic VAT201 return. When the CTC framework
+launches (currently consultation-phase, target 2026-2027 production)
+a sandbox will follow.
+"""
+endpoint = "https://sars-future-ctc-sandbox.invoicekit.example/v1/"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_ZA_SARS_TOKEN"
+
+[production]
+endpoint = "https://sars-future-ctc.invoicekit.example/v1/"
+production_credentials_env_var = "INVOICEKIT_PROD_ZA_SARS_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_optional"
+qualified_seal_notes = """
+Electronic tax invoices are accepted by SARS under the Electronic
+Communications and Transactions Act 25 of 2002 as long as the
+invoice contains the Section 20 mandatory fields. A digital
+signature is not required by the VAT Act today, but advanced
+electronic signatures (AES) from a SAAA (South African Accreditation
+Authority) accredited Authentication Service Provider give the
+invoice stronger evidentiary weight in disputes. The upcoming
+CTC framework is expected to require a digital signature.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "none"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses with no South African establishment that
+supply services to South African customers above the threshold
+must register for VAT by appointing a South African VAT
+representative. The Electronic Service VAT regulation captures
+foreign B2C digital-services providers.
+"""
+
+[validator]
+backend = "none"
+backend_notes = """
+SARS does not run a clearance validator today; tax-invoice
+content compliance is enforced through the VAT201 return audit
+and ad-hoc inspections. The rust side runs a Section-20 content
+checker locally (VAT registration number format, mandatory-
+fields presence, currency-and-amount-in-Rand check) so customers
+can self-validate before the future CTC framework demands it.
+This manifest entry will switch to a real backend once SARS
+publishes the CTC technical specification.
+"""
+
+[interop]
+formats = ["Section 20 plain electronic invoice (no national XML schema today)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+No CTC mandate today means any format that satisfies VAT Act
+Section 20 is acceptable for B2B exchange. South Africa is a
+Peppol Authority through the Department of Communications and
+Digital Technologies but Peppol BIS is not mandatory.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/south-africa"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/south-africa"
+
+[follow_ups]
+items = [
+    "Track SARS Modernisation Programme announcements on the CTC launch date (current target 2026-2027)",
+    "Replace sandbox.availability = \"none\" with \"public\" or \"partner_gated\" once SARS opens a CTC sandbox",
+    "Replace validator.backend = \"none\" with a real backend identifier once the CTC technical specification publishes",
+]

@@ -1,0 +1,108 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-7a3 country feasibility manifest: Nigeria.
+#
+# Nigeria's FIRS (Federal Inland Revenue Service) is rolling out
+# a national e-invoicing platform (e-Invoicing Solution) for B2B
+# transactions, with phased mandatory coverage from 2025-09-01
+# starting with large taxpayers.
+
+schema_version = "1.0"
+country = "NG"
+country_name = "Nigeria"
+program = "FIRS e-Invoicing Solution"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-7a3-manifest-nigeria-dl9"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "FIRS — e-Invoicing portal"
+url = "https://www.firs.gov.ng/e-invoicing/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Value Added Tax Act (Cap V1, LFN 2004 as amended)"
+url = "https://www.firs.gov.ng/wp-content/uploads/2021/03/Value-Added-Tax-VAT-Act.pdf"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "FIRS e-Invoicing technical documentation"
+url = "https://einvoicing.firs.gov.ng/documentation"
+kind = "api_documentation"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "partner_gated"
+notes = """
+FIRS does not run a public e-Invoicing sandbox; the platform is
+accessible only through FIRS-accredited Solution Providers
+(currently Vatebra, Tianocom, Sage). Sandbox access is partner-
+mediated; production access requires a Nigerian TIN (Taxpayer
+Identification Number) and FIRS e-Invoicing enrollment.
+"""
+endpoint = "https://einvoicing-test.firs.gov.ng/api/v1/submit"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_NG_FIRS_TOKEN"
+
+[production]
+endpoint = "https://einvoicing.firs.gov.ng/api/v1/submit"
+production_credentials_env_var = "INVOICEKIT_PROD_NG_FIRS_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every FIRS e-Invoice document must be signed with a XAdES
+signature using a NITDA (National Information Technology
+Development Agency) accredited CA certificate. The certificate
+carries the issuer's TIN. The Solution Provider's corporate
+certificate signs for taxpayers under the provider model.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "common_for_solution_providers"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses providing taxable services to Nigerian
+customers must register for VAT in Nigeria by appointing a
+Nigerian tax representative who holds the TIN. The foreign
+digital-services VAT regime was introduced under the Finance
+Act 2021; foreign B2C providers can register directly under the
+Non-Resident Person VAT regime.
+"""
+
+[validator]
+backend = "rest:firs-nigeria"
+backend_notes = """
+FIRS is the authoritative validator: it accepts the e-Invoice
+JSON envelope, runs server-side validation, and returns rule-
+level diagnostics. The rust side runs a minimal pre-validator
+(TIN checksum, VAT rate enumeration 7.5%, required-field
+presence) before the REST call.
+"""
+
+[interop]
+formats = ["FIRS e-Invoice JSON envelope (Nigeria proprietary)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+FIRS e-Invoicing is national-format-only. There is no PEPPOL
+PINT-NG profile.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/nigeria"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/nigeria"
+
+[follow_ups]
+items = [
+    "Track FIRS's phased mandate calendar (currently large taxpayers from 2025-09-01)",
+    "Pin a Nigerian Solution Provider partner for the hosted layer's TIN-holding entity",
+    "Confirm the buyer-side acknowledgement flow as the FIRS platform evolves",
+]
