@@ -1,0 +1,61 @@
+name: Fuzz (nightly)
+
+# oueo: heavy fuzz targets that don't fit the 5-minute PR matrix in
+# fuzz.yml. The Typst renderer costs 10-100 ms per iteration, so a
+# 5-minute libFuzzer run only covers ~3-30k iterations — most of which
+# exercise the same parser path. The nightly job gives it a 30-minute
+# wall-clock budget per target instead, and seeds the corpus from the
+# committed conformance fixtures the same way the PR matrix does.
+
+on:
+  schedule:
+    # 03:17 UTC daily — avoids the top-of-the-hour stampede on shared
+    # runners and keeps results visible before the European workday.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: fuzz-nightly-${{ github.workflow }}-${{ matrix.target }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  fuzz-nightly:
+    name: cargo-fuzz nightly ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - render_typst_pdf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - name: Install cargo-fuzz
+        run: cargo install --locked cargo-fuzz
+      - name: Fuzz ${{ matrix.target }} for 30 minutes
+        run: |
+          set -euo pipefail
+          mkdir -p fuzz/corpus/${{ matrix.target }}
+          if [ -d "conformance-corpus/fuzz/${{ matrix.target }}" ]; then
+            cp -n conformance-corpus/fuzz/${{ matrix.target }}/* \
+              fuzz/corpus/${{ matrix.target }}/ || true
+          fi
+          cargo +nightly fuzz run ${{ matrix.target }} \
+            -- -max_total_time=1800 -timeout=120
+      - name: Upload any crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-nightly-crash-${{ matrix.target }}
+          path: |
+            fuzz/artifacts/${{ matrix.target }}/**
+            fuzz/corpus/${{ matrix.target }}/**

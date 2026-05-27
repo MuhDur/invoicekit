@@ -60,11 +60,10 @@ jobs:
             fuzz/artifacts/${{ matrix.target }}/**
             fuzz/corpus/${{ matrix.target }}/**
 
-  # Note: the bead's render_typst_pdf target is deferred to a follow-up
-  # bead because `invoicekit_render_pdf::RenderRequest::new` is not pub
-  # today, so there is no public Typst-source entry point to fuzz; the
-  # follow-up either opens that constructor or wraps Typst source through
-  # a future `render_for_fuzz(&str)` shim. Typst's per-iteration time
-  # (10-100ms) also means a 5-minute libFuzzer run only covers ~3-30k
-  # iterations, most of which exercise the same parser path; a nightly
-  # higher-iteration job is the right shape for it anyway.
+  # oueo: render_typst_pdf is now a dedicated `render_for_fuzz(&str)`
+  # shim in `crates/render-pdf`, but Typst's per-iteration cost (10-100
+  # ms) makes a 5-minute libFuzzer run cover only ~3-30k iterations —
+  # most of which exercise the same parser path. The target therefore
+  # runs as a 30-minute nightly job in
+  # `.github/workflows/fuzz-nightly.yml` rather than in this per-PR
+  # matrix.
