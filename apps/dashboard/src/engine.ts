@@ -16,6 +16,8 @@ export type TeamMemberStatus = "active" | "disabled" | "invited";
 
 export type TransmissionState = "accepted" | "archived" | "failed" | "queued" | "rejected" | "sent" | "validating";
 
+export type WebhookStatus = "active" | "disabled" | "failing";
+
 export interface RecentActivityItem {
   readonly id: string;
   readonly kind: ActivityKind;
@@ -153,6 +155,29 @@ export interface TeamMemberListParams {
   readonly role?: TeamMemberRole;
 }
 
+export interface WebhookEndpoint {
+  readonly id: string;
+  readonly name: string;
+  readonly url: string;
+  readonly eventTypes: readonly string[];
+  readonly status: WebhookStatus;
+  readonly signingSecretPrefix: string;
+  readonly createdAt: string;
+  readonly lastDeliveredAt?: string;
+  readonly failureCount: number;
+}
+
+export interface WebhookEndpointPage {
+  readonly items: readonly WebhookEndpoint[];
+  readonly pageInfo: TransmissionPageInfo;
+}
+
+export interface WebhookEndpointListParams {
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly status?: WebhookStatus;
+}
+
 export interface TransmissionSummary {
   readonly id: string;
   readonly documentId: string;
@@ -190,6 +215,7 @@ export interface DashboardEngineClient {
   listRecentErrors(params?: RecentErrorListParams): Promise<RecentErrorPage>;
   listTeamMembers(params?: TeamMemberListParams): Promise<TeamMemberPage>;
   listTransmissions(params?: TransmissionListParams): Promise<TransmissionPage>;
+  listWebhooks(params?: WebhookEndpointListParams): Promise<WebhookEndpointPage>;
   tenantUsage(): Promise<TenantUsage>;
   tenantOverview(): Promise<TenantOverview>;
 }
@@ -276,6 +302,16 @@ export function createHttpDashboardClient(options: EngineRpcClientOptions = {}):
         requestId: requestIdFactory()
       });
     },
+    async listWebhooks(params = {}) {
+      return callEngineMethod({
+        endpoint,
+        fetcher,
+        method: "engine.list_webhooks",
+        params,
+        parse: parseWebhookEndpointPage,
+        requestId: requestIdFactory()
+      });
+    },
     async tenantUsage() {
       return callEngineMethod({
         endpoint,
@@ -329,6 +365,7 @@ interface EngineMethodCall<Result> {
     | "engine.list_recent_errors"
     | "engine.list_team_members"
     | "engine.list_transmissions"
+    | "engine.list_webhooks"
     | "engine.tenant_overview"
     | "engine.tenant_usage";
   readonly params: unknown;
@@ -345,6 +382,7 @@ async function callEngineMethod<
     | TenantOverview
     | TenantUsage
     | TransmissionPage
+    | WebhookEndpointPage
 >({
   endpoint,
   fetcher,
@@ -550,6 +588,33 @@ function parseTeamMember(value: unknown): TeamMember {
     ...(lastActiveAt !== undefined ? { lastActiveAt } : {}),
     ...(invitedAt !== undefined ? { invitedAt } : {})
   };
+}
+
+function parseWebhookEndpointPage(value: unknown): WebhookEndpointPage {
+  const record = asRecord(value, "webhook endpoint page");
+
+  return {
+    items: readArray(record, "items", "webhook endpoint page").map(parseWebhookEndpoint),
+    pageInfo: parseTransmissionPageInfo(readRequired(record, "pageInfo", "webhook endpoint page"))
+  };
+}
+
+function parseWebhookEndpoint(value: unknown): WebhookEndpoint {
+  const record = asRecord(value, "webhook endpoint");
+  const webhook: WebhookEndpoint = {
+    id: readString(record, "id", "webhook endpoint"),
+    name: readString(record, "name", "webhook endpoint"),
+    url: readString(record, "url", "webhook endpoint"),
+    eventTypes: readStringArray(record, "eventTypes", "webhook endpoint"),
+    status: readWebhookStatus(record, "status", "webhook endpoint"),
+    signingSecretPrefix: readString(record, "signingSecretPrefix", "webhook endpoint"),
+    createdAt: readString(record, "createdAt", "webhook endpoint"),
+    failureCount: readNumber(record, "failureCount", "webhook endpoint")
+  };
+
+  appendOptionalStringField(webhook, "lastDeliveredAt", readOptionalString(record, "lastDeliveredAt", "webhook endpoint"));
+
+  return webhook;
 }
 
 function parseTenantUsage(value: unknown): TenantUsage {
@@ -803,6 +868,16 @@ function readTeamMemberStatus(record: Record<string, unknown>, key: string, labe
   }
 
   throw new EngineRpcError(`Invalid ${label}: unsupported team member status`, { data: record });
+}
+
+function readWebhookStatus(record: Record<string, unknown>, key: string, label: string): WebhookStatus {
+  const value = readString(record, key, label);
+
+  if (value === "active" || value === "disabled" || value === "failing") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported webhook status`, { data: record });
 }
 
 function readTransmissionState(record: Record<string, unknown>, key: string, label: string): TransmissionState {
