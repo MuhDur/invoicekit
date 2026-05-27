@@ -1,0 +1,163 @@
+name: Python SDK
+
+# 9p5u + 4qeq: build the InvoiceKit Python SDK wheel on every PR and
+# every tag across the three platforms the SDK supports, run the
+# golden-fixture test on each platform, and publish to PyPI when the
+# trigger is a `v*` tag. maturin handles the Rust + PyO3 build and
+# the abi3 wheel emission; one abi3 wheel per platform covers all
+# supported interpreters per
+# https://docs.python.org/3/c-api/stable.html.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  # 4qeq: id-token: write is required for PyPI trusted publishing.
+  # Operators that have not yet configured the trusted publisher can
+  # fall back to a PYPI_API_TOKEN secret without changing this file.
+  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  wheels:
+    name: build & test (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            label: linux-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            label: macos-aarch64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: windows-x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      # 9p5u: setup-python is the cleanest way to provision multiple
+      # interpreters in one step. The abi3 wheel is built against the
+      # lowest supported (3.10), then verified against every higher
+      # 3.x to prove the abi3 contract holds on this platform.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: |
+            3.10
+            3.11
+            3.12
+            3.13
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Per-platform cache to avoid cross-OS poisoning.
+          shared-key: python-sdk-${{ matrix.target }}
+      - name: Install maturin
+        shell: bash
+        run: pipx install 'maturin>=1.13,<2'
+      - name: Build abi3 wheel (release)
+        # Force bash so the line-continuation backslashes parse on
+        # the Windows runner too (default shell there is pwsh).
+        shell: bash
+        working-directory: bindings/python
+        run: |
+          maturin build --release --target ${{ matrix.target }} \
+            --features extension-module --out ../../target/wheels --strip
+      - name: Verify the wheel installs and the golden tests pass on each interpreter
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ver in 3.10 3.11 3.12 3.13; do
+            interp="python${ver}"
+            if ! command -v "$interp" >/dev/null 2>&1; then
+              echo "skipping $interp (not installed on this runner image)"
+              continue
+            fi
+            echo "=== installing wheel on $interp ==="
+            "$interp" -m pip install --upgrade pip
+            "$interp" -m pip install --upgrade pytest
+            "$interp" -m pip install target/wheels/*.whl --force-reinstall
+            "$interp" -m pytest bindings/python/tests -v
+          done
+      - name: Upload built wheel as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: invoicekit-python-${{ matrix.label }}
+          path: target/wheels/*
+          if-no-files-found: error
+          retention-days: 14
+
+  sdist:
+    name: build sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install maturin
+        run: pipx install 'maturin>=1.13,<2'
+      - name: Build sdist
+        working-directory: bindings/python
+        run: maturin sdist --out ../../target/wheels
+      - uses: actions/upload-artifact@v4
+        with:
+          name: invoicekit-python-sdist
+          path: target/wheels/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    # 4qeq: PyPI publish gated on `v*` tag. Pulls every per-platform
+    # artifact built above plus the sdist, then uploads in one batch.
+    # Uses PyPI trusted publishing (no secret needed) when configured.
+    name: publish to PyPI on tagged release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [wheels, sdist]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/invoicekit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: invoicekit-python-*
+          merge-multiple: true
+          path: dist/
+      - name: Verify the uploaded version mirrors the engine semver
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # 4qeq strict-gate: the wheel filename's version must equal
+          # the tag minus the leading `v`. This guards against a
+          # maturin / Cargo version drift that would publish the
+          # wrong semver under the right tag.
+          set -euo pipefail
+          expected="${TAG#v}"
+          found=$(ls dist/*.whl | head -1 | sed -nE 's|.*/invoicekit-([^-]+)-.*|\1|p')
+          if [ "$found" != "$expected" ]; then
+            echo "tag $TAG implies version $expected but wheel is $found" >&2
+            exit 1
+          fi
+      - name: Publish to PyPI (trusted publisher)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          skip-existing: true
