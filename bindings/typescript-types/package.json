@@ -1,0 +1,40 @@
+{
+  "name": "@invoicekit/types",
+  "version": "0.0.0",
+  "description": "Generated TypeScript types for the InvoiceKit JSON Schemas (IR, validation result, capabilities). Source of truth: schemas/*.json. Do not hand-edit src/generated/.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/MuhDur/invoicekit",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MuhDur/invoicekit.git",
+    "directory": "bindings/typescript-types"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test tests/round-trip.test.mjs"
+  },
+  "devDependencies": {
+    "json-schema-to-typescript": "^15.0.4",
+    "typescript": "^5.6.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

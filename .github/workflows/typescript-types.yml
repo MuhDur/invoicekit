@@ -1,0 +1,39 @@
+name: TypeScript types
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: typescript-types-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  generate-and-check:
+    name: '@invoicekit/types generate + tsc --noEmit'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bindings/typescript-types
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --no-fund --no-audit
+      - name: Re-generate from schemas/*.json and assert no drift
+        run: node scripts/generate.mjs --check
+      - name: TypeScript strict-mode compile
+        run: npx tsc --noEmit -p tsconfig.json
+      - name: Round-trip + drift checks
+        run: node --test tests/round-trip.test.mjs
+      - name: Verify package declares Apache 2.0 license
+        run: |
+          set -euo pipefail
+          jq -e '.license == "Apache-2.0"' package.json
