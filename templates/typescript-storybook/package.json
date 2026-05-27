@@ -1,0 +1,23 @@
+{
+  "name": "@invoicekit/template-storybook",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "T-114 Storybook showcase for every InvoiceKit Typst template plus allowance / reverse-charge variants.",
+  "scripts": {
+    "storybook": "bunx storybook dev -p 6006",
+    "build-storybook": "bunx storybook build",
+    "test": "bun test tests/stories.test.mjs",
+    "typecheck": "bunx tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@invoicekit/template-typst": "file:../typescript"
+  },
+  "devDependencies": {
+    "@storybook/html": "^8.4.7",
+    "@storybook/html-vite": "^8.4.7",
+    "storybook": "^8.4.7",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}
