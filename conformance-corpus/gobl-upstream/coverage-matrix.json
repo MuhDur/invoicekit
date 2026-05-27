@@ -1,0 +1,143 @@
+{
+  "fixture_count": 20,
+  "outcomes": {
+    "LossyRoundTrip": 17,
+    "SkippedFromGoblError": 3
+  },
+  "fixtures": [
+    {
+      "fixture": "ae__invoice-ae-ae-stnr.json",
+      "outcome": "lossy_round_trip",
+      "lossy_anchors": [
+        "type (was String(\"standard\"), became String(\"invoice\"))"
+      ]
+    },
+    {
+      "fixture": "ar__invoice-ar-arca-standard.json",
+      "outcome": "lossy_round_trip",
+      "lossy_anchors": [
+        "type (was String(\"standard\"), became String(\"invoice\"))"
+      ]
+    },
+    {
+      "fixture": "be__invoice-peppol.json",
+      "outcome": "lossy_round_trip",
+      "lossy_anchors": [
+        "type (was String(\"standard\"), became String(\"invoice\"))"
+      ]
+    },
+    {
+      "fixture": "br__invoice-nfse.json",
+      "outcome": "lossy_round_trip",
+      "lossy_anchors": [
+        "type (was String(\"standard\"), became String(\"invoice\"))"
+      ]
+    },
+    {
+      "fixture": "de__invoice-de-de-stnr.json",
+      "outcome": "skipped_from_gobl_error",
+      "reason": "produced CommercialDocument failed IR validation: missing required field `party.tax_ids.value`"
+    },
+    {
+      "fixture": "de__invoice-de-de-xr.json",
+      "outcome": "lossy_round_trip",
+      "lossy_anchors": [
+        "type (was String(\"standard\"), became String(\"invoice\"))"
+      ]
+    },
+    {
+      "fixture": "es__invoice-es-es-freelance.json",
+      "outcome": "lossy_round_trip",
+      "lossy_anchors": [
+        "type (was String(\"standard\"), became String(\"invoice\"))"
+      ]
+    },
+    {
+      "fixture": "es__invoice-es-es-peppol-1.json",
+      "outcome": "lossy_round_trip",
+      "lossy_anchors": [
+        "type (was String(\"standard\"), became String(\"invoice\"))"
+      ]
+    },
+    {
+      "fixture": "fr__invoice-fr-fr-facturx.json",
+      "outcome": "lossy_round_trip",
+      "lossy_anchors": [
+        "type (was String(\"standard\"), became String(\"invoice\"))"
+      ]
+    },
+    {
+      "fixture": "fr__invoice-fr-fr.json",
+      "outcome": "lossy_round_trip",
+      "lossy_anchors": [
+        "type (was String(\"standard\"), became String(\"invoice\"))"
+      ]
+    },
+    {
+      "fixture": "gb__invoice-b2b.json",
+      "outcome": "lossy_round_trip",
+      "lossy_anchors": [
+        "type (was String(\"standard\"), became String(\"invoice\"))"
+      ]
+    },
+    {
+      "fixture": "gr__invoice-el-el.json",
+      "outcome": "lossy_round_trip",
+      "lossy_anchors": [
+        "type (was String(\"standard\"), became String(\"invoice\"))"
+      ]
+    },
+    {
+      "fixture": "mx__invoice.json",
+      "outcome": "lossy_round_trip",
+      "lossy_anchors": [
+        "type (was String(\"standard\"), became String(\"invoice\"))"
+      ]
+    },
+    {
+      "fixture": "nl__invoice.json",
+      "outcome": "lossy_round_trip",
+      "lossy_anchors": [
+        "type (was String(\"standard\"), became String(\"invoice\"))"
+      ]
+    },
+    {
+      "fixture": "pl__invoice-reverse-charge.json",
+      "outcome": "lossy_round_trip",
+      "lossy_anchors": [
+        "type (was String(\"standard\"), became String(\"invoice\"))"
+      ]
+    },
+    {
+      "fixture": "pl__invoice-standard.json",
+      "outcome": "lossy_round_trip",
+      "lossy_anchors": [
+        "type (was String(\"standard\"), became String(\"invoice\"))"
+      ]
+    },
+    {
+      "fixture": "pt__invoice.json",
+      "outcome": "skipped_from_gobl_error",
+      "reason": "GOBL document missing required field /id"
+    },
+    {
+      "fixture": "se__invoice-se-se.json",
+      "outcome": "lossy_round_trip",
+      "lossy_anchors": [
+        "type (was String(\"standard\"), became String(\"invoice\"))"
+      ]
+    },
+    {
+      "fixture": "sg__invoice.json",
+      "outcome": "lossy_round_trip",
+      "lossy_anchors": [
+        "type (was String(\"standard\"), became String(\"invoice\"))"
+      ]
+    },
+    {
+      "fixture": "us__invoice-us-us.json",
+      "outcome": "skipped_from_gobl_error",
+      "reason": "GOBL document missing required field /customer/addresses/0/country"
+    }
+  ]
+}
