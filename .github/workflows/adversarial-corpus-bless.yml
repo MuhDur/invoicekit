@@ -1,0 +1,107 @@
+name: Adversarial corpus bless
+
+# T-122 impl-bless-ci: regenerate the v0.5 synthetic corpus from
+# the T-121 adversarial-generator and fail if any byte drifted
+# from what's committed under
+# conformance-corpus/synthetic/adversarial-v0-5/.
+#
+# This catches silent format-* changes that would mutate the
+# corpus without anyone noticing. A drift is a deliberate
+# release-note item: either bump the generator's version field
+# in the corpus metadata + commit the regenerated files, or
+# revert the format-* change that introduced the drift.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "conformance-corpus/synthetic/adversarial-v0-5/**"
+      - "crates/adversarial-generator/**"
+      - "crates/format-ubl/**"
+      - "crates/format-cii/**"
+      - "crates/format-gobl/**"
+      - "crates/profile-peppol-bis/**"
+      - "crates/profile-peppol-pint/**"
+      - "crates/profile-xrechnung/**"
+      - "crates/ir/**"
+      - ".github/workflows/adversarial-corpus-bless.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "conformance-corpus/synthetic/adversarial-v0-5/**"
+      - "crates/adversarial-generator/**"
+      - "crates/format-ubl/**"
+      - "crates/format-cii/**"
+      - "crates/format-gobl/**"
+      - "crates/profile-peppol-bis/**"
+      - "crates/profile-peppol-pint/**"
+      - "crates/profile-xrechnung/**"
+      - "crates/ir/**"
+      - ".github/workflows/adversarial-corpus-bless.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: adversarial-corpus-bless-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  regenerate-and-diff:
+    name: regenerate + diff committed corpus
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: adversarial-corpus-bless
+      - name: Regenerate corpus into a clean directory
+        run: |
+          # The generator writes into the working tree at
+          # conformance-corpus/synthetic/adversarial-v0-5/. We
+          # stash a hash of the committed tree first, then run
+          # the generator, then re-hash and compare. Any drift
+          # surfaces as a non-zero diff exit code with the per-
+          # file list of differences printed to the log.
+          set -euo pipefail
+          committed_hash=$(find conformance-corpus/synthetic/adversarial-v0-5 \
+              -type f -print0 \
+              | sort -z \
+              | xargs -0 sha256sum \
+              | sha256sum | cut -d' ' -f1)
+          echo "committed corpus hash: $committed_hash"
+          cargo run --release --quiet -p invoicekit-adversarial-generator --bin gen-corpus-v0-5
+          regenerated_hash=$(find conformance-corpus/synthetic/adversarial-v0-5 \
+              -type f -print0 \
+              | sort -z \
+              | xargs -0 sha256sum \
+              | sha256sum | cut -d' ' -f1)
+          echo "regenerated corpus hash: $regenerated_hash"
+          if [ "$committed_hash" != "$regenerated_hash" ]; then
+            echo "::error::Adversarial v0.5 corpus drifted from generator output."
+            echo "Diff (committed vs regenerated):"
+            git --no-pager diff --stat conformance-corpus/synthetic/adversarial-v0-5/ || true
+            echo
+            echo "Resolve by either:"
+            echo "  1. Rerunning 'cargo run -p invoicekit-adversarial-generator --bin gen-corpus-v0-5'"
+            echo "     locally and committing the regenerated files (intentional bump), OR"
+            echo "  2. Reverting the format-* change that introduced the drift."
+            exit 1
+          fi
+      - name: Validate metadata on the regenerated tree
+        run: python3 tools/conformance-corpus/validate_fixture_metadata.py
+      - name: Confirm corpus still ships >= 500 fixtures
+        run: |
+          set -euo pipefail
+          count=$(find conformance-corpus/synthetic/adversarial-v0-5 \
+              -name fixture.xml -o -name fixture.json \
+              | wc -l)
+          echo "fixture count: $count"
+          if [ "$count" -lt 500 ]; then
+            echo "::error::T-122 floor: expected >= 500 fixtures, got $count" >&2
+            exit 1
+          fi
