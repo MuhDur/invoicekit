@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
 [package]
 name = "invoicekit-managed-api-server"
 version.workspace = true
@@ -7,16 +9,33 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit workspace binary: invoicekit-managed-api-server"
+description = "InvoiceKit managed-layer API gateway (axum + per-tenant rate limiting + API-key auth)."
 publish = false
 
 [[bin]]
 name = "invoicekit-managed-api-server"
 path = "src/main.rs"
 
+[lib]
+name = "invoicekit_managed_api_server"
+path = "src/lib.rs"
+
 [dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "macros", "query"] }
+http = "1"
 invoicekit-managed-api = { path = "../../crates/managed-api", version = "0.0.0" }
+invoicekit-reconcile = { path = "../../crates/reconcile", version = "0.0.0" }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+thiserror.workspace = true
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "signal"] }
+tower = { version = "0.5", features = ["util"] }
+tracing.workspace = true
+
+[dev-dependencies]
+http-body-util = "0.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tower = { version = "0.5", features = ["util"] }
 
 [lints]
 workspace = true
