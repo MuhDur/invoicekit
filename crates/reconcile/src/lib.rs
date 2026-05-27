@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod outbox;
+pub mod reconcile_api;
 pub mod redact;
 pub mod webhook;
 mod worker;

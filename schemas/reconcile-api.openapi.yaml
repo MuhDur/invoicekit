@@ -1,0 +1,187 @@
+# T-075 OpenAPI for the reconciliation API surface. The Rust handler
+# (`invoicekit_reconcile::reconcile_api::handle_reconcile_request`) is
+# the source of truth for the bucket semantics; this document is the
+# customer-facing contract the future T-134 API gateway will route.
+#
+# Regenerated: human-authored for the first cut. A future bead can
+# wire `utoipa` or similar into the gateway to generate this from
+# the Rust types directly.
+
+openapi: 3.1.0
+info:
+  title: InvoiceKit Reconciliation API
+  version: "0.0.0"
+  description: |
+    Customer-facing reconciliation API. Customers submit batches of
+    `(internal_id, fingerprint)` pairs and receive bucketed lists of
+    their internal ids based on the outbox state of each fingerprint.
+
+    Fingerprints are hex-encoded BLAKE3 digests of the canonical
+    commercial document, as returned by
+    `invoicekit_reconcile::fingerprint`.
+
+    Tenant isolation is enforced server-side: the `tenant_id` in the
+    request body must match the tenant authenticated by the API
+    gateway's API-key check. The gateway returns 403 on mismatch.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  contact:
+    name: InvoiceKit security
+    email: durakovic.mu@gmail.com
+
+servers:
+  - url: https://api.invoicekit.io
+    description: Managed-layer production endpoint (gated on T-134)
+
+paths:
+  /v1/reconcile:
+    post:
+      operationId: reconcileBatch
+      summary: Reconcile a batch of internal ids against outbox state
+      description: |
+        Accepts up to 10 000 `(internal_id, fingerprint)` pairs and
+        returns four bucketed lists of internal ids:
+
+        - **delivered** — outbox row in {delivered, acknowledged}
+        - **failed** — outbox row in {rejected, dead_letter}
+        - **pending** — outbox row in any non-terminal state
+        - **unknown** — no outbox row matches the fingerprint
+
+        Internal ids appear in the order they were submitted;
+        duplicates within a batch are collapsed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReconcileRequest"
+            examples:
+              minimalBatch:
+                summary: Three invoices in three different buckets
+                value:
+                  tenant_id: tenant_acme
+                  entries:
+                    - internal_id: ACME-INV-1001
+                      fingerprint: 0101010101010101010101010101010101010101010101010101010101010101
+                    - internal_id: ACME-INV-1002
+                      fingerprint: 0202020202020202020202020202020202020202020202020202020202020202
+                    - internal_id: ACME-INV-1003
+                      fingerprint: 9999999999999999999999999999999999999999999999999999999999999999
+      responses:
+        "200":
+          description: Bucketed reconciliation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconcileResponse"
+              examples:
+                bucketedResult:
+                  value:
+                    bead: invoices-t-075-reconciliation-api-0ne
+                    delivered: [ACME-INV-1001]
+                    failed: [ACME-INV-1002]
+                    pending: []
+                    unknown: [ACME-INV-1003]
+        "400":
+          description: Malformed entry (bad internal_id or bad fingerprint)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Caller's API key does not authorize the requested tenant
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "413":
+          description: Batch exceeds the 10 000-entry maximum
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      security:
+        - apiKey: []
+
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: Authorization
+
+  schemas:
+    ReconcileRequest:
+      type: object
+      required: [tenant_id, entries]
+      additionalProperties: false
+      properties:
+        tenant_id:
+          type: string
+          description: Owning tenant; must match the API key's tenant.
+          minLength: 1
+        entries:
+          type: array
+          maxItems: 10000
+          items:
+            $ref: "#/components/schemas/ReconcileEntry"
+
+    ReconcileEntry:
+      type: object
+      required: [internal_id, fingerprint]
+      additionalProperties: false
+      properties:
+        internal_id:
+          type: string
+          description: Customer's internal id for the transmission.
+          minLength: 1
+          maxLength: 256
+        fingerprint:
+          type: string
+          description: Hex-encoded BLAKE3 fingerprint of the canonical commercial document.
+          pattern: "^[0-9a-fA-F]{64}$"
+
+    ReconcileResponse:
+      type: object
+      required: [bead, delivered, failed, pending, unknown]
+      additionalProperties: false
+      properties:
+        bead:
+          type: string
+          description: Bead identifier for diagnostic correlation; ignored by clients.
+        delivered:
+          type: array
+          items:
+            type: string
+        failed:
+          type: array
+          items:
+            type: string
+        pending:
+          type: array
+          items:
+            type: string
+        unknown:
+          type: array
+          items:
+            type: string
+
+    ApiError:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Stable error code (e.g. batch_too_large, bad_fingerprint).
+            message:
+              type: string
+              description: Operator-readable description of the failure.
+            index:
+              type: integer
+              description: When relevant, the 0-based index into `entries` that triggered the error.
