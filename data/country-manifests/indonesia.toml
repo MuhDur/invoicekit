@@ -1,0 +1,112 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-795 country feasibility manifest: Indonesia.
+#
+# Indonesia's DJP (Direktorat Jenderal Pajak) operates the e-Faktur
+# system: every B2B PPN-taxable invoice must be cleared through
+# e-Faktur Web/Desktop/Host-to-Host and assigned a NSFP (Nomor
+# Seri Faktur Pajak) before issuance.
+
+schema_version = "1.0"
+country = "ID"
+country_name = "Indonesia"
+program = "e-Faktur Pajak (DJP)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-795-manifest-indonesia-ak4"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "DJP — e-Faktur Pajak portal"
+url = "https://efaktur.pajak.go.id/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Peraturan Direktur Jenderal Pajak PER-03/PJ/2022 (e-Faktur regulation)"
+url = "https://www.pajak.go.id/sites/default/files/2022-04/PER-03.PJ_.2022.pdf"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "e-Faktur Host-to-Host API documentation"
+url = "https://efaktur.pajak.go.id/dokumentasi-host-to-host"
+kind = "api_documentation"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "requires_local_tax_id"
+notes = """
+DJP operates a test environment that requires an Indonesian NPWP
+(Nomor Pokok Wajib Pajak) and a DJP-issued sertifikat elektronik
+(electronic certificate). Foreign-only providers cannot enroll
+without an NPWP. Sandbox access for software developers is
+gated through a partnership programme with DJP's IT directorate.
+"""
+endpoint = "https://h2h-test.pajak.go.id/efaktur/api/upload"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_ID_DJP_CERT"
+
+[production]
+endpoint = "https://h2h.pajak.go.id/efaktur/api/upload"
+production_credentials_env_var = "INVOICEKIT_PROD_ID_DJP_CERT"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+e-Faktur authenticates with a sertifikat elektronik issued by
+DJP to the taxpayer, used in TLS mutual authentication for the
+Host-to-Host API. The invoice XML itself does NOT carry a XAdES
+signature; the trust anchor is the NSFP that DJP allocates after
+each successful submission. Smart-card tokens are common for
+high-value taxpayers.
+"""
+smart_card_requirement = "common"
+hsm_requirement = "recommended_for_high_volume"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses providing taxable goods or services to
+Indonesian customers must register for PPN (Pajak Pertambahan
+Nilai) by establishing an Indonesian entity (PT PMA) or
+appointing a Pengusaha Kena Pajak representative. B2C cross-
+border digital services have a separate PMSE (Perdagangan
+Melalui Sistem Elektronik) registration regime introduced in
+2020.
+"""
+
+[validator]
+backend = "rest:djp-efaktur"
+backend_notes = """
+DJP is the authoritative validator: it accepts the e-Faktur XML
+envelope, runs server-side validation with rule-level diagnostics
+returned in the response payload (10000-series for envelope
+errors, 20000-series for business rule failures). The rust side
+runs a minimal pre-validator (NPWP checksum, PPN rate
+enumeration, NSFP format) before the H2H call.
+"""
+
+[interop]
+formats = ["DJP e-Faktur XML envelope (Indonesia proprietary)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+e-Faktur is national-format-only. There is no PEPPOL PINT-ID
+profile. Cross-border invoices to Indonesia must be translated
+to the e-Faktur XML envelope.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/indonesia"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/indonesia"
+
+[follow_ups]
+items = [
+    "Track DJP's CoreTax modernisation rollout (currently in pilot, expected production 2026-2027)",
+    "Pin an Indonesian fiscal-representative partner for the hosted layer's NPWP-holding entity",
+    "Open a follow-up for the PMSE foreign digital-services flow",
+]

@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-794 country feasibility manifest: Israel.
+#
+# Israel's Tax Authority (Rashut Hamisim) operates a Mas Hachnasa
+# clearance model for high-value B2B invoices: every Heshbonit Mas
+# (tax invoice) above the threshold (currently 25,000 NIS) must
+# receive an allocation number from the Tax Authority before
+# being valid for input VAT deduction.
+
+schema_version = "1.0"
+country = "IL"
+country_name = "Israel"
+program = "Mispar Hatzaa (Allocation Numbers) — Israel Tax Authority"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-794-manifest-israel-344"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "Rashut Hamisim — Allocation Numbers portal"
+url = "https://www.gov.il/he/departments/general/tax_authority_invoices_information"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Income Tax Ordinance amendments (legal framework)"
+url = "https://www.gov.il/he/departments/legalInfo/itc"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Allocation Numbers API technical documentation"
+url = "https://www.gov.il/he/departments/policies/tax_authority_invoice_allocation_api"
+kind = "api_documentation"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "requires_local_tax_id"
+notes = """
+The Israel Tax Authority operates a test environment that requires
+an Israeli VAT number (Mispar Osek Murshe) and a tax-authority
+issued API token. Foreign-only providers cannot enroll directly;
+the standard path is through an Israeli tax representative or an
+authorised software vendor.
+"""
+endpoint = "https://il-test.invoice-allocation.gov.il/api/v1/allocations"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_IL_TAX_TOKEN"
+
+[production]
+endpoint = "https://invoice-allocation.gov.il/api/v1/allocations"
+production_credentials_env_var = "INVOICEKIT_PROD_IL_TAX_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_optional"
+qualified_seal_notes = """
+Allocation-Number API calls authenticate via an OAuth-style token
+tied to the taxpayer's VAT number; a qualified electronic
+signature is NOT required for the API call itself. The allocation
+number that the Tax Authority returns is the trust anchor —
+buyers verify it through the Tax Authority's lookup service.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "none"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses providing taxable services to Israeli customers
+must register for VAT with the Israel Tax Authority. Non-resident
+businesses without a permanent establishment must appoint an
+Israeli VAT representative (Netzig Le'inyenei Maam) who holds
+the Osek Murshe registration and the allocation-number API
+credentials.
+"""
+
+[validator]
+backend = "rest:il-tax-authority"
+backend_notes = """
+The Israel Tax Authority is the authoritative validator: it
+returns rule-level diagnostics with codes from its error
+registry. The rust side runs a minimal pre-validator (Osek
+Murshe checksum, threshold check, required-field presence)
+before the REST call to avoid trivially malformed submissions.
+The Tax Authority also publishes a buyer-side lookup API to
+verify allocation numbers; that lookup is mirrored as a
+post-clearance check.
+"""
+
+[interop]
+formats = ["Israel Tax Authority JSON allocation request (proprietary)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+The Israeli allocation model is not Peppol-aligned. Cross-border
+invoices to Israeli buyers still need an allocation number when
+the invoice value exceeds the threshold; foreign sellers obtain
+this via their Netzig.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/israel"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/israel"
+
+[follow_ups]
+items = [
+    "Track the threshold reduction schedule (25,000 NIS today, 20,000 NIS targeted for 2027)",
+    "Confirm whether the Tax Authority will move to a full CTC clearance model beyond allocation numbers",
+    "Add the buyer-side allocation-number verification API as a separate adapter",
+]

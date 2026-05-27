@@ -1,0 +1,118 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-791 country feasibility manifest: Costa Rica.
+#
+# Costa Rica's Ministerio de Hacienda operates the Factura
+# Electronica system: every B2B and most B2C documents must be
+# cleared through the ATV (Administracion Tributaria Virtual)
+# before delivery.
+
+schema_version = "1.0"
+country = "CR"
+country_name = "Costa Rica"
+program = "Factura Electronica — Ministerio de Hacienda"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-791-manifest-costa-rica-6wg"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "Ministerio de Hacienda — Factura Electronica portal"
+url = "https://www.hacienda.go.cr/comprobantes-electronicos"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Resolucion DGT-R-033-2019 (factura electronica framework)"
+url = "https://www.hacienda.go.cr/docs/5cba6c8df3760_DGT-R-033-2019.pdf"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "ATV technical specification (XML schema 4.4)"
+url = "https://www.hacienda.go.cr/comprobantes-electronicos/anexos-y-estructuras-comprobantes-electronicos"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "List of authorised digital signature CAs"
+url = "https://www.firmadigital.go.cr/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "public"
+notes = """
+Hacienda operates a publicly accessible sandbox environment
+(api-sandbox.comprobanteselectronicos.go.cr) where any Costa
+Rican taxpayer or registered software provider can submit
+documents using a sandbox certificate. The sandbox accepts test
+identifications and is the standard developer onboarding path.
+Production access requires a Costa Rican identification (cedula
+juridica or cedula fisica).
+"""
+endpoint = "https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1/recepcion"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_CR_HACIENDA_CERT"
+
+[production]
+endpoint = "https://api.comprobanteselectronicos.go.cr/recepcion/v1/recepcion"
+production_credentials_env_var = "INVOICEKIT_PROD_CR_HACIENDA_CERT"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every comprobante must be signed with a XAdES-EPES detached
+signature using a Firma Digital Costarricense certificate issued
+by a Costa Rican authorised CA (BCCR Sello Electronico for legal
+entities, or BCCR Firma Digital for natural persons). The cedula
+holder is identified in the subject; corporate certificates carry
+the cedula juridica.
+"""
+smart_card_requirement = "common"
+hsm_requirement = "recommended_for_high_volume"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses without a Costa Rican establishment must
+register for IVA in Costa Rica by appointing a Costa Rican
+representative who holds the cedula juridica and digital
+signature. B2C cross-border digital services can register under
+the IVA Servicios Digitales Transfronterizos regime.
+"""
+
+[validator]
+backend = "jvm:saxon"
+backend_notes = """
+ATV uses a proprietary XML schema (FacturaElectronica,
+NotaCreditoElectronica, NotaDebitoElectronica, TiqueteElectronico)
+validated via Saxon-HE. The business-rule layer (BR-CR-*) covers
+cedula checksum, IVA rate enumeration (13% standard, 4% reduced,
+2% medical, 1% basket), clave numerica (50-digit) format, and
+per-comprobante-type situacion validation. Signature verification
+delegates to validator-kosit.
+"""
+
+[interop]
+formats = ["ATV XML 4.4 (Hacienda CR proprietary)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+ATV comprobantes are national-format-only; Peppol envelopes are
+NOT accepted. There is no PEPPOL PINT-CR profile.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/costa-rica"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/costa-rica"
+
+[follow_ups]
+items = [
+    "Track ATV schema version as Hacienda publishes 5.x (currently 4.4 in force)",
+    "Add Mensaje de Receptor (Aceptacion/Rechazo) flow for the buyer-side acknowledgement",
+    "Pin a Costa Rican fiscal-representative partner once production scale demands it",
+]

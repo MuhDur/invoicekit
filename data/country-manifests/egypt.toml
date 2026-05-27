@@ -1,0 +1,116 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-793 country feasibility manifest: Egypt.
+#
+# Egypt's ETA (Egyptian Tax Authority) operates a mandatory CTC
+# e-invoicing system: every B2B invoice must be cleared by ETA's
+# central platform before delivery, with rolling phases since 2020.
+
+schema_version = "1.0"
+country = "EG"
+country_name = "Egypt"
+program = "Egyptian Tax Authority e-Invoicing"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-793-manifest-egypt-241"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "ETA — e-Invoicing portal"
+url = "https://eta.gov.eg/en/Pages/e-invoice.aspx"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Law 67/2016 Value Added Tax (foundation of e-invoicing mandate)"
+url = "https://www.eta.gov.eg/sites/default/files/2020-09/qanon67_2016.pdf"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "ETA e-Invoicing SDK documentation"
+url = "https://sdk.invoicing.eta.gov.eg/"
+kind = "api_documentation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "ETA e-Invoice technical specification"
+url = "https://sdk.invoicing.eta.gov.eg/posting_invoices"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "public"
+notes = """
+ETA operates a publicly accessible preproduction environment
+(api.preprod.invoicing.eta.gov.eg) that any registered developer
+can use after obtaining a developer account. Production access
+requires an Egyptian Tax Registration Number (TRN) and an
+ETA-issued client certificate.
+"""
+endpoint = "https://api.preprod.invoicing.eta.gov.eg/api/v1.0/documentsubmissions"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_EG_ETA_TOKEN"
+
+[production]
+endpoint = "https://api.invoicing.eta.gov.eg/api/v1.0/documentsubmissions"
+production_credentials_env_var = "INVOICEKIT_PROD_EG_ETA_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every e-invoice document must be signed with a CADES-BES signature
+(CMS Advanced Electronic Signature) using a USB-token certificate
+issued by an Egyptian ITIDA-licensed CA (Egypt Trust, Misr for
+Digital Authentication). The signature is computed over the
+canonicalized JSON document body. The ETA portal supports both
+direct submission and reseller-led submission.
+"""
+smart_card_requirement = "common"
+hsm_requirement = "recommended_for_high_volume"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses without an Egyptian establishment must
+register for VAT in Egypt by appointing an Egyptian tax
+representative who holds the TRN and ETA certificate. Cross-
+border B2B flow typically uses the Egyptian buyer's
+self-invoicing path under Reverse Charge Mechanism.
+"""
+
+[validator]
+backend = "rest:eta-egypt"
+backend_notes = """
+ETA is the authoritative validator: it accepts a JSON envelope,
+runs server-side validation with rule-level diagnostics
+returned in the response payload (10000-series for envelope
+errors, 20000-series for business rule failures). The rust side
+runs a minimal pre-validator (TRN format, line-item totals,
+required-field presence) before the REST call to avoid trivially
+malformed submissions consuming rate-limit quota.
+"""
+
+[interop]
+formats = ["ETA JSON envelope (Egypt proprietary)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+ETA accepts only its JSON envelope. There is no PEPPOL PINT-EG
+profile. Cross-border invoices must be translated to ETA JSON
+before submission.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/egypt"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/egypt"
+
+[follow_ups]
+items = [
+    "Track ETA's e-Receipt phase (currently rolling out for B2C alongside e-Invoice for B2B)",
+    "Confirm whether ETA will move from CADES-BES to a XAdES variant as the SDK evolves",
+    "Add support for ETA's Document Type catalogs as they expand",
+]

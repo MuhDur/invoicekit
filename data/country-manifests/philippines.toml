@@ -1,0 +1,118 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-796 country feasibility manifest: Philippines.
+#
+# The Philippines' BIR (Bureau of Internal Revenue) operates the
+# EIS (Electronic Invoicing System) under the TRAIN law: every
+# large taxpayer must transmit B2B invoices to BIR's central
+# database in real-time, with phased rollout to medium taxpayers
+# from 2026 onward.
+
+schema_version = "1.0"
+country = "PH"
+country_name = "Philippines"
+program = "Electronic Invoicing System (EIS) — BIR"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-796-manifest-philippines-14s"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "BIR — Electronic Invoicing System portal"
+url = "https://www.bir.gov.ph/index.php/eis.html"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "TRAIN law (Republic Act 10963, Section 237-A)"
+url = "https://www.officialgazette.gov.ph/downloads/2017/12dec/20171219-RA-10963-RRD.pdf"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "BIR Revenue Regulations 8-2022 (EIS technical regulation)"
+url = "https://www.bir.gov.ph/images/bir_files/internal_communications_2/RRs/2022%20RRs/RR%20No.%208-2022.pdf"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "EIS technical specification (JSON schema)"
+url = "https://eis.bir.gov.ph/dev/documentation"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "partner_gated"
+notes = """
+BIR's EIS sandbox is gated by taxpayer enrollment in the EIS
+programme — currently only large taxpayers (top 1000) are
+enrolled. Software developers can request sandbox access via the
+BIR EIS technical support, but production access requires an
+Philippine TIN (Tax Identification Number) and EIS enrollment.
+"""
+endpoint = "https://eis-sandbox.bir.gov.ph/api/v1/transmit"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_PH_BIR_TOKEN"
+
+[production]
+endpoint = "https://eis.bir.gov.ph/api/v1/transmit"
+production_credentials_env_var = "INVOICEKIT_PROD_PH_BIR_TOKEN"
+
+[trust]
+qualified_seal_requirement = "qes_optional"
+qualified_seal_notes = """
+EIS transmissions authenticate with a BIR-issued API token tied
+to the taxpayer's TIN. A digital signature on the invoice itself
+is not required for the EIS submission, but the underlying
+invoice / receipt must still bear a printed serial number from
+the taxpayer's BIR-approved ATP (Authority to Print) or CAS
+(Computerised Accounting System) for legal validity.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "none"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses providing taxable services to Philippine
+customers must register for VAT by appointing a Philippine
+representative who holds the TIN and EIS credentials. The recent
+amendments under RA 11976 (Ease of Paying Taxes Act) simplified
+this for digital-services providers, but B2B invoicing via EIS
+still requires Philippine representation for large-taxpayer
+inclusion.
+"""
+
+[validator]
+backend = "rest:bir-eis"
+backend_notes = """
+BIR EIS is the authoritative validator: it accepts a JSON
+envelope, runs server-side validation, and returns rule-level
+diagnostics in the response payload. The rust side runs a
+minimal pre-validator (TIN checksum, VAT rate enumeration 12%,
+required-field presence) before the REST call.
+"""
+
+[interop]
+formats = ["BIR EIS JSON envelope (Philippines proprietary)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+EIS is national-format-only. There is no PEPPOL PINT-PH profile.
+Cross-border invoices to Philippine large taxpayers must be
+translated to the EIS JSON envelope.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/philippines"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/philippines"
+
+[follow_ups]
+items = [
+    "Track BIR's phased EIS expansion (large 2022, medium expected 2026, small TBA)",
+    "Confirm whether the EIS schema will move from JSON to UBL as part of ASEAN harmonisation",
+    "Pin a Philippine fiscal-representative partner once EIS enrollment expands beyond top-1000 taxpayers",
+]

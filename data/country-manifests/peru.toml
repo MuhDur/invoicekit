@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-788 country feasibility manifest: Peru.
+#
+# Peru's SUNAT (Superintendencia Nacional de Aduanas y de
+# Administracion Tributaria) operates a Sistema de Emision
+# Electronica (SEE) that requires CTC clearance for every B2B and
+# most B2C documents through one of two operational paths:
+# SEE-OSE (operator-based) or SEE-SOL (taxpayer-direct).
+
+schema_version = "1.0"
+country = "PE"
+country_name = "Peru"
+program = "Sistema de Emision Electronica (SUNAT)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-788-manifest-peru-r7r"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "SUNAT — Sistema de Emision Electronica portal"
+url = "https://www.sunat.gob.pe/cl-at-ittipcom/index.htm"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Resolucion de Superintendencia 097-2012/SUNAT (e-invoicing framework)"
+url = "https://www.sunat.gob.pe/legislacion/superin/2012/097-2012.pdf"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Anexo 8 Resolucion 097-2012/SUNAT (UBL 2.1 specification)"
+url = "https://www.sunat.gob.pe/legislacion/superin/2018/anexos/anexoVIII-117-2018.pdf"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "List of authorised OSE (Operadores de Servicios Electronicos)"
+url = "https://www.sunat.gob.pe/operatividadaduanera/novedades/comprobantesAutorizacion.html"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "requires_local_tax_id"
+notes = """
+SUNAT operates a public beta environment (e-beta.sunat.gob.pe)
+that any taxpayer with a Peruvian RUC (Registro Unico de
+Contribuyentes) can use after enrolling for SEE-SOL or contracting
+a SEE-OSE partner. Foreign-only providers cannot obtain a RUC
+directly; the standard path is through a SEE-OSE partner that
+holds RUC and the SUNAT-issued OSE authorisation. OSE
+authorisation is a documented 3-6 month audit process.
+"""
+endpoint = "https://e-beta.sunat.gob.pe/ol-ti-itcpfegem-beta/billService"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_PE_SUNAT_CERT"
+
+[production]
+endpoint = "https://e-factura.sunat.gob.pe/ol-ti-itcpfegem/billService"
+production_credentials_env_var = "INVOICEKIT_PROD_PE_SUNAT_CERT"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every SEE submission must be signed with a Certificado Digital
+issued by a Peruvian CA accredited by INDECOPI under the Ley de
+Firmas y Certificados Digitales 27269 (Camerfirma Peru, La Llave,
+Soluciones Tecnologicas y Procesos). The certificate carries the
+issuer's RUC in the subject distinguished name. Signature is
+XML-DSig over a canonical UBL 2.1 representation defined in
+Anexo 8.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "required_for_OSE_signing_keys"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses without a Peruvian establishment must register
+for IGV (Impuesto General a las Ventas) in Peru by appointing a
+Peruvian tax representative (representante legal) who holds the
+RUC and digital certificate, or alternatively work through a SEE-
+OSE partner that multiplexes RUC-on-behalf-of-foreign-sellers
+arrangements. Foreign digital-services providers can register
+under the IGV B2C foreign-providers regime for distance sales.
+"""
+
+[validator]
+backend = "rust_native"
+backend_notes = """
+SUNAT SEE uses UBL 2.1 with Peru-specific extensions (Anexo 8)
+for RUC validation, IGV rate enumeration (18% standard, 10%
+reduced for tourism), ISC (Impuesto Selectivo al Consumo)
+brackets, and per-document-type series authorisation. Structural
+XSD validation runs in the shared rust-native UBL validator; the
+SUNAT business rules (BR-PE-*) live in the rulepack runtime.
+Signature verification delegates to validator-kosit.
+"""
+
+[interop]
+formats = ["UBL 2.1 (SEE-SOL + SEE-OSE flavours, Anexo 8)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+SUNAT SEE is national-format-only; Peppol envelopes are NOT
+accepted. Cross-border senders must translate to the SUNAT UBL
+flavour before submission. There is no PEPPOL PINT-PE profile.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/peru"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/peru"
+
+[follow_ups]
+items = [
+    "Select two Peruvian SEE-OSE partners (primary + fallback) with documented per-document pricing",
+    "Track the SUNAT GRE (Guia de Remision Electronica) rollout for transport documents",
+    "Pin Anexo 8 version as SUNAT publishes amendments (currently anexoVIII-117-2018)",
+]
