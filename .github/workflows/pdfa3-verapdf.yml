@@ -1,0 +1,157 @@
+name: PDF/A-3 veraPDF gate
+
+# T-053 impl-verapdf: closes the gate waived in PR #114.
+#
+# Renders 30 Factur-X PDFs (5 per profile x 6 profiles) using the
+# Typst-backed invoicekit-render-pdf, post-processes each via
+# invoicekit-render-pdf-postproc::embed_factur_x, and validates
+# every output against veraPDF --profile=3b AND --profile=3u.
+# Any failure prints the per-file veraPDF report.
+#
+# veraPDF is a JVM application; the install step downloads the
+# pinned headless installer from verapdf.org. Pinning the version
+# keeps the gate deterministic across reruns.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/render-pdf/**"
+      - "crates/render-pdf-postproc/**"
+      - "tools/render-factur-x-acceptance/**"
+      - ".github/workflows/pdfa3-verapdf.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/render-pdf/**"
+      - "crates/render-pdf-postproc/**"
+      - "tools/render-factur-x-acceptance/**"
+      - ".github/workflows/pdfa3-verapdf.yml"
+  workflow_dispatch:
+  schedule:
+    # 04:23 UTC daily so a fresh veraPDF release doesn't surprise
+    # the next tagged release. Stagger from the fuzz nightly to
+    # avoid runner contention.
+    - cron: "23 4 * * *"
+
+concurrency:
+  group: pdfa3-verapdf-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  VERAPDF_VERSION: "1.26.5"
+
+jobs:
+  verapdf-gate:
+    name: veraPDF --profile=3b + --profile=3u
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pdfa3-verapdf
+      - name: Install veraPDF ${{ env.VERAPDF_VERSION }} headless
+        run: |
+          set -euo pipefail
+          ZIP="verapdf-greenfield-${VERAPDF_VERSION}-installer.zip"
+          URL="https://software.verapdf.org/releases/verapdf-greenfield-${VERAPDF_VERSION}-installer.zip"
+          curl -fsSL "$URL" -o /tmp/verapdf.zip
+          mkdir -p /tmp/verapdf-installer
+          (cd /tmp/verapdf-installer && unzip -q /tmp/verapdf.zip)
+          # Locate the headless installer JAR — the directory layout
+          # varies slightly per release, so we glob for it.
+          installer=$(find /tmp/verapdf-installer -maxdepth 3 -name 'verapdf-izpack-installer-*.jar' | head -1)
+          if [ -z "$installer" ]; then
+            echo "::error::veraPDF installer JAR not found under /tmp/verapdf-installer"
+            ls -lR /tmp/verapdf-installer >&2
+            exit 1
+          fi
+          cat > /tmp/verapdf-auto-install.xml <<'XML'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <AutomatedInstallation langpack="eng">
+            <com.izforge.izpack.panels.target.TargetPanel id="install.dir">
+              <installpath>/opt/verapdf</installpath>
+            </com.izforge.izpack.panels.target.TargetPanel>
+            <com.izforge.izpack.panels.userinput.UserInputPanel id="ConfigurationPanel">
+              <userInput/>
+            </com.izforge.izpack.panels.userinput.UserInputPanel>
+            <com.izforge.izpack.panels.packs.PacksPanel id="package.select">
+              <pack index="0" name="veraPDF GUI" selected="false"/>
+              <pack index="1" name="veraPDF Mac and *nix Scripts" selected="true"/>
+              <pack index="2" name="veraPDF Validation model" selected="true"/>
+              <pack index="3" name="veraPDF Documentation" selected="false"/>
+              <pack index="4" name="veraPDF Sample Plugins" selected="false"/>
+            </com.izforge.izpack.panels.packs.PacksPanel>
+            <com.izforge.izpack.panels.install.InstallPanel id="install"/>
+            <com.izforge.izpack.panels.finish.FinishPanel id="finish"/>
+          </AutomatedInstallation>
+          XML
+          sudo java -jar "$installer" /tmp/verapdf-auto-install.xml
+          sudo chmod +x /opt/verapdf/verapdf
+          /opt/verapdf/verapdf --version
+          echo "/opt/verapdf" >> "$GITHUB_PATH"
+      - name: Render 30 Factur-X candidate PDFs
+        run: |
+          set -euo pipefail
+          mkdir -p target/factur-x-acceptance
+          cargo run --release --quiet \
+            -p invoicekit-render-factur-x-acceptance \
+            -- --out target/factur-x-acceptance
+          find target/factur-x-acceptance -name '*.pdf' | wc -l
+      - name: veraPDF --profile=3b
+        run: |
+          set -euo pipefail
+          mkdir -p target/verapdf-3b
+          fail=0
+          while IFS= read -r pdf; do
+            report="target/verapdf-3b/$(basename "${pdf%.pdf}").xml"
+            if ! verapdf --flavour 3b --format xml "$pdf" > "$report"; then
+              echo "::error::veraPDF 3b reported a failure for $pdf"
+              cat "$report"
+              fail=1
+            fi
+            if grep -q 'isCompliant="false"' "$report"; then
+              echo "::error::veraPDF 3b: $pdf is non-conformant"
+              cat "$report"
+              fail=1
+            fi
+          done < <(find target/factur-x-acceptance -name '*.pdf' | sort)
+          exit "$fail"
+      - name: veraPDF --profile=3u
+        run: |
+          set -euo pipefail
+          mkdir -p target/verapdf-3u
+          fail=0
+          while IFS= read -r pdf; do
+            report="target/verapdf-3u/$(basename "${pdf%.pdf}").xml"
+            if ! verapdf --flavour 3u --format xml "$pdf" > "$report"; then
+              echo "::error::veraPDF 3u reported a failure for $pdf"
+              cat "$report"
+              fail=1
+            fi
+            if grep -q 'isCompliant="false"' "$report"; then
+              echo "::error::veraPDF 3u: $pdf is non-conformant"
+              cat "$report"
+              fail=1
+            fi
+          done < <(find target/factur-x-acceptance -name '*.pdf' | sort)
+          exit "$fail"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verapdf-reports
+          path: |
+            target/factur-x-acceptance/
+            target/verapdf-3b/
+            target/verapdf-3u/
+          if-no-files-found: ignore
+          retention-days: 30

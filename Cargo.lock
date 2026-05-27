@@ -2407,6 +2407,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoicekit-render-factur-x-acceptance"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-render-pdf",
+ "invoicekit-render-pdf-postproc",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "invoicekit-render-html"
 version = "0.0.0"
 dependencies = [
