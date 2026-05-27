@@ -12,22 +12,22 @@ GENERATOR = REPO / "tools" / "cii-coverage" / "generate_coverage.py"
 
 EXPECTED_CLASSES = {
     "cii_document_field_extension",
+    "cii_preserved_xml_extension",
     "current_ir",
     "invoicekit_metadata_extension",
     "lossiness_ledger_preserved",
     "profile_extension_payload",
-    "unsupported_gap",
 }
 
 EXPECTED_COUNTS = {
     "cii_document_field_extension": 2,
+    "cii_preserved_xml_extension": 429,
     "complex_types_reachable": 95,
     "current_ir": 74,
     "elements_total": 951,
     "invoicekit_metadata_extension": 0,
-    "lossiness_ledger_preserved": 443,
-    "profile_extension_payload": 9,
-    "unsupported_gap": 423,
+    "lossiness_ledger_preserved": 441,
+    "profile_extension_payload": 5,
 }
 
 EXPECTED_SOURCE_HASHES = {
@@ -155,6 +155,20 @@ def test_named_metadata_overload_boundaries_are_explicit() -> None:
         "profile_extension_payload",
         "application context must not be classified wholesale as InvoiceKit metadata",
     )
+    _require(
+        "application_contexts[]" in " ".join(application_context["extension_fields"]),
+        "application context extension field must be named",
+    )
+    for element, expected_field in [
+        ("SpecifiedTransactionID", "transaction_ids[]"),
+        ("TestIndicator", "test_indicators[]"),
+    ]:
+        row = _row("ExchangedDocumentContextType", element)
+        _require_equal(row["class"], "profile_extension_payload", f"{element} class")
+        _require(
+            expected_field in " ".join(row["extension_fields"]),
+            f"{element} extension field must be named",
+        )
     named_decisions = _artifact()["named_mapping_decisions"]
     _require(
         any(
@@ -182,9 +196,11 @@ def test_known_cii_d16b_gap_families_are_not_silent() -> None:
         ("HeaderTradeAgreementType", "AdditionalReferencedDocument"): (
             "lossiness_ledger_preserved"
         ),
-        ("TradePartyType", "ID"): "lossiness_ledger_preserved",
-        ("TradePartyType", "GlobalID"): "lossiness_ledger_preserved",
-        ("CrossIndustryInvoiceType", "ValuationBreakdownStatement"): "unsupported_gap",
+        ("TradePartyType", "ID"): "cii_preserved_xml_extension",
+        ("TradePartyType", "GlobalID"): "cii_preserved_xml_extension",
+        ("CrossIndustryInvoiceType", "ValuationBreakdownStatement"): (
+            "cii_preserved_xml_extension"
+        ),
     }
     for key, expected_class in expectations.items():
         _require_equal(_row(*key)["class"], expected_class, f"{key} class")
