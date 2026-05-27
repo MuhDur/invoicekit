@@ -28,12 +28,20 @@ path = "src/bin/gen_schema.rs"
 name = "migrate-archive"
 path = "src/bin/migrate_archive.rs"
 
+[[bin]]
+name = "invoicekit-admin"
+path = "src/bin/invoicekit_admin.rs"
+
 [dependencies]
+blake3 = "1"
 invoicekit-codelists = { path = "../codelists", version = "0.0.0" }
 invoicekit-ir = { path = "../ir", version = "0.0.0" }
 invoicekit-migration = { path = "../migration", version = "0.0.0" }
+invoicekit-reconcile = { path = "../reconcile", version = "0.0.0" }
+rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+thiserror.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
