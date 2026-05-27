@@ -12,5 +12,6 @@
 // schemas/. Re-exports stay deliberately namespace-flat: callers
 // import { CommercialDocument } from "@invoicekit/types".
 
+export * from "./generated/invoicekit_capabilities_v1.js";
 export * from "./generated/invoicekit_ir_v1.js";
 export * from "./generated/validation_result.js";
