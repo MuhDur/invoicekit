@@ -24,7 +24,7 @@
 
 use invoicekit_format_cii::{from_xml as cii_from_xml, to_xml as cii_to_xml, CiiError};
 use invoicekit_format_ubl::{from_xml as ubl_from_xml, to_xml as ubl_to_xml, UblError};
-use invoicekit_ir::{CommercialDocument, IrError, LossinessEntry, LossinessLedger};
+use invoicekit_ir::{CommercialDocument, IrError, LossinessLedger};
 use invoicekit_profile_factur_x::{
     project as factur_x_project, FacturXError, FacturXProfile, ProjectedDocument,
 };
@@ -109,162 +109,18 @@ fn compute_ubl_ledger(
     source: &CommercialDocument,
 ) -> Result<LossinessLedger, LossinessGeneratorError> {
     let xml = ubl_to_xml(source)?;
-    let reparsed = ubl_from_xml(&xml)?;
-    diff_ledger(source, &reparsed, "format-ubl")
+    let (reparsed, _) = ubl_from_xml(&xml)?;
+    LossinessLedger::from_roundtrip_comparison(source, &reparsed, "format-ubl")
+        .map_err(LossinessGeneratorError::Ledger)
 }
 
 fn compute_cii_ledger(
     source: &CommercialDocument,
 ) -> Result<LossinessLedger, LossinessGeneratorError> {
     let xml = cii_to_xml(source)?;
-    let reparsed = cii_from_xml(&xml)?;
-    diff_ledger(source, &reparsed, "format-cii")
-}
-
-#[allow(clippy::too_many_lines)]
-fn diff_ledger(
-    source: &CommercialDocument,
-    reparsed: &CommercialDocument,
-    adapter: &'static str,
-) -> Result<LossinessLedger, LossinessGeneratorError> {
-    let mut preserved: Vec<LossinessEntry> = Vec::new();
-    let mut lost: Vec<LossinessEntry> = Vec::new();
-
-    // Top-level field-by-field comparison. We pick the
-    // user-visible fields the evidence bundle cares about — id,
-    // dates, currency, line count, tax_summary length — and skip
-    // the metadata that the adapter regenerates (trace_id, etc.).
-    record(
-        &mut preserved,
-        &mut lost,
-        "/id",
-        source.id.as_str() == reparsed.id.as_str(),
-        || format!("{adapter} round-trips /id"),
-        || format!("{adapter} dropped /id"),
-    );
-    record(
-        &mut preserved,
-        &mut lost,
-        "/document_number",
-        source.document_number.as_str() == reparsed.document_number.as_str(),
-        || format!("{adapter} round-trips /document_number"),
-        || format!("{adapter} dropped /document_number"),
-    );
-    record(
-        &mut preserved,
-        &mut lost,
-        "/currency",
-        source.currency.as_str() == reparsed.currency.as_str(),
-        || format!("{adapter} round-trips /currency"),
-        || format!("{adapter} dropped /currency"),
-    );
-    record(
-        &mut preserved,
-        &mut lost,
-        "/issue_date",
-        source.issue_date.as_str() == reparsed.issue_date.as_str(),
-        || format!("{adapter} round-trips /issue_date"),
-        || format!("{adapter} dropped /issue_date"),
-    );
-    record(
-        &mut preserved,
-        &mut lost,
-        "/lines",
-        source.lines == reparsed.lines,
-        || {
-            format!(
-                "{adapter} round-trips {n} line(s) byte-for-byte in IR",
-                n = source.lines.len()
-            )
-        },
-        || {
-            format!(
-                "{adapter} line drift: source={s} reparsed={r}",
-                s = source.lines.len(),
-                r = reparsed.lines.len(),
-            )
-        },
-    );
-    record(
-        &mut preserved,
-        &mut lost,
-        "/tax_summary",
-        source.tax_summary == reparsed.tax_summary,
-        || {
-            format!(
-                "{adapter} round-trips {n} tax bucket(s) byte-for-byte in IR",
-                n = source.tax_summary.len()
-            )
-        },
-        || {
-            format!(
-                "{adapter} tax_summary drift: source={s} reparsed={r}",
-                s = source.tax_summary.len(),
-                r = reparsed.tax_summary.len(),
-            )
-        },
-    );
-    record(
-        &mut preserved,
-        &mut lost,
-        "/notes",
-        source.notes == reparsed.notes,
-        || {
-            format!(
-                "{adapter} round-trips {n} note(s) byte-for-byte in IR",
-                n = source.notes.len()
-            )
-        },
-        || {
-            format!(
-                "{adapter} notes drift: source={s} reparsed={r}",
-                s = source.notes.len(),
-                r = reparsed.notes.len(),
-            )
-        },
-    );
-    record(
-        &mut preserved,
-        &mut lost,
-        "/extensions",
-        source.extensions == reparsed.extensions,
-        || {
-            format!(
-                "{adapter} round-trips {n} extension(s) byte-for-byte in IR",
-                n = source.extensions.len()
-            )
-        },
-        || {
-            format!(
-                "{adapter} extension drift: source={s} reparsed={r}",
-                s = source.extensions.len(),
-                r = reparsed.extensions.len(),
-            )
-        },
-    );
-
-    LossinessLedger::new(preserved, lost).map_err(LossinessGeneratorError::Ledger)
-}
-
-fn record(
-    preserved: &mut Vec<LossinessEntry>,
-    lost: &mut Vec<LossinessEntry>,
-    path: &'static str,
-    survived: bool,
-    on_preserved: impl FnOnce() -> String,
-    on_lost: impl FnOnce() -> String,
-) {
-    if survived {
-        preserved.push(LossinessEntry {
-            path: path.to_owned(),
-            reason: on_preserved(),
-        });
-    } else {
-        lost.push(LossinessEntry {
-            path: path.to_owned(),
-            reason: on_lost(),
-        });
-    }
+    let (reparsed, _) = cii_from_xml(&xml)?;
+    LossinessLedger::from_roundtrip_comparison(source, &reparsed, "format-cii")
+        .map_err(LossinessGeneratorError::Ledger)
 }
 
 /// Canonical Cargo package name of this crate.
@@ -284,12 +140,12 @@ pub const fn crate_name() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_ledger, crate_name, diff_ledger, TargetFormat};
+    use super::{compute_ledger, crate_name, TargetFormat};
 
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly, DecimalValue,
         DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentType, Iso4217Code,
-        JurisdictionExtension, LocalizedString, MonetaryTotal, Party, PartyTaxId,
+        JurisdictionExtension, LocalizedString, LossinessLedger, MonetaryTotal, Party, PartyTaxId,
         PaymentInstruction, PaymentInstructionKind, PaymentTerms, PostalAddress, SchemaVersion,
         TaxCategorySummary,
     };
@@ -498,8 +354,12 @@ mod tests {
             .map_err(|error| error.to_string())?,
         );
 
-        let ledger = diff_ledger(&source_with_extension, &tampered, "test-adapter")
-            .map_err(|error| error.to_string())?;
+        let ledger = LossinessLedger::from_roundtrip_comparison(
+            &source_with_extension,
+            &tampered,
+            "test-adapter",
+        )
+        .map_err(|error| error.to_string())?;
         for path in ["/lines", "/tax_summary", "/notes", "/extensions"] {
             assert!(
                 ledger.lost.iter().any(|entry| entry.path == path),

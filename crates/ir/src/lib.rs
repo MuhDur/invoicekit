@@ -1064,6 +1064,26 @@ impl LossinessLedger {
         Ok(ledger)
     }
 
+    /// Builds a field-level ledger by comparing a source document with
+    /// the document produced after a format projection round trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`IrError`] when a generated ledger entry is invalid.
+    pub fn from_roundtrip_comparison(
+        source: &CommercialDocument,
+        reparsed: &CommercialDocument,
+        adapter: &'static str,
+    ) -> Result<Self, IrError> {
+        let mut preserved: Vec<LossinessEntry> = Vec::new();
+        let mut lost: Vec<LossinessEntry> = Vec::new();
+
+        record_identity_lossiness(&mut preserved, &mut lost, source, reparsed, adapter);
+        record_payload_lossiness(&mut preserved, &mut lost, source, reparsed, adapter);
+
+        Self::new(preserved, lost)
+    }
+
     /// Validates ledger entries.
     ///
     /// # Errors
@@ -1077,6 +1097,209 @@ impl LossinessLedger {
             entry.validate("lossiness.lost")?;
         }
         Ok(())
+    }
+}
+
+fn record_identity_lossiness(
+    preserved: &mut Vec<LossinessEntry>,
+    lost: &mut Vec<LossinessEntry>,
+    source: &CommercialDocument,
+    reparsed: &CommercialDocument,
+    adapter: &'static str,
+) {
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/id",
+        source.id.as_str() == reparsed.id.as_str(),
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/schema_version",
+        source.schema_version == reparsed.schema_version,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/document_type",
+        source.document_type == reparsed.document_type,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/issue_date",
+        source.issue_date == reparsed.issue_date,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/tax_point_date",
+        source.tax_point_date == reparsed.tax_point_date,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/due_date",
+        source.due_date == reparsed.due_date,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/document_number",
+        source.document_number.as_str() == reparsed.document_number.as_str(),
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/currency",
+        source.currency.as_str() == reparsed.currency.as_str(),
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/meta",
+        source.meta == reparsed.meta,
+        adapter,
+    );
+}
+
+fn record_payload_lossiness(
+    preserved: &mut Vec<LossinessEntry>,
+    lost: &mut Vec<LossinessEntry>,
+    source: &CommercialDocument,
+    reparsed: &CommercialDocument,
+    adapter: &'static str,
+) {
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/supplier",
+        source.supplier == reparsed.supplier,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/customer",
+        source.customer == reparsed.customer,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/payee",
+        source.payee == reparsed.payee,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/payment_terms",
+        source.payment_terms == reparsed.payment_terms,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/payment_instructions",
+        source.payment_instructions == reparsed.payment_instructions,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/lines",
+        source.lines == reparsed.lines,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/tax_summary",
+        source.tax_summary == reparsed.tax_summary,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/monetary_total",
+        source.monetary_total == reparsed.monetary_total,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/attachments",
+        source.attachments == reparsed.attachments,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/references",
+        source.references == reparsed.references,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/notes",
+        source.notes == reparsed.notes,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/extensions",
+        source.extensions == reparsed.extensions,
+        adapter,
+    );
+}
+
+fn record_field_lossiness(
+    preserved: &mut Vec<LossinessEntry>,
+    lost: &mut Vec<LossinessEntry>,
+    path: &'static str,
+    survived: bool,
+    adapter: &'static str,
+) {
+    record_lossiness(
+        preserved,
+        lost,
+        path,
+        survived,
+        || format!("{adapter} round-trips {path}"),
+        || format!("{adapter} drift at {path}"),
+    );
+}
+
+fn record_lossiness(
+    preserved: &mut Vec<LossinessEntry>,
+    lost: &mut Vec<LossinessEntry>,
+    path: &'static str,
+    survived: bool,
+    on_preserved: impl FnOnce() -> String,
+    on_lost: impl FnOnce() -> String,
+) {
+    if survived {
+        preserved.push(LossinessEntry {
+            path: path.to_owned(),
+            reason: on_preserved(),
+        });
+    } else {
+        lost.push(LossinessEntry {
+            path: path.to_owned(),
+            reason: on_lost(),
+        });
     }
 }
 

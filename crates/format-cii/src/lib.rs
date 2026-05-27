@@ -16,9 +16,9 @@ use invoicekit_canonical::{canonicalize_xml, XmlCanonicalizeError};
 use invoicekit_ir::{
     Attachment, CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly,
     DecimalValue, DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference,
-    DocumentType, IrError, Iso4217Code, JurisdictionExtension, LocalizedString, MonetaryTotal,
-    MoneyAmount, Party, PartyTaxId, PaymentInstruction, PaymentInstructionKind, PaymentTerms,
-    PostalAddress, Quantity, SchemaVersion, TaxCategorySummary,
+    DocumentType, IrError, Iso4217Code, JurisdictionExtension, LocalizedString, LossinessLedger,
+    MonetaryTotal, MoneyAmount, Party, PartyTaxId, PaymentInstruction, PaymentInstructionKind,
+    PaymentTerms, PostalAddress, Quantity, SchemaVersion, TaxCategorySummary,
 };
 use quick_xml::events::{attributes::AttrError, BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
@@ -233,11 +233,21 @@ pub fn to_xml(document: &CommercialDocument) -> Result<String, CiiError> {
 ///
 /// ```
 /// # let xml = r#"<rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100" xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100" xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100"><rsm:ExchangedDocument><ram:ID>INV-1</ram:ID><ram:TypeCode>380</ram:TypeCode><ram:IssueDateTime><udt:DateTimeString format="102">20260526</udt:DateTimeString></ram:IssueDateTime></rsm:ExchangedDocument><rsm:SupplyChainTradeTransaction><ram:IncludedSupplyChainTradeLineItem><ram:AssociatedDocumentLineDocument><ram:LineID>1</ram:LineID></ram:AssociatedDocumentLineDocument><ram:SpecifiedTradeProduct><ram:Name>Service</ram:Name></ram:SpecifiedTradeProduct><ram:SpecifiedLineTradeAgreement><ram:NetPriceProductTradePrice><ram:ChargeAmount>100.00</ram:ChargeAmount></ram:NetPriceProductTradePrice></ram:SpecifiedLineTradeAgreement><ram:SpecifiedLineTradeDelivery><ram:BilledQuantity unitCode="C62">1</ram:BilledQuantity></ram:SpecifiedLineTradeDelivery><ram:SpecifiedLineTradeSettlement><ram:SpecifiedTradeSettlementLineMonetarySummation><ram:LineTotalAmount>100.00</ram:LineTotalAmount></ram:SpecifiedTradeSettlementLineMonetarySummation></ram:SpecifiedLineTradeSettlement></ram:IncludedSupplyChainTradeLineItem><ram:ApplicableHeaderTradeAgreement><ram:SellerTradeParty><ram:Name>Supplier</ram:Name><ram:PostalTradeAddress><ram:LineOne>Main</ram:LineOne><ram:CityName>Berlin</ram:CityName><ram:PostcodeCode>10115</ram:PostcodeCode><ram:CountryID>DE</ram:CountryID></ram:PostalTradeAddress></ram:SellerTradeParty><ram:BuyerTradeParty><ram:Name>Customer</ram:Name><ram:PostalTradeAddress><ram:LineOne>Main</ram:LineOne><ram:CityName>Berlin</ram:CityName><ram:PostcodeCode>10115</ram:PostcodeCode><ram:CountryID>DE</ram:CountryID></ram:PostalTradeAddress></ram:BuyerTradeParty></ram:ApplicableHeaderTradeAgreement><ram:ApplicableHeaderTradeSettlement><ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode><ram:SpecifiedTradeSettlementHeaderMonetarySummation><ram:LineTotalAmount>100.00</ram:LineTotalAmount><ram:TaxBasisTotalAmount>100.00</ram:TaxBasisTotalAmount><ram:GrandTotalAmount>119.00</ram:GrandTotalAmount><ram:DuePayableAmount>119.00</ram:DuePayableAmount></ram:SpecifiedTradeSettlementHeaderMonetarySummation></ram:ApplicableHeaderTradeSettlement></rsm:SupplyChainTradeTransaction></rsm:CrossIndustryInvoice>"#;
-/// let parsed = invoicekit_format_cii::from_xml(xml).unwrap();
+/// let (parsed, ledger) = invoicekit_format_cii::from_xml(xml).unwrap();
 /// assert_eq!(parsed.document_type, invoicekit_ir::DocumentType::Invoice);
+/// assert!(ledger.lost.is_empty());
 /// ```
 #[allow(clippy::too_many_lines)]
-pub fn from_xml(input: &str) -> Result<CommercialDocument, CiiError> {
+pub fn from_xml(input: &str) -> Result<(CommercialDocument, LossinessLedger), CiiError> {
+    let document = parse_xml_document(input)?;
+    let serialized = to_xml(&document)?;
+    let reparsed = parse_xml_document(&serialized)?;
+    let ledger = LossinessLedger::from_roundtrip_comparison(&document, &reparsed, "format-cii")?;
+    Ok((document, ledger))
+}
+
+#[allow(clippy::too_many_lines)]
+fn parse_xml_document(input: &str) -> Result<CommercialDocument, CiiError> {
     let mut reader = Reader::from_str(input);
     reader.config_mut().trim_text(false);
     let mut xml_version = XmlVersion::default();
@@ -3848,11 +3858,20 @@ mod tests {
         assert_eq!(crate_name(), "invoicekit-format-cii");
     }
 
+    fn parse_document(xml: &str) -> CommercialDocument {
+        let (document, ledger) = from_xml(xml).unwrap();
+        assert!(
+            ledger.lost.is_empty(),
+            "successful CII fixture parse should not report lost IR fields"
+        );
+        document
+    }
+
     #[test]
     fn invoice_round_trip_preserves_core_ir() {
         let document = fixture(DocumentType::Invoice, 1);
         let xml = to_xml(&document).unwrap();
-        let parsed = from_xml(&xml).unwrap();
+        let parsed = parse_document(&xml);
         assert_eq!(parsed, document);
     }
 
@@ -3860,7 +3879,7 @@ mod tests {
     fn credit_note_round_trip_preserves_core_ir() {
         let document = fixture(DocumentType::CreditNote, 2);
         let xml = to_xml(&document).unwrap();
-        let parsed = from_xml(&xml).unwrap();
+        let parsed = parse_document(&xml);
         assert_eq!(parsed, document);
     }
 
@@ -3873,7 +3892,7 @@ mod tests {
         assert!(xml.contains(mapping::INVOICEKIT_CII_METADATA_EXTENSION_URN));
         assert!(!xml.contains("BusinessProcessSpecifiedDocumentContextParameter"));
         assert!(!xml.contains("BuyerReference"));
-        assert_eq!(from_xml(&xml).unwrap(), document);
+        assert_eq!(parse_document(&xml), document);
     }
 
     #[test]
@@ -3899,7 +3918,7 @@ mod tests {
             ),
         );
 
-        let parsed = from_xml(&with_buyer_reference).unwrap();
+        let parsed = parse_document(&with_buyer_reference);
         assert_eq!(parsed.meta, document.meta);
         let extension = parsed
             .extensions
@@ -3942,7 +3961,7 @@ mod tests {
         assert!(xml.contains("<ram:ID>PROCESS-43</ram:ID>"));
         assert!(xml.contains("<ram:ID>PROCESS-44</ram:ID>"));
         assert!(xml.contains("<ram:BuyerReference>BUYER-PO-8</ram:BuyerReference>"));
-        assert_eq!(from_xml(&xml).unwrap(), document);
+        assert_eq!(parse_document(&xml), document);
     }
 
     #[test]
@@ -3963,7 +3982,7 @@ mod tests {
         let xml = to_xml(&document).unwrap();
         assert!(xml.contains("GuidelineSpecifiedDocumentContextParameter"));
         assert!(xml.contains("urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic"));
-        assert_eq!(from_xml(&xml).unwrap(), document);
+        assert_eq!(parse_document(&xml), document);
     }
 
     #[test]
@@ -3988,7 +4007,7 @@ mod tests {
             1,
         );
 
-        let parsed = from_xml(&with_tax_representative).unwrap();
+        let parsed = parse_document(&with_tax_representative);
         let preserved = parsed
             .extensions
             .iter()
@@ -4013,7 +4032,7 @@ mod tests {
                     .and_then(|value| value.as_str())
                     .is_some_and(|xml| xml.contains("Tax Representative"))
         }));
-        assert_eq!(from_xml(&to_xml(&parsed).unwrap()).unwrap(), parsed);
+        assert_eq!(parse_document(&to_xml(&parsed).unwrap()), parsed);
     }
 
     #[test]
@@ -4030,7 +4049,7 @@ mod tests {
             &document_name,
         );
 
-        let parsed = from_xml(&with_document_name).unwrap();
+        let parsed = parse_document(&with_document_name);
         let preserved_xml = parsed
             .extensions
             .iter()
@@ -4043,7 +4062,7 @@ mod tests {
             .unwrap();
         assert!(preserved_xml.contains(r#"alpha="1" beta="2""#));
         assert!(preserved_xml.contains(CII_RAM_NAMESPACE_URI));
-        assert_eq!(from_xml(&to_xml(&parsed).unwrap()).unwrap(), parsed);
+        assert_eq!(parse_document(&to_xml(&parsed).unwrap()), parsed);
     }
 
     #[test]
@@ -4088,7 +4107,7 @@ mod tests {
             1,
         );
 
-        let parsed = from_xml(&with_party_identifiers).unwrap();
+        let parsed = parse_document(&with_party_identifiers);
         assert_eq!(parsed.supplier.id, document.supplier.id);
         let serialized = to_xml(&parsed).unwrap();
         let id_pos = serialized.find("4000001123452").unwrap();
@@ -4096,7 +4115,7 @@ mod tests {
             .find("<ram:Name>Supplier GmbH</ram:Name>")
             .unwrap();
         assert!(id_pos < name_pos);
-        assert_eq!(from_xml(&serialized).unwrap(), parsed);
+        assert_eq!(parse_document(&serialized), parsed);
     }
 
     #[test]
@@ -4112,7 +4131,7 @@ mod tests {
             1,
         );
 
-        let parsed = from_xml(&with_description_code).unwrap();
+        let parsed = parse_document(&with_description_code);
         let preserved = preserved_xml_items(&parsed);
         assert!(preserved.iter().any(|item| {
             item.get("container").and_then(|value| value.as_str())
@@ -4128,7 +4147,7 @@ mod tests {
             .find("<ram:AssociatedDocumentLineDocument>")
             .unwrap();
         assert!(description_pos < line_id_container_pos);
-        assert_eq!(from_xml(&serialized).unwrap(), parsed);
+        assert_eq!(parse_document(&serialized), parsed);
     }
 
     #[test]
@@ -4145,7 +4164,7 @@ mod tests {
             1,
         );
 
-        let parsed = from_xml(&with_contact).unwrap();
+        let parsed = parse_document(&with_contact);
         assert_eq!(parsed.supplier.contact, None);
         let preserved = preserved_xml_items(&parsed);
         assert!(preserved.iter().any(|item| {
@@ -4161,7 +4180,7 @@ mod tests {
         let serialized = to_xml(&parsed).unwrap();
         assert!(serialized.contains("<ram:DefinedTradeContact><ram:ID"));
         assert!(serialized.contains("CONTACT-ONLY"));
-        assert_eq!(from_xml(&serialized).unwrap(), parsed);
+        assert_eq!(parse_document(&serialized), parsed);
     }
 
     #[test]
@@ -4178,7 +4197,7 @@ mod tests {
             1,
         );
 
-        let parsed = from_xml(&with_contact).unwrap();
+        let parsed = parse_document(&with_contact);
         assert_eq!(parsed.supplier.contact, None);
         let preserved = preserved_xml_items(&parsed);
         assert!(preserved.iter().any(|item| {
@@ -4207,7 +4226,7 @@ mod tests {
         assert!(serialized.contains("<ram:URIID"));
         assert!(serialized.contains("<ram:ChannelCode"));
         assert!(serialized.contains("TELEPHONE"));
-        assert_eq!(from_xml(&serialized).unwrap(), parsed);
+        assert_eq!(parse_document(&serialized), parsed);
     }
 
     #[test]
@@ -4223,14 +4242,14 @@ mod tests {
             1,
         );
 
-        let parsed = from_xml(&xml).unwrap();
+        let parsed = parse_document(&xml);
         let serialized = to_xml(&parsed).unwrap();
         let transaction_pos = serialized
             .find("</rsm:SupplyChainTradeTransaction>")
             .unwrap();
         let valuation_pos = serialized.find("<rsm:ValuationBreakdownStatement").unwrap();
         assert!(transaction_pos < valuation_pos);
-        assert_eq!(from_xml(&serialized).unwrap(), parsed);
+        assert_eq!(parse_document(&serialized), parsed);
     }
 
     #[test]
@@ -4246,7 +4265,7 @@ mod tests {
             1,
         );
 
-        let parsed = from_xml(&with_profile_context).unwrap();
+        let parsed = parse_document(&with_profile_context);
         let extension = parsed
             .extensions
             .iter()
@@ -4268,7 +4287,7 @@ mod tests {
                 .map(Vec::as_slice),
             Some([json!("true")].as_slice())
         );
-        assert_eq!(from_xml(&to_xml(&parsed).unwrap()).unwrap(), parsed);
+        assert_eq!(parse_document(&to_xml(&parsed).unwrap()), parsed);
     }
 
     #[test]
@@ -4405,7 +4424,7 @@ mod tests {
             1,
         );
 
-        let parsed = from_xml(&with_context_fragments).unwrap();
+        let parsed = parse_document(&with_context_fragments);
         let serialized = to_xml(&parsed).unwrap();
         let exchanged_document_start = serialized.find("<rsm:ExchangedDocument>").unwrap();
         let id_pos = exchanged_document_start
@@ -4435,7 +4454,7 @@ mod tests {
         assert!(bim_pos < scenario_pos);
         assert!(scenario_pos < application_pos);
         assert!(application_pos < guideline_pos);
-        assert_eq!(from_xml(&serialized).unwrap(), parsed);
+        assert_eq!(parse_document(&serialized), parsed);
     }
 
     #[test]
@@ -4537,7 +4556,7 @@ mod tests {
                 seed,
             );
             let xml = to_xml(&document).unwrap();
-            assert_eq!(from_xml(&xml).unwrap(), document);
+            assert_eq!(parse_document(&xml), document);
         }
     }
 
@@ -4553,10 +4572,10 @@ mod tests {
         let xml = to_xml(&document).unwrap();
         assert!(xml.contains("Supplier &amp; Sons"));
         assert!(xml.contains("Customer &lt;EU&gt;"));
-        assert_eq!(from_xml(&xml).unwrap(), document);
+        assert_eq!(parse_document(&xml), document);
 
         let numeric_reference_xml = xml.replace("Supplier &amp; Sons", "Supplier &#x26; Sons");
-        assert_eq!(from_xml(&numeric_reference_xml).unwrap(), document);
+        assert_eq!(parse_document(&numeric_reference_xml), document);
     }
 
     #[test]
@@ -4622,8 +4641,8 @@ mod tests {
         fn parse_serialize_parse_is_stable(seed in 0_u32..128) {
             let document = fixture(DocumentType::Invoice, seed);
             let xml = to_xml(&document).unwrap();
-            let parsed = from_xml(&xml).unwrap();
-            let reparsed = from_xml(&to_xml(&parsed).unwrap()).unwrap();
+            let parsed = parse_document(&xml);
+            let reparsed = parse_document(&to_xml(&parsed).unwrap());
             prop_assert_eq!(parsed, reparsed);
         }
     }

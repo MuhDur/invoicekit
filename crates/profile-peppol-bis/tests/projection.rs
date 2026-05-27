@@ -27,7 +27,7 @@ fn fixture_paths() -> Vec<PathBuf> {
 }
 
 #[test]
-fn projects_twenty_plus_cross_border_fixtures_with_peppol_bis_headers() {
+fn projects_twenty_plus_cross_border_fixtures_with_peppol_bis_headers() -> Result<(), String> {
     let fixtures = fixture_paths();
     assert!(
         fixtures.len() >= 20,
@@ -36,11 +36,12 @@ fn projects_twenty_plus_cross_border_fixtures_with_peppol_bis_headers() {
     );
 
     for (i, path) in fixtures.iter().take(20).enumerate() {
-        let xml = fs::read_to_string(path).unwrap();
-        let document = from_xml(&xml)
-            .unwrap_or_else(|err| panic!("fixture {i} ({path:?}) failed to parse: {err}"));
+        let xml = fs::read_to_string(path)
+            .map_err(|err| format!("fixture {i} ({path:?}) could not be read: {err}"))?;
+        let (document, _) = from_xml(&xml)
+            .map_err(|err| format!("fixture {i} ({path:?}) failed to parse: {err}"))?;
         let projected = to_peppol_bis_3_0_xml(&document)
-            .unwrap_or_else(|err| panic!("projection {i} ({path:?}) failed: {err}"));
+            .map_err(|err| format!("projection {i} ({path:?}) failed: {err}"))?;
 
         assert!(
             projected.contains(PEPPOL_BIS_3_0_CUSTOMIZATION_ID),
@@ -59,6 +60,7 @@ fn projects_twenty_plus_cross_border_fixtures_with_peppol_bis_headers() {
             "fixture {i}: projected XML must carry country codes"
         );
     }
+    Ok(())
 }
 
 #[test]
@@ -69,7 +71,7 @@ fn projection_replaces_any_existing_customization_override() {
     // one.
     let path = &fixture_paths()[1]; // 0-indexed: 2nd fixture cycles to XRechnung-UBL
     let xml = fs::read_to_string(path).unwrap();
-    let document = from_xml(&xml).unwrap();
+    let (document, _) = from_xml(&xml).unwrap();
     let projected = to_peppol_bis_3_0_xml(&document).unwrap();
 
     assert!(projected.contains(PEPPOL_BIS_3_0_CUSTOMIZATION_ID));

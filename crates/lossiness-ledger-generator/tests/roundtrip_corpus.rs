@@ -19,14 +19,27 @@ use invoicekit_lossiness_ledger_generator::{compute_ledger, TargetFormat};
 const MIN_FIXTURES_PER_FORMAT: usize = 20;
 const ZERO_LOSS_LOST_PATHS: &[&str] = &[];
 const ZERO_LOSS_PRESERVED_PATHS: &[&str] = &[
-    "/id",
-    "/document_number",
+    "/attachments",
     "/currency",
+    "/customer",
+    "/document_number",
+    "/document_type",
+    "/due_date",
+    "/extensions",
+    "/id",
     "/issue_date",
     "/lines",
-    "/tax_summary",
+    "/meta",
+    "/monetary_total",
     "/notes",
-    "/extensions",
+    "/payee",
+    "/payment_instructions",
+    "/payment_terms",
+    "/references",
+    "/schema_version",
+    "/supplier",
+    "/tax_point_date",
+    "/tax_summary",
 ];
 
 const UBL_ZERO_LOSS_FIXTURE_IDS: &[&str] = &[
@@ -333,18 +346,22 @@ fn parse_fixture(case: &CorpusCase) -> Result<CommercialDocument, String> {
     let xml = fs::read_to_string(&case.fixture)
         .map_err(|error| format!("could not read fixture {}: {error}", case.fixture.display()))?;
     match case.format {
-        CorpusFormat::Ubl => ubl_from_xml(&xml).map_err(|error| {
-            format!(
-                "could not parse UBL fixture {}: {error}",
-                case.fixture.display()
-            )
-        }),
-        CorpusFormat::Cii => cii_from_xml(&xml).map_err(|error| {
-            format!(
-                "could not parse CII fixture {}: {error}",
-                case.fixture.display()
-            )
-        }),
+        CorpusFormat::Ubl => ubl_from_xml(&xml)
+            .map(|(document, _)| document)
+            .map_err(|error| {
+                format!(
+                    "could not parse UBL fixture {}: {error}",
+                    case.fixture.display()
+                )
+            }),
+        CorpusFormat::Cii => cii_from_xml(&xml)
+            .map(|(document, _)| document)
+            .map_err(|error| {
+                format!(
+                    "could not parse CII fixture {}: {error}",
+                    case.fixture.display()
+                )
+            }),
     }
 }
 

@@ -4,12 +4,36 @@
 //! Regression tests for the committed synthetic CII D16B corpus.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use invoicekit_canonical::canonicalize_xml;
 use invoicekit_format_cii::{from_xml, to_xml};
+use invoicekit_ir::LossinessLedger;
 
 const EXPECTED_FIXTURES: usize = 50;
+const EXPECTED_PRESERVED_PATHS: [&str; 21] = [
+    "/attachments",
+    "/currency",
+    "/customer",
+    "/document_number",
+    "/document_type",
+    "/due_date",
+    "/extensions",
+    "/id",
+    "/issue_date",
+    "/lines",
+    "/meta",
+    "/monetary_total",
+    "/notes",
+    "/payee",
+    "/payment_instructions",
+    "/payment_terms",
+    "/references",
+    "/schema_version",
+    "/supplier",
+    "/tax_point_date",
+    "/tax_summary",
+];
 
 #[test]
 fn committed_cii_corpus_round_trips_and_is_byte_stable() {
@@ -18,7 +42,8 @@ fn committed_cii_corpus_round_trips_and_is_byte_stable() {
 
     for fixture in fixtures {
         let xml = fs::read_to_string(&fixture).unwrap();
-        let parsed = from_xml(&xml).unwrap();
+        let (parsed, ledger) = from_xml(&xml).unwrap();
+        assert_zero_loss_ledger(&ledger, &fixture);
         let first = to_xml(&parsed).unwrap();
         let second = to_xml(&parsed).unwrap();
         assert_eq!(
@@ -30,7 +55,8 @@ fn committed_cii_corpus_round_trips_and_is_byte_stable() {
             first,
             "non-canonical serializer output for {fixture:?}"
         );
-        let reparsed = from_xml(&first).unwrap();
+        let (reparsed, reparse_ledger) = from_xml(&first).unwrap();
+        assert_zero_loss_ledger(&reparse_ledger, &fixture);
         assert_eq!(
             parsed, reparsed,
             "parse -> serialize -> parse drift for {fixture:?}"
@@ -77,8 +103,9 @@ fn committed_cii_corpus_covers_required_scenarios() {
 /// assertion in `format-ubl/tests/ubl_corpus.rs`:
 ///
 /// 1. >= 20 fixtures covered (bead lower bound).
-/// 2. Zero lossiness per fixture, asserted indirectly by IR
-///    equality across the parse -> serialize -> parse cycle.
+/// 2. Zero lossiness per fixture, asserted directly by the
+///    inline parser ledger and again by IR equality across the
+///    parse -> serialize -> parse cycle.
 #[test]
 fn committed_cii_corpus_satisfies_t_021a_zero_loss() {
     let fixtures = fixture_paths();
@@ -89,9 +116,11 @@ fn committed_cii_corpus_satisfies_t_021a_zero_loss() {
     );
     for fixture in &fixtures {
         let xml = fs::read_to_string(fixture).unwrap();
-        let parsed = from_xml(&xml).unwrap();
+        let (parsed, ledger) = from_xml(&xml).unwrap();
+        assert_zero_loss_ledger(&ledger, fixture);
         let serialized = to_xml(&parsed).unwrap();
-        let reparsed = from_xml(&serialized).unwrap();
+        let (reparsed, reparse_ledger) = from_xml(&serialized).unwrap();
+        assert_zero_loss_ledger(&reparse_ledger, fixture);
         assert_eq!(
             parsed, reparsed,
             "T-021a: non-empty lossiness implied for {fixture:?}",
@@ -108,4 +137,31 @@ fn fixture_paths() -> Vec<PathBuf> {
         .collect::<Vec<_>>();
     paths.sort();
     paths
+}
+
+fn assert_zero_loss_ledger(ledger: &LossinessLedger, fixture: &Path) {
+    let fixture = fixture.display();
+    assert!(
+        ledger.lost.is_empty(),
+        "CII inline parse ledger should have no lost fields for {fixture}: {:?}",
+        ledger.lost
+    );
+    assert!(
+        ledger.warnings.is_empty(),
+        "CII inline parse ledger should have no warnings for {fixture}: {:?}",
+        ledger.warnings
+    );
+
+    let mut actual = ledger
+        .preserved
+        .iter()
+        .map(|entry| entry.path.as_str())
+        .collect::<Vec<_>>();
+    actual.sort_unstable();
+    let mut expected = EXPECTED_PRESERVED_PATHS.to_vec();
+    expected.sort_unstable();
+    assert_eq!(
+        actual, expected,
+        "CII inline parse ledger preserved paths drifted for {fixture}"
+    );
 }
