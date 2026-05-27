@@ -1,0 +1,70 @@
+name: Fuzz
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: fuzz-${{ github.workflow }}-${{ github.ref }}-${{ matrix.target }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  fuzz:
+    name: cargo-fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - canonicalize_json
+          - canonicalize_xml
+          - ir_try_from_value
+          - ubl_from_xml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - name: Install cargo-fuzz
+        run: cargo install --locked cargo-fuzz
+      - name: Fuzz ${{ matrix.target }} for 5 minutes
+        # 300 seconds wall-clock budget per target matches the bead's
+        # "5 minutes per PR" requirement; libFuzzer's coverage feedback
+        # means new edges seed the corpus across runs and crashes fail
+        # the build immediately (non-zero exit).
+        run: |
+          set -euo pipefail
+          mkdir -p fuzz/corpus/${{ matrix.target }}
+          # Seed the in-memory corpus from the committed conformance
+          # corpus so each run starts with a known-good baseline.
+          if [ -d "conformance-corpus/fuzz/${{ matrix.target }}" ]; then
+            cp -n conformance-corpus/fuzz/${{ matrix.target }}/* \
+              fuzz/corpus/${{ matrix.target }}/ || true
+          fi
+          cargo +nightly fuzz run ${{ matrix.target }} \
+            -- -max_total_time=300 -timeout=30
+      - name: Upload any crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: |
+            fuzz/artifacts/${{ matrix.target }}/**
+            fuzz/corpus/${{ matrix.target }}/**
+
+  # Note: the bead's render_typst_pdf target is deferred to a follow-up
+  # bead because `invoicekit_render_pdf::RenderRequest::new` is not pub
+  # today, so there is no public Typst-source entry point to fuzz; the
+  # follow-up either opens that constructor or wraps Typst source through
+  # a future `render_for_fuzz(&str)` shim. Typst's per-iteration time
+  # (10-100ms) also means a 5-minute libFuzzer run only covers ~3-30k
+  # iterations, most of which exercise the same parser path; a nightly
+  # higher-iteration job is the right shape for it anyway.
