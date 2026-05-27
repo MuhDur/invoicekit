@@ -4,6 +4,10 @@ export type ActivityKind = "sent" | "validated" | "failed" | "archived";
 
 export type AuditOutcome = "denied" | "failed" | "succeeded";
 
+export type RecentErrorSeverity = "critical" | "info" | "warning";
+
+export type RecentErrorSource = "gateway" | "retry" | "system" | "validator";
+
 export type TransmissionState = "accepted" | "archived" | "failed" | "queued" | "rejected" | "sent" | "validating";
 
 export interface RecentActivityItem {
@@ -53,6 +57,28 @@ export interface TenantUsage {
   readonly partnerApCostTotal: string;
   readonly currency: string;
   readonly months: readonly UsageMonth[];
+}
+
+export interface RecentError {
+  readonly id: string;
+  readonly occurredAt: string;
+  readonly source: RecentErrorSource;
+  readonly severity: RecentErrorSeverity;
+  readonly documentId: string;
+  readonly summary: string;
+  readonly remediation: string;
+  readonly traceId: string;
+}
+
+export interface RecentErrorPage {
+  readonly items: readonly RecentError[];
+  readonly pageInfo: TransmissionPageInfo;
+}
+
+export interface RecentErrorListParams {
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly severity?: RecentErrorSeverity;
 }
 
 export interface AuditEvent {
@@ -111,6 +137,7 @@ export interface TransmissionListParams {
 
 export interface DashboardEngineClient {
   listAuditEvents(params?: AuditEventListParams): Promise<AuditEventPage>;
+  listRecentErrors(params?: RecentErrorListParams): Promise<RecentErrorPage>;
   listTransmissions(params?: TransmissionListParams): Promise<TransmissionPage>;
   tenantUsage(): Promise<TenantUsage>;
   tenantOverview(): Promise<TenantOverview>;
@@ -155,6 +182,16 @@ export function createHttpDashboardClient(options: EngineRpcClientOptions = {}):
         method: "engine.list_audit_events",
         params,
         parse: parseAuditEventPage,
+        requestId: requestIdFactory()
+      });
+    },
+    async listRecentErrors(params = {}) {
+      return callEngineMethod({
+        endpoint,
+        fetcher,
+        method: "engine.list_recent_errors",
+        params,
+        parse: parseRecentErrorPage,
         requestId: requestIdFactory()
       });
     },
@@ -217,6 +254,7 @@ interface EngineMethodCall<Result> {
   readonly fetcher: FetchLike;
   readonly method:
     | "engine.list_audit_events"
+    | "engine.list_recent_errors"
     | "engine.list_transmissions"
     | "engine.tenant_overview"
     | "engine.tenant_usage";
@@ -225,7 +263,7 @@ interface EngineMethodCall<Result> {
   readonly requestId: string;
 }
 
-async function callEngineMethod<Result extends AuditEventPage | TenantOverview | TenantUsage | TransmissionPage>({
+async function callEngineMethod<Result extends AuditEventPage | RecentErrorPage | TenantOverview | TenantUsage | TransmissionPage>({
   endpoint,
   fetcher,
   method,
@@ -354,6 +392,30 @@ function parseAuditEvent(value: unknown): AuditEvent {
     resourceId: readString(record, "resourceId", "audit event"),
     outcome: readAuditOutcome(record, "outcome", "audit event"),
     traceId: readString(record, "traceId", "audit event")
+  };
+}
+
+function parseRecentErrorPage(value: unknown): RecentErrorPage {
+  const record = asRecord(value, "recent error page");
+
+  return {
+    items: readArray(record, "items", "recent error page").map(parseRecentError),
+    pageInfo: parseTransmissionPageInfo(readRequired(record, "pageInfo", "recent error page"))
+  };
+}
+
+function parseRecentError(value: unknown): RecentError {
+  const record = asRecord(value, "recent error");
+
+  return {
+    id: readString(record, "id", "recent error"),
+    occurredAt: readString(record, "occurredAt", "recent error"),
+    source: readRecentErrorSource(record, "source", "recent error"),
+    severity: readRecentErrorSeverity(record, "severity", "recent error"),
+    documentId: readString(record, "documentId", "recent error"),
+    summary: readString(record, "summary", "recent error"),
+    remediation: readString(record, "remediation", "recent error"),
+    traceId: readString(record, "traceId", "recent error")
   };
 }
 
@@ -522,6 +584,30 @@ function readAuditOutcome(record: Record<string, unknown>, key: string, label: s
   }
 
   throw new EngineRpcError(`Invalid ${label}: unsupported audit outcome`, { data: record });
+}
+
+function readRecentErrorSeverity(
+  record: Record<string, unknown>,
+  key: string,
+  label: string
+): RecentErrorSeverity {
+  const value = readString(record, key, label);
+
+  if (value === "critical" || value === "info" || value === "warning") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported error severity`, { data: record });
+}
+
+function readRecentErrorSource(record: Record<string, unknown>, key: string, label: string): RecentErrorSource {
+  const value = readString(record, key, label);
+
+  if (value === "gateway" || value === "retry" || value === "system" || value === "validator") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported error source`, { data: record });
 }
 
 function readTransmissionState(record: Record<string, unknown>, key: string, label: string): TransmissionState {
