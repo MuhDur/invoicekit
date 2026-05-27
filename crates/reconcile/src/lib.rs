@@ -21,6 +21,7 @@ use thiserror::Error;
 
 mod outbox;
 pub mod redact;
+pub mod webhook;
 mod worker;
 
 pub use outbox::{
@@ -28,6 +29,11 @@ pub use outbox::{
     OutboxMigration, OutboxState, RetryDecision, RetryPolicy, OUTBOX_BEAD_ID,
 };
 pub use redact::{redact_for_support, RedactedBundle, RedactionReport, REDACT_BEAD_ID};
+pub use webhook::{
+    DeliveryOutcome, EventIdLedger, WebhookDispatcher, WebhookEnvelope, WebhookEvent,
+    WebhookHeaders, WebhookRetryDecision, WebhookRetryPolicy, WebhookSigner, WebhookVerifier,
+    WebhookVerifyError, WEBHOOK_BEAD_ID,
+};
 pub use worker::{
     CircuitBreakerPolicy, GatewayRateLimit, TransmissionJob, TransmissionWorker,
     TransmissionWorkerConfig, TransmissionWorkerLogEvent, TransmissionWorkerOutcomeKind,
