@@ -2475,6 +2475,13 @@ dependencies = [
 [[package]]
 name = "invoicekit-validate-ubl-cii"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-validate",
+ "quick-xml 0.40.1",
+ "rust_decimal",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-verify"
