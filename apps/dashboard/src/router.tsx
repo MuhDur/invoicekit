@@ -1,8 +1,9 @@
 import { Link, Outlet, createRootRoute, createRoute, createRouter, useRouterState } from "@tanstack/react-router";
 import { Suspense } from "react";
-import { Activity, BarChart3, Gauge, Inbox, Settings } from "lucide-react";
+import { Activity, AlertTriangle, BarChart3, Gauge, Inbox, Settings } from "lucide-react";
 import { AuditRoute } from "../routes/audit";
 import { DocumentsRoute } from "../routes/documents";
+import { ErrorsRoute } from "../routes/errors";
 import { OverviewRoute } from "../routes/overview";
 import { UsageRoute } from "../routes/usage";
 
@@ -12,6 +13,7 @@ function AppShell() {
   const overviewActive = pathname === "/" || pathname === "/overview";
   const documentsActive = pathname.startsWith("/documents");
   const usageActive = pathname.startsWith("/usage");
+  const errorsActive = pathname.startsWith("/errors");
 
   return (
     <div className="app-shell">
@@ -39,6 +41,10 @@ function AppShell() {
           <Link className="nav-item" data-active={usageActive ? true : undefined} to="/usage">
             <BarChart3 size={18} aria-hidden="true" />
             Usage
+          </Link>
+          <Link className="nav-item" data-active={errorsActive ? true : undefined} to="/errors">
+            <AlertTriangle size={18} aria-hidden="true" />
+            Errors
           </Link>
           <span className="nav-item nav-item-disabled">
             <Settings size={18} aria-hidden="true" />
@@ -90,7 +96,20 @@ const usageRoute = createRoute({
   component: UsageRoute
 });
 
-const routeTree = rootRoute.addChildren([overviewIndexRoute, overviewRoute, documentsRoute, auditRoute, usageRoute]);
+const errorsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/errors",
+  component: ErrorsRoute
+});
+
+const routeTree = rootRoute.addChildren([
+  overviewIndexRoute,
+  overviewRoute,
+  documentsRoute,
+  auditRoute,
+  usageRoute,
+  errorsRoute
+]);
 
 export const router = createRouter({
   defaultPreload: "intent",
@@ -109,9 +128,9 @@ function DashboardError({ error }: { readonly error: unknown }) {
   return (
     <div className="error-panel" role="alert">
       <p className="eyebrow">Dashboard error</p>
-      <h1>Overview unavailable</h1>
+      <h1>Dashboard unavailable</h1>
       <p className="muted">{message}</p>
-      <pre>{JSON.stringify({ route: "overview", message }, null, 2)}</pre>
+      <pre>{JSON.stringify({ route: "dashboard", message }, null, 2)}</pre>
     </div>
   );
 }
