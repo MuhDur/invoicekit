@@ -28,6 +28,7 @@ mysql = "28"
 postgres = "0.19"
 proptest = "1"
 rusqlite = "0.37"
+rust_decimal = { version = "1", default-features = false, features = ["serde-with-str", "std"] }
 
 [lints]
 workspace = true

@@ -20,12 +20,14 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod outbox;
+pub mod redact;
 mod worker;
 
 pub use outbox::{
     all_outbox_migrations, outbox_migration, DatabaseDialect, DeadLetterRecord, OutboxEnvelope,
     OutboxMigration, OutboxState, RetryDecision, RetryPolicy, OUTBOX_BEAD_ID,
 };
+pub use redact::{redact_for_support, RedactedBundle, RedactionReport, REDACT_BEAD_ID};
 pub use worker::{
     CircuitBreakerPolicy, GatewayRateLimit, TransmissionJob, TransmissionWorker,
     TransmissionWorkerConfig, TransmissionWorkerLogEvent, TransmissionWorkerOutcomeKind,
