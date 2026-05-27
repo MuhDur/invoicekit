@@ -250,15 +250,49 @@ pub const fn crate_name() -> &'static str {
 mod tests {
     use super::{crate_name, embed_factur_x, render_xmp, PostprocError, ZugferdProfile};
 
+    use lopdf::content::{Content, Operation};
+    use lopdf::{dictionary, Dictionary, Document, Object, Stream};
+
     use invoicekit_intake_pdf::extract_factur_x_xml;
 
-    /// Synthesize a fresh PDF for each fixture index so the
-    /// post-processor proves it tolerates input variation.
+    /// Synthesize a minimal PDF for each fixture index using lopdf
+    /// directly so the test does not pull the Typst dependency
+    /// graph in (which would force the Typst advisory waivers in
+    /// `tools/release-checks/verify_release_checks.py` to be widened
+    /// to a non-`invoicekit-render-pdf` crate).
     fn synthesize_pdf_for_profile(idx: usize) -> Vec<u8> {
-        let mut pdf =
-            invoicekit_render_pdf::render_hello_world_invoice().expect("hello world renders");
-        pdf.extend_from_slice(format!("\n%idx-{idx}\n").as_bytes());
-        pdf
+        let mut doc = Document::with_version("1.7");
+        let content_id = doc.add_object(Stream::new(
+            Dictionary::new(),
+            Content {
+                operations: vec![Operation::new("q", vec![]), Operation::new("Q", vec![])],
+            }
+            .encode()
+            .unwrap(),
+        ));
+        let leaf_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => Object::Reference((0, 0)),
+            "Contents" => content_id,
+        });
+        let parent_id = doc.add_object(dictionary! {
+            "Type" => "Pages",
+            "Count" => 1,
+            "Kids" => vec![leaf_id.into()],
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+        });
+        if let Ok(Object::Dictionary(d)) = doc.get_object_mut(leaf_id) {
+            d.set("Parent", parent_id);
+        }
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => parent_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).expect("serialize synthesised pdf");
+        bytes.extend_from_slice(format!("\n%idx-{idx}\n").as_bytes());
+        bytes
     }
 
     fn xml_for_profile(profile: ZugferdProfile, idx: usize) -> Vec<u8> {

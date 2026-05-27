@@ -2263,7 +2263,6 @@ name = "invoicekit-render-pdf-postproc"
 version = "0.0.0"
 dependencies = [
  "invoicekit-intake-pdf",
- "invoicekit-render-pdf",
  "lopdf",
  "thiserror 2.0.18",
 ]
