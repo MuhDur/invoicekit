@@ -1636,6 +1636,10 @@ dependencies = [
 [[package]]
 name = "invoicekit-cli"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-ir",
+ "serde_json",
+]
 
 [[package]]
 name = "invoicekit-codelists"
@@ -1720,6 +1724,7 @@ name = "invoicekit-ir"
 version = "0.0.0"
 dependencies = [
  "rust_decimal",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

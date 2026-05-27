@@ -23,12 +23,15 @@ jobs:
         with:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install pytest
-        run: pip install pytest
+      - uses: Swatinem/rust-cache@v2
+      - name: Install pytest + jsonschema
+        run: pip install pytest jsonschema
       - name: Run header-tool tests
         run: pytest tools/license-header/tests -q
       - name: Run release-checks meta-tests
         run: pytest tools/release-checks/tests -q
+      - name: Run IR JSON Schema gate (T-011)
+        run: pytest tools/release-checks/test_ir_schema_match.py -q
       - name: Check Apache 2.0 SPDX header on every Rust source
         run: python3 tools/license-header/check_headers.py --check
       - name: Verify ci.yml + release.yml + license-header.yml still wired

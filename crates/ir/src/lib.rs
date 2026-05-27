@@ -8,12 +8,13 @@
 //! from profile or country-specific extension data.
 
 use rust_decimal::Decimal;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
 /// Canonical schema version carried by every serialized document.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum SchemaVersion {
     /// Initial public IR version.
     #[serde(rename = "1.0")]
@@ -22,7 +23,7 @@ pub enum SchemaVersion {
 }
 
 /// Top-level document type.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DocumentType {
     /// Commercial invoice.
@@ -38,7 +39,7 @@ pub enum DocumentType {
 }
 
 /// Stable identifier for a commercial document.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(transparent)]
 pub struct DocumentId(String);
 
@@ -64,7 +65,7 @@ impl DocumentId {
 }
 
 /// Human or tenant-visible invoice number.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(transparent)]
 pub struct DocumentNumber(String);
 
@@ -97,7 +98,7 @@ impl DocumentNumber {
 }
 
 /// ISO 8601 calendar date without a time component.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(transparent)]
 pub struct DateOnly(String);
 
@@ -133,7 +134,7 @@ impl DateOnly {
 }
 
 /// ISO 4217 currency code.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(transparent)]
 pub struct Iso4217Code(String);
 
@@ -176,7 +177,7 @@ impl Iso4217Code {
 }
 
 /// ISO 3166-1 alpha-2 country code.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(transparent)]
 pub struct CountryCode(String);
 
@@ -206,9 +207,13 @@ impl CountryCode {
 }
 
 /// Decimal value serialized as a fixed decimal string at the API boundary.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(transparent)]
-pub struct DecimalValue(#[serde(with = "rust_decimal::serde::str")] Decimal);
+pub struct DecimalValue(
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schemars(with = "String")]
+    Decimal,
+);
 
 impl DecimalValue {
     /// Wraps a decimal value.
@@ -231,7 +236,7 @@ pub type MoneyAmount = DecimalValue;
 pub type Quantity = DecimalValue;
 
 /// Localized human text.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct LocalizedString {
     /// BCP 47 language tag.
     pub language: String,
@@ -247,7 +252,7 @@ impl LocalizedString {
 }
 
 /// Party tax identifier.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct PartyTaxId {
     /// Identifier scheme, such as `vat`.
     pub scheme: String,
@@ -263,7 +268,7 @@ impl PartyTaxId {
 }
 
 /// Postal address for a supplier, customer, payee, or other party.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct PostalAddress {
     /// Address lines in display order.
     pub lines: Vec<String>,
@@ -293,7 +298,7 @@ impl PostalAddress {
 }
 
 /// Contact details for a party.
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Contact {
     /// Optional contact name.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -307,7 +312,7 @@ pub struct Contact {
 }
 
 /// Commercial party.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Party {
     /// Optional stable party identifier.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -335,7 +340,7 @@ impl Party {
 }
 
 /// Payment terms attached to the document.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct PaymentTerms {
     /// Human-readable payment terms.
     pub description: String,
@@ -355,7 +360,7 @@ impl PaymentTerms {
 }
 
 /// Payment rail or instruction kind.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PaymentInstructionKind {
     /// SEPA credit transfer.
@@ -373,7 +378,7 @@ pub enum PaymentInstructionKind {
 }
 
 /// Payment instruction.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct PaymentInstruction {
     /// Instruction kind.
     pub kind: PaymentInstructionKind,
@@ -386,7 +391,7 @@ pub struct PaymentInstruction {
 }
 
 /// Polymorphic jurisdiction or profile extension payload.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct JurisdictionExtension {
     /// Uniform resource name for the extension schema.
     pub urn: String,
@@ -427,7 +432,7 @@ impl JurisdictionExtension {
 }
 
 /// Document line.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct DocumentLine {
     /// Line identifier.
     pub id: String,
@@ -462,7 +467,7 @@ impl DocumentLine {
 }
 
 /// Tax category summary.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct TaxCategorySummary {
     /// Tax category code.
     pub category_code: String,
@@ -482,7 +487,7 @@ impl TaxCategorySummary {
 }
 
 /// Document monetary totals.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 // The `_amount` suffix matches invoice business terms and serialized field names.
 #[allow(clippy::struct_field_names)]
 pub struct MonetaryTotal {
@@ -506,7 +511,7 @@ pub struct MonetaryTotal {
 }
 
 /// Content-addressed attachment reference.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Attachment {
     /// Attachment role or semantic type.
     pub kind: String,
@@ -525,7 +530,7 @@ impl Attachment {
 }
 
 /// Reference to another commercial document.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct DocumentReference {
     /// Reference type, such as purchase order.
     pub kind: String,
@@ -548,7 +553,7 @@ impl DocumentReference {
 }
 
 /// Operational metadata for a document.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct DocumentMeta {
     /// Tenant identifier.
     pub tenant_id: String,
@@ -567,7 +572,7 @@ impl DocumentMeta {
 }
 
 /// Input parts for constructing a [`CommercialDocument`].
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct CommercialDocumentParts {
     /// Schema version.
     #[serde(default)]
@@ -625,7 +630,7 @@ pub struct CommercialDocumentParts {
 }
 
 /// Jurisdiction-agnostic commercial invoice or credit note semantics.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct CommercialDocument {
     /// Schema version.
     #[serde(default)]
@@ -787,7 +792,7 @@ impl CommercialDocument {
 }
 
 /// Profile identifier and version.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct ProfileIdentifier {
     /// Profile URN.
     pub urn: String,
@@ -805,7 +810,7 @@ impl ProfileIdentifier {
 }
 
 /// Projection of a commercial document onto a standard or country profile.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct ProfileView {
     /// Target profile.
     pub profile: ProfileIdentifier,
@@ -862,7 +867,7 @@ impl ProfileView {
 }
 
 /// Field-level projection outcome.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct LossinessEntry {
     /// JSON Pointer-like source field path.
     pub path: String,
@@ -878,7 +883,7 @@ impl LossinessEntry {
 }
 
 /// Structured record of data preserved or lost during a profile projection.
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct LossinessLedger {
     /// Fields preserved by the projection.
     #[serde(default)]
@@ -953,6 +958,37 @@ pub enum IrError {
     /// JSON encoding or decoding failed.
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+/// Generate the canonical JSON Schema (Draft 2020-12) for [`CommercialDocument`].
+///
+/// The returned value is the schema the InvoiceKit binding generators
+/// (TypeScript, Python, Java, .NET) consume; CI re-derives it on every PR
+/// and asserts byte-equality against the committed
+/// `schemas/invoicekit-ir-v1.json`, so a future PR that edits the Rust
+/// source of truth without regenerating the schema cannot ship.
+///
+/// # Panics
+///
+/// Panics only if `schemars` produces a schema that fails to serialize
+/// back to a `serde_json::Value`, which the `schemars` documentation rules
+/// out for any type that derives `JsonSchema` (and `CommercialDocument`
+/// does). In practice this function is total.
+///
+/// # Examples
+///
+/// ```
+/// let schema = invoicekit_ir::commercial_document_schema();
+/// assert!(schema.get("$schema").is_some());
+/// assert_eq!(
+///     schema.get("title").and_then(|v| v.as_str()),
+///     Some("CommercialDocument"),
+/// );
+/// ```
+#[must_use]
+pub fn commercial_document_schema() -> serde_json::Value {
+    let schema = schemars::schema_for!(CommercialDocument);
+    serde_json::to_value(schema).expect("schemars output is always serializable")
 }
 
 /// Canonical Cargo package name of this crate.
