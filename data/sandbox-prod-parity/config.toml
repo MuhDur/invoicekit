@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-074d sandbox vs production parity diff configuration.
+#
+# Each `[[pair]]` stanza declares one sandbox-vs-production
+# comparison the canary should run nightly. Critical safety
+# difference from T-074c (sandbox-only drift): this canary MAY
+# touch production endpoints, and that requires explicit per-pair
+# customer consent before the first production call.
+#
+# Consent is recorded as `consent_signed_at` (RFC 3339 timestamp).
+# When this field is empty, the canary records "skipped: no
+# production-call consent on file" and exits without touching the
+# production endpoint. Even if a sandbox-only run is desirable, the
+# T-074c sandbox-drift canary already covers that case — this
+# canary's whole point is the prod comparison, so no consent means
+# no work.
+#
+# The canary ALSO requires credentials env vars for both ends; the
+# absence-of-credentials skip semantics are the same as T-074c.
+# Production credentials must be sourced from the secret manager
+# the principal controls, never inlined here.
+
+schema_version = "1.0"
+
+# Every stanza below is intentionally disabled (consent_signed_at
+# empty + auth env vars pointing at variables that don't exist) so
+# the workflow has a hermetic "every pair skipped" baseline. Real
+# consent + credentials come from the principal per-customer.
+
+[[pair]]
+country = "IT"
+pair_id = "italy-sdi-it-it"
+description = "Italy SDI sandbox vs production (Agenzia delle Entrate)"
+sandbox_endpoint = "https://testservizi.fatturapa.gov.it"
+production_endpoint = "https://servizi.fatturapa.gov.it"
+sandbox_auth_env_var = "INVOICEKIT_SANDBOX_IT_SDI_TOKEN"
+production_auth_env_var = "INVOICEKIT_PROD_IT_SDI_TOKEN"
+request_fixture = "conformance-corpus/cassette/parity/italy-sdi.request.json"
+consent_signed_at = ""
+
+[[pair]]
+country = "FR"
+pair_id = "france-chorus-fr-fr"
+description = "France Chorus Pro sandbox vs production (DGFiP)"
+sandbox_endpoint = "https://sandbox.chorus-pro.gouv.fr"
+production_endpoint = "https://www.chorus-pro.gouv.fr"
+sandbox_auth_env_var = "INVOICEKIT_SANDBOX_FR_CHORUS_TOKEN"
+production_auth_env_var = "INVOICEKIT_PROD_FR_CHORUS_TOKEN"
+request_fixture = "conformance-corpus/cassette/parity/france-chorus.request.json"
+consent_signed_at = ""
+
+[[pair]]
+country = "ES"
+pair_id = "spain-verifactu-es-es"
+description = "Spain VeriFactu pre-production vs production (AEAT)"
+sandbox_endpoint = "https://prewww1.aeat.es/wlpl/TIKE-CONT/ConsultaQR"
+production_endpoint = "https://www1.agenciatributaria.gob.es/wlpl/TIKE-CONT/ConsultaQR"
+sandbox_auth_env_var = "INVOICEKIT_SANDBOX_ES_VERIFACTU_TOKEN"
+production_auth_env_var = "INVOICEKIT_PROD_ES_VERIFACTU_TOKEN"
+request_fixture = "conformance-corpus/cassette/parity/spain-verifactu.request.json"
+consent_signed_at = ""
