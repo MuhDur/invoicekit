@@ -2035,6 +2035,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoicekit-format-detect"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "invoicekit-format-gobl"
 version = "0.0.0"
 dependencies = [
