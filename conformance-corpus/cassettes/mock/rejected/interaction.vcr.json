@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "scenario": {
+    "schema_version": "1.0",
+    "scenario_id": "mock/submit/rejected",
+    "title": "Mock submit rejected",
+    "country": "DE",
+    "route": "mock",
+    "source": "synthetic",
+    "scrubber_profile": "none"
+  },
+  "interactions": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/mock/submit",
+        "body": "{\"operation\":\"submit\",\"context\":{\"tenant_id\":\"tenant_mock\",\"trace_id\":\"trace_mock_rejected\",\"idempotency_key\":\"idem_mock_rejected\",\"gateway_attempt_id\":\"attempt_mock_rejected\"},\"route\":{\"route\":\"mock\",\"profile\":\"mock-profile\",\"country\":\"DE\"},\"document_id\":\"doc_mock_rejected\",\"document_number\":\"INV-MOCK-REJECTED\",\"document_fingerprint\":\"315ddb0b6911b66b6ca743e27422287e9c35c1a6c8220900535ef8e471eddd27\"}",
+        "body_fingerprint": "d6de0d0807b9f4cb4279db92ce94a68e45d4b7616271bb5a3123dbead1f9fd26"
+      },
+      "response": {
+        "status": 422,
+        "body": "{\"kind\":\"rejected\",\"message\":\"mock gateway rejected the invoice\",\"remediation\":\"fix the invoice payload and replay the matching cassette\",\"gateway_code\":\"MOCK_REJECTED\",\"submission_id\":\"mock_sub_rejected\"}"
+      }
+    }
+  ]
+}

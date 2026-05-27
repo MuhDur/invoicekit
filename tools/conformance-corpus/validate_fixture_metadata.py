@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import re
 import sys
@@ -175,7 +176,7 @@ def validate_artifact(metadata: dict[str, Any], metadata_path: Path) -> None:
         )
 
     actual_sha256 = hashlib.sha256(payload).hexdigest()
-    if actual_sha256 != artifact["sha256"]:
+    if not hmac.compare_digest(actual_sha256, artifact["sha256"]):
         raise MetadataError(
             f"{metadata_path}: artifact sha256 mismatch for {relative_path}: "
             f"metadata={artifact['sha256']} actual={actual_sha256}"
@@ -244,7 +245,7 @@ def iter_artifact_files(corpus_root: Path) -> list[Path]:
         relative = path.relative_to(corpus_root)
         if relative in IGNORED_ARTIFACT_PATHS:
             continue
-        if relative.name in {"README.md", "metadata.json"}:
+        if relative.name in {"README.md", "metadata.json", "scenario.json"}:
             continue
         if relative.parts and relative.parts[0] in IGNORED_ARTIFACT_DIRS:
             continue

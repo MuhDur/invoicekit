@@ -58,6 +58,20 @@ def test_reference_json_is_not_treated_as_fixture_artifact(tmp_path: Path) -> No
     validator.validate_metadata_coverage(tmp_path, [metadata_path])
 
 
+def test_cassette_scenario_json_is_not_treated_as_fixture_artifact(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "cassettes" / "mock" / "accepted"
+    fixture_dir.mkdir(parents=True)
+    (fixture_dir / "interaction.vcr.json").write_text("{}", encoding="utf-8")
+    (fixture_dir / "scenario.json").write_text("{}", encoding="utf-8")
+
+    metadata = copy.deepcopy(sample_metadata())
+    metadata["artifact"]["path"] = "interaction.vcr.json"
+    metadata_path = fixture_dir / "metadata.json"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    validator.validate_metadata_coverage(tmp_path, [metadata_path])
+
+
 def test_unknown_top_level_property_is_rejected() -> None:
     schema = validator.load_json(validator.SCHEMA_PATH)
     metadata = sample_metadata()

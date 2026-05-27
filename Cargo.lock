@@ -1981,9 +1981,13 @@ name = "invoicekit-transmit-mock"
 version = "0.0.0"
 dependencies = [
  "blake3",
+ "invoicekit-canonical",
+ "invoicekit-ir",
+ "invoicekit-reconcile",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
