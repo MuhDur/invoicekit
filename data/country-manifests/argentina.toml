@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-789 country feasibility manifest: Argentina.
+#
+# Argentina's AFIP (Administracion Federal de Ingresos Publicos,
+# now succeeded by ARCA — Agencia de Recaudacion y Control
+# Aduanero) operates the Comprobantes Electronicos system, a
+# pre-clearance regime where every taxable invoice must request a
+# Codigo de Autorizacion Electronico (CAE) from AFIP/ARCA before
+# issuance.
+
+schema_version = "1.0"
+country = "AR"
+country_name = "Argentina"
+program = "Comprobantes Electronicos + CAE (AFIP / ARCA)"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-789-manifest-argentina-vvv"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "AFIP / ARCA — Factura Electronica portal"
+url = "https://www.afip.gob.ar/fe/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Resolucion General AFIP 4291/2018 (factura electronica framework)"
+url = "https://www.boletinoficial.gob.ar/detalleAviso/primera/195330/20180921"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Web Service WSFEv1 technical documentation"
+url = "https://www.afip.gob.ar/ws/WSFEV1/"
+kind = "api_documentation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Web Service WSFEX (export invoices) technical documentation"
+url = "https://www.afip.gob.ar/ws/WSFEX/"
+kind = "api_documentation"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "requires_local_tax_id"
+notes = """
+AFIP/ARCA operates a publicly accessible homologation environment
+(wswhomo.afip.gov.ar) that any Argentine taxpayer with a CUIT
+(Clave Unica de Identificacion Tributaria) and a digital
+certificate can use. Foreign-only providers cannot obtain a CUIT
+without either incorporating in Argentina or appointing an
+apoderado fiscal who holds the CUIT.
+"""
+endpoint = "https://wswhomo.afip.gov.ar/wsfev1/service.asmx"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_AR_AFIP_CERT"
+
+[production]
+endpoint = "https://servicios1.afip.gov.ar/wsfev1/service.asmx"
+production_credentials_env_var = "INVOICEKIT_PROD_AR_AFIP_CERT"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+The AFIP/ARCA WSFEv1 web service uses WS-Security with a digital
+signature derived from an AFIP-issued certificate (Token de
+Autenticacion plus Sign-In via WSAA — Web Service de
+Autenticacion y Autorizacion). The certificate is tied to the
+taxpayer's CUIT and re-issued every 1-2 years. The invoice
+itself is NOT XAdES-signed; the trust comes from the WSAA token
+and the returned CAE which AFIP/ARCA signs and dates.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "recommended_for_high_volume"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses without an Argentine establishment must
+register for IVA (Impuesto al Valor Agregado) by appointing an
+Argentine apoderado fiscal who holds the CUIT and digital
+certificate. The apoderado submits CAE requests on behalf of the
+foreign seller. Inbound B2B transactions where the foreign
+seller does not invoice through AFIP/ARCA flow as buyer-side
+self-invoicing under the Sistema Tributario Argentino.
+"""
+
+[validator]
+backend = "rest:afip-wsfev1"
+backend_notes = """
+The AFIP/ARCA WSFEv1 service is the authoritative validator; it
+returns rule-level diagnostics with codes from the AFIP error
+registry (10000-series for envelope errors, 20000-series for
+business rule failures, etc). The rust side runs a minimal
+pre-validator (CUIT checksum, IVA aliquot enumeration, per-
+comprobante-type field presence) before the SOAP call to avoid
+trivially malformed submissions consuming rate-limit quota.
+"""
+
+[interop]
+formats = ["AFIP WSFEv1 SOAP envelope (proprietary XML)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+AFIP/ARCA accepts only its own proprietary SOAP envelope; Peppol
+is not used in Argentine domestic B2B. The export-specific
+WSFEX flow handles cross-border invoices with the same proprietary
+format adapted for foreign-buyer fields.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/argentina"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/argentina"
+
+[follow_ups]
+items = [
+    "Track the ARCA transition: as of 2024-10 AFIP was succeeded by ARCA, endpoints may rebrand",
+    "Add WSFEX (export invoices) support once cross-border AR scenarios become a target",
+    "Open a follow-up for the Provincial CABA / AGIP electronic Ingresos Brutos integrations once relevant",
+]

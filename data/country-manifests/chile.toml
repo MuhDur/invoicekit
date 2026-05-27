@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-786 country feasibility manifest: Chile.
+#
+# Chile pioneered Latin American CTC e-invoicing: the Servicio de
+# Impuestos Internos (SII) mandates DTE (Documento Tributario
+# Electronico) clearance for every B2B invoice since 2018, and for
+# every B2C invoice since 2020.
+
+schema_version = "1.0"
+country = "CL"
+country_name = "Chile"
+program = "DTE (Documento Tributario Electronico) — SII"
+retrieved_at = "2026-05-27"
+maintainer = "GreenCastle"
+bead = "invoices-t-786-manifest-chile-hqq"
+
+signature_alg = "blake3:identity"
+signature = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[sources]
+[[sources.entry]]
+name = "SII — Factura electronica portal"
+url = "https://www.sii.cl/factura_electronica/"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "Resolucion Exenta SII No 80 de 2014 (DTE technical regulation)"
+url = "https://www.sii.cl/normativa_legislacion/resoluciones/2014/reso80.htm"
+kind = "primary_legislation"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "DTE XML schema (instructivo tecnico)"
+url = "https://www.sii.cl/factura_electronica/formato_dte.htm"
+kind = "technical_spec"
+retrieved_at = "2026-05-27"
+
+[[sources.entry]]
+name = "List of authorised proveedores de servicio"
+url = "https://www.sii.cl/factura_electronica/empresas_proveedoras.htm"
+kind = "regulator_homepage"
+retrieved_at = "2026-05-27"
+
+[sandbox]
+availability = "requires_local_tax_id"
+notes = """
+The SII operates a publicly accessible certification environment
+(palena.sii.cl) where any taxpayer with a Chilean RUT (Rol Unico
+Tributario) and a SII-issued certificate can register a test
+company and submit DTEs. Foreign-only providers cannot obtain a
+RUT without a Chilean legal representative; the typical path is
+through a proveedor de servicio (technology partner) that holds
+the RUT and a delegated authorisation from each end customer.
+"""
+endpoint = "https://palena.sii.cl/cgi_dte/UPL/DTEUpload"
+sandbox_credentials_env_var = "INVOICEKIT_SANDBOX_CL_SII_CERT"
+
+[production]
+endpoint = "https://maullin.sii.cl/cgi_dte/UPL/DTEUpload"
+production_credentials_env_var = "INVOICEKIT_PROD_CL_SII_CERT"
+
+[trust]
+qualified_seal_requirement = "qes_required"
+qualified_seal_notes = """
+Every DTE must be signed with a SII-issued digital certificate
+(Certificado Digital Tributario) tied to the issuing taxpayer's
+RUT. Certificates are issued by SII-authorised CAs (E-Sign,
+Acepta, e-Certchile, Paperless, Pruff) and renew every 1-3 years
+depending on the keystore type. Signature is XML-DSig over a
+canonical DTE representation defined in the SII's instructivo
+tecnico.
+"""
+smart_card_requirement = "none"
+hsm_requirement = "common_for_high_volume_proveedores"
+
+[fiscal_rep]
+required_for = ["foreign_sellers"]
+notes = """
+Foreign businesses without a Chilean establishment must register
+for VAT (IVA) in Chile by appointing a Chilean tax representative
+(representante legal) who holds the RUT and the digital
+certificate. The representative submits DTEs on behalf of the
+foreign seller and carries joint VAT liability. Foreign digital-
+services providers can alternatively register under the Special
+Regime for Foreign Digital Services (RES) for B2C transactions.
+"""
+
+[validator]
+backend = "jvm:saxon"
+backend_notes = """
+DTE XML validates against the SII-published XSD bundle via the
+validator-saxon sidecar. The business-rule layer (BR-CL-*)
+covers RUT checksum, DTE type-code enumeration, glosa-per-tipo
+restrictions, IVA rate validation, and per-document folio range
+authorisation. Signature verification delegates to
+validator-kosit (XML-DSig). The SII also returns its own EnvioDTE
+acknowledgement (Acuse de Recibo) with response codes; those
+codes are mirrored into the rust validator's output for parity.
+"""
+
+[interop]
+formats = ["DTE 1.0 (Factura/Boleta/NotaCredito/NotaDebito/Liquidacion)"]
+peppol_bis_accepted = false
+peppol_pint_accepted = false
+notes = """
+DTE is national-format-only; Peppol envelopes are NOT accepted
+at the SII clearance gate. Cross-border B2B traffic typically
+uses the DTE 'Receptor extranjero' marker for foreign buyers, or
+flows entirely outside DTE when the seller is foreign.
+"""
+
+[fixtures]
+fixture_directory = "conformance-corpus/country/chile"
+sandbox_cassette_directory = "conformance-corpus/cassette/sandbox/chile"
+
+[follow_ups]
+items = [
+    "Select a Chilean proveedor de servicio partner with documented per-DTE pricing",
+    "Track the SII's planned Boleta Electronica B2C summary cadence (currently real-time per-transaction)",
+    "Evaluate the SII's Libro Electronico de Compras y Ventas (LCE) integration for full reporting parity",
+]
