@@ -26,7 +26,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use thiserror::Error;
 
-mod mapping;
+pub mod mapping;
 mod schema;
 
 pub use mapping::{

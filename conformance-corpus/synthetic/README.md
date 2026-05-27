@@ -15,5 +15,12 @@ Regenerate it with:
 cargo run -p invoicekit-format-cii --example generate_cii_corpus
 ```
 
-The generator creates missing files, accepts identical existing files, and
-fails instead of overwriting changed fixture data.
+The `ubl-2-1/` directory contains the `invoices-bbqm` synthetic UBL 2.1
+corpus. Regenerate it with:
+
+```bash
+cargo run -p invoicekit-format-ubl --example generate_ubl_corpus
+```
+
+Both generators create missing files, accept identical existing files, and
+fail instead of overwriting changed fixture data.
