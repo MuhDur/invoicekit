@@ -28,8 +28,18 @@ def sample_metadata() -> dict[str, object]:
 
 def test_committed_sample_metadata_validates() -> None:
     metadata_files = validator.validate_all()
-    if len(metadata_files) < 3:
-        raise AssertionError(f"expected at least 3 sample metadata files, got {metadata_files}")
+    if len(metadata_files) < 4:
+        raise AssertionError(f"expected at least 4 sample metadata files, got {metadata_files}")
+
+
+def test_artifact_without_sibling_metadata_is_rejected(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "synthetic" / "examples" / "missing-metadata"
+    fixture_dir.mkdir(parents=True)
+    (fixture_dir / "fixture.json").write_text("{}", encoding="utf-8")
+    metadata_files: list[Path] = []
+
+    with pytest.raises(validator.MetadataError, match="missing sibling metadata"):
+        validator.validate_metadata_coverage(tmp_path, metadata_files)
 
 
 def test_unknown_top_level_property_is_rejected() -> None:
@@ -61,6 +71,24 @@ def test_licensed_real_fixture_requires_license_evidence() -> None:
     metadata["pii"]["redaction_status"] = "redacted"
 
     with pytest.raises(validator.MetadataError, match="license.evidence_path"):
+        validator.validate_policy_semantics(metadata, Path("metadata.json"))
+
+
+def test_reference_paths_must_stay_inside_fixture_directory() -> None:
+    metadata = sample_metadata()
+    metadata["license"] = copy.deepcopy(metadata["license"])
+    metadata["license"]["evidence_path"] = "../../outside-license.txt"
+
+    with pytest.raises(validator.MetadataError, match="license.evidence_path must stay inside"):
+        validator.validate_policy_semantics(metadata, Path("metadata.json"))
+
+
+def test_redaction_report_path_must_stay_inside_fixture_directory() -> None:
+    metadata = sample_metadata()
+    metadata["pii"] = copy.deepcopy(metadata["pii"])
+    metadata["pii"]["redaction_report_path"] = "../../outside-redaction.md"
+
+    with pytest.raises(validator.MetadataError, match="pii.redaction_report_path must stay inside"):
         validator.validate_policy_semantics(metadata, Path("metadata.json"))
 
 
