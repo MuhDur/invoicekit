@@ -182,6 +182,16 @@ impl Manifest {
         require_non_empty("retrieved_at", &self.retrieved_at)?;
         require_non_empty("signature_alg", &self.signature_alg)?;
         require_non_empty("signature", &self.signature)?;
+        // 522z: reject separator characters that would make the
+        // signing-payload format ambiguous.
+        require_payload_safe("list", &self.list)?;
+        require_payload_safe("version", &self.version)?;
+        require_payload_safe("source_url", &self.source_url)?;
+        require_payload_safe("retrieved_at", &self.retrieved_at)?;
+        if let Some(effective_to) = &self.effective_to {
+            require_payload_safe("effective_to", effective_to)?;
+        }
+        require_payload_safe("effective_from", &self.effective_from)?;
         validate_date(&self.effective_from)?;
         if let Some(effective_to) = &self.effective_to {
             validate_date(effective_to)?;
@@ -293,11 +303,21 @@ impl Entry {
     fn validate(&self, list: &str) -> Result<(), CodelistError> {
         require_non_empty("code", &self.code)?;
         require_non_empty("label", &self.label)?;
+        // 522z: keep the signing payload unambiguous by rejecting
+        // separator characters in entry-shaped fields.
+        require_payload_safe("entry.code", &self.code)?;
+        require_payload_safe("entry.label", &self.label)?;
         if let Some(valid_from) = &self.valid_from {
+            require_payload_safe("entry.valid_from", valid_from)?;
             validate_date(valid_from)?;
         }
         if let Some(valid_to) = &self.valid_to {
+            require_payload_safe("entry.valid_to", valid_to)?;
             validate_date(valid_to)?;
+        }
+        for (key, value) in &self.attrs {
+            require_payload_safe("entry.attrs.key", key)?;
+            require_payload_safe("entry.attrs.value", value)?;
         }
         if let (Some(valid_from), Some(valid_to)) = (&self.valid_from, &self.valid_to) {
             if valid_to < valid_from {
@@ -478,6 +498,18 @@ pub enum CodelistError {
         /// Field name.
         field: &'static str,
     },
+    /// 522z: a field value contains a character that the
+    /// signing-payload format uses as a delimiter.
+    #[error(
+        "code list manifest field `{field}` contains separator character {character:?} \
+         which would make the signing payload ambiguous"
+    )]
+    AmbiguousSeparator {
+        /// Field name.
+        field: &'static str,
+        /// Offending character.
+        character: char,
+    },
     /// A date string is not a valid `YYYY-MM-DD` date.
     #[error("date `{date}` must be a valid YYYY-MM-DD date")]
     InvalidDate {
@@ -534,6 +566,23 @@ fn require_non_empty(field: &'static str, value: &str) -> Result<(), CodelistErr
     } else {
         Ok(())
     }
+}
+
+/// 522z: reject characters that the line-and-pipe-separated
+/// signing payload uses as field delimiters. Without this guard
+/// a future upstream label containing `|` or a newline would
+/// produce a digest payload that collides with a different
+/// manifest.
+fn require_payload_safe(field: &'static str, value: &str) -> Result<(), CodelistError> {
+    for c in value.chars() {
+        if matches!(c, '\n' | '\r' | '|' | ';' | '=') {
+            return Err(CodelistError::AmbiguousSeparator {
+                field,
+                character: c,
+            });
+        }
+    }
+    Ok(())
 }
 
 fn is_within_window(on_date: &str, from: Option<&str>, to: Option<&str>) -> bool {
@@ -716,6 +765,93 @@ mod tests {
         assert!(matches!(
             err,
             CodelistError::UnsupportedSignatureAlgorithm { .. }
+        ));
+    }
+
+    // -------- 522z: ambiguous-separator regression tests --------
+
+    #[test]
+    fn label_with_pipe_is_rejected() {
+        let mut manifest = signed_test_manifest(None);
+        manifest.entries[0].label = "Old|test|label".to_owned();
+        let err = manifest.verify().expect_err("label with `|` is ambiguous");
+        assert!(
+            matches!(
+                err,
+                CodelistError::AmbiguousSeparator {
+                    field: "entry.label",
+                    character: '|'
+                }
+            ),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn label_with_newline_is_rejected() {
+        let mut manifest = signed_test_manifest(None);
+        manifest.entries[0].label = "Old\ntest".to_owned();
+        let err = manifest
+            .verify()
+            .expect_err("label with `\\n` is ambiguous");
+        assert!(matches!(
+            err,
+            CodelistError::AmbiguousSeparator {
+                field: "entry.label",
+                character: '\n'
+            }
+        ));
+    }
+
+    #[test]
+    fn version_with_equals_is_rejected() {
+        let mut manifest = signed_test_manifest(None);
+        manifest.version = "v=1.0".to_owned();
+        let err = manifest
+            .verify()
+            .expect_err("version with `=` is ambiguous");
+        assert!(matches!(
+            err,
+            CodelistError::AmbiguousSeparator {
+                field: "version",
+                character: '='
+            }
+        ));
+    }
+
+    #[test]
+    fn attrs_value_with_semicolon_is_rejected() {
+        let mut manifest = signed_test_manifest(None);
+        manifest.entries[0]
+            .attrs
+            .insert("region".to_owned(), "EU;DACH".to_owned());
+        let err = manifest
+            .verify()
+            .expect_err("attrs value with `;` is ambiguous");
+        assert!(matches!(
+            err,
+            CodelistError::AmbiguousSeparator {
+                field: "entry.attrs.value",
+                character: ';'
+            }
+        ));
+    }
+
+    #[test]
+    fn attrs_key_with_pipe_is_rejected() {
+        let mut manifest = signed_test_manifest(None);
+        manifest.entries[0]
+            .attrs
+            .insert("reg|ion".to_owned(), "EU".to_owned());
+        let err = manifest
+            .verify()
+            .expect_err("attrs key with `|` is ambiguous");
+        assert!(matches!(
+            err,
+            CodelistError::AmbiguousSeparator {
+                field: "entry.attrs.key",
+                character: '|'
+            }
         ));
     }
 
