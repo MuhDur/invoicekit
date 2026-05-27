@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+[package]
+name = "invoicekit-format-gobl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Bidirectional adapter between InvoiceKit's CommercialDocument and invopop/gobl JSON."
+publish = false
+
+[lib]
+name = "invoicekit_format_gobl"
+path = "src/lib.rs"
+
+[dependencies]
+invoicekit-ir = { path = "../ir", version = "0.0.0" }
+rust_decimal = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
+
+[lints]
+workspace = true
