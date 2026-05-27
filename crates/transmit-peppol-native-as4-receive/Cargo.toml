@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+[package]
+name = "invoicekit-transmit-peppol-native-as4-receive"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Native Rust AS4 receiver scaffold. mTLS listener + XMLDSig verifier + downstream dispatcher; all three abstractions are traits — xmlsec / axum impls land behind cargo features."
+publish = false
+
+[lib]
+name = "invoicekit_transmit_peppol_native_as4_receive"
+path = "src/lib.rs"
+
+[dependencies]
+invoicekit-transmit-peppol-native-as4 = { path = "../transmit-peppol-native-as4", version = "0.0.0" }
+thiserror.workspace = true
+
+[dev-dependencies]
+pollster = "0.4"
+
+[lints]
+workspace = true
