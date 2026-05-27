@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: Apache-2.0
+# T-103 TypeScript SDK build + test gate.
+#
+# Runs the three packages (@invoicekit/core, /render, /managed) under
+# Bun on every push / PR that touches them. The npm-publish job is
+# gated on the NPM_TOKEN secret (same pattern as T-012 and T-108).
+
+name: typescript-sdk
+
+on:
+  push:
+    paths:
+      - "bindings/typescript-sdk-core/**"
+      - "bindings/typescript-sdk-render/**"
+      - "bindings/typescript-sdk-managed/**"
+      - ".github/workflows/typescript-sdk.yml"
+  pull_request:
+    paths:
+      - "bindings/typescript-sdk-core/**"
+      - "bindings/typescript-sdk-render/**"
+      - "bindings/typescript-sdk-managed/**"
+      - ".github/workflows/typescript-sdk.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build + test (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - typescript-sdk-core
+          - typescript-sdk-render
+          - typescript-sdk-managed
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: bindings/${{ matrix.package }}
+        run: bun install --frozen-lockfile || bun install
+
+      - name: Type-check
+        working-directory: bindings/${{ matrix.package }}
+        run: bunx tsc --noEmit -p tsconfig.json
+
+      - name: Build
+        working-directory: bindings/${{ matrix.package }}
+        run: bunx tsc -p tsconfig.json
+
+      - name: Test (bun)
+        working-directory: bindings/${{ matrix.package }}
+        run: bun run test
+
+  publish:
+    name: publish to npm
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package:
+          - typescript-sdk-core
+          - typescript-sdk-render
+          - typescript-sdk-managed
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        working-directory: bindings/${{ matrix.package }}
+        run: bun install
+
+      - name: Build
+        working-directory: bindings/${{ matrix.package }}
+        run: bunx tsc -p tsconfig.json
+
+      - name: Publish (only when NPM_TOKEN configured)
+        working-directory: bindings/${{ matrix.package }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "::notice::NPM_TOKEN unset — skipping publish (gate matches T-012/T-108)."
+            exit 0
+          fi
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+          bun publish --access public
