@@ -15,6 +15,7 @@ members = [
   "crates/format-cii",
   "crates/format-gobl",
   "crates/profile-peppol-bis",
+  "crates/profile-peppol-pint",
   "crates/profile-xrechnung",
   "crates/validate",
   "crates/validate-ubl-cii",
