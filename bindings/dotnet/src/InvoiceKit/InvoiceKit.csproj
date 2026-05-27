@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>InvoiceKit</AssemblyName>
+    <RootNamespace>InvoiceKit</RootNamespace>
+    <PackageId>InvoiceKit.Engine</PackageId>
+    <Version>0.0.0</Version>
+    <Authors>The InvoiceKit Authors</Authors>
+    <Company>InvoiceKit</Company>
+    <Description>.NET 8 SDK for the InvoiceKit Engine ABI with P/Invoke native access and REST sidecar fallback.</Description>
+    <PackageTags>invoicekit;einvoicing;invoices;ffi;peppol</PackageTags>
+    <PackageProjectUrl>https://github.com/MuhDur/invoicekit</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/MuhDur/invoicekit</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+</Project>

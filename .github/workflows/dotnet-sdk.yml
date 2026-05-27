@@ -1,0 +1,69 @@
+name: .NET SDK
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUSTFLAGS: -D warnings
+  CARGO_INCREMENTAL: 0
+  DOTNET_NOLOGO: true
+
+jobs:
+  test:
+    name: .NET 8 on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p invoicekit-ffi --locked
+      - name: Export native library path
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux)
+              echo "INVOICEKIT_FFI_LIB=$GITHUB_WORKSPACE/target/debug/libinvoicekit_ffi.so" >> "$GITHUB_ENV"
+              ;;
+            macOS)
+              echo "INVOICEKIT_FFI_LIB=$GITHUB_WORKSPACE/target/debug/libinvoicekit_ffi.dylib" >> "$GITHUB_ENV"
+              ;;
+            Windows)
+              echo "INVOICEKIT_FFI_LIB=$GITHUB_WORKSPACE/target/debug/invoicekit_ffi.dll" >> "$GITHUB_ENV"
+              ;;
+          esac
+      - run: dotnet test bindings/dotnet/tests/InvoiceKit.Tests/InvoiceKit.Tests.csproj -c Release
+      - run: dotnet run --project bindings/dotnet/InvoiceKit.AbiGolden/InvoiceKit.AbiGolden.csproj -c Release
+      - run: dotnet pack bindings/dotnet/src/InvoiceKit/InvoiceKit.csproj -c Release -p:PackageVersion=0.0.0-ci --output artifacts/nuget
+
+  publish:
+    name: NuGet publish
+    runs-on: ubuntu-latest
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - run: dotnet pack bindings/dotnet/src/InvoiceKit/InvoiceKit.csproj -c Release -p:PackageVersion="${GITHUB_REF_NAME#v}" --output artifacts/nuget
+      - run: dotnet nuget push "artifacts/nuget/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
