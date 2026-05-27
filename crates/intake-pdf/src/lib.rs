@@ -1,12 +1,64 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The InvoiceKit Authors
 
-//! `invoicekit-intake-pdf` — InvoiceKit workspace member.
+//! `invoicekit-intake-pdf` — Layer-1/Layer-2 PDF intake.
 //!
-//! See [`plans/PLAN.md`](../../plans/PLAN.md) for the architectural role of
-//! this crate. The exported API below is the stable workspace-identity
-//! helper every InvoiceKit crate carries; downstream beads layer their
-//! domain logic on top of it without touching this surface.
+//! T-061 owns the Layer-2 path: deterministic text extraction from
+//! "digital" PDFs (PDFs that carry an embedded text layer; scanned
+//! PDFs are routed to `invoicekit-intake-ocr` instead). The public
+//! API is:
+//!
+//! ```rust,ignore
+//! use invoicekit_intake_pdf::{extract_pdf_text, StructuredText};
+//! let bytes: Vec<u8> = std::fs::read("invoice.pdf").unwrap();
+//! let st: StructuredText = extract_pdf_text(&bytes).unwrap();
+//! for page in &st.pages {
+//!     for frag in &page.fragments {
+//!         println!("p{} ({:.1},{:.1}) {}", page.index, frag.x, frag.y, frag.text);
+//!     }
+//! }
+//! ```
+//!
+//! Guarantees:
+//!
+//! 1. **Reading order preserved.** Fragments inside a page are sorted
+//!    top-to-bottom (PDF Y-axis is bottom-up, so we sort by `-y`) and
+//!    then left-to-right. Pages are emitted in PDF page order. This is
+//!    enough to round-trip rendered Latin invoices; right-to-left and
+//!    CJK vertical writing modes are documented gaps that downstream
+//!    OCR can still re-align using the `(x, y, font_size)` triplet.
+//! 2. **Encrypted PDFs are rejected** with [`PdfTextError::Encrypted`].
+//!    A future bead can supply credentials.
+//! 3. **Position information is in PDF user-space units** (1 unit =
+//!    1/72 inch), origin at the lower-left of the page. The OCR
+//!    aligner consumes the same coordinate system.
+
+mod text;
+
+use thiserror::Error;
+
+pub use text::{extract_pdf_text, PageText, StructuredText, TextFragment};
+
+/// Errors returned by [`extract_pdf_text`].
+#[derive(Debug, Error)]
+pub enum PdfTextError {
+    /// The byte stream is not a parseable PDF.
+    #[error("not a parseable PDF: {0}")]
+    Parse(String),
+    /// The PDF declares an `Encrypt` dictionary. T-061 does not
+    /// attempt decryption; a future bead can supply credentials.
+    #[error("PDF is encrypted; T-061 does not decrypt")]
+    Encrypted,
+    /// The PDF parsed but a page's content stream could not be
+    /// decoded or interpreted.
+    #[error("page {page} content stream malformed: {detail}")]
+    Page {
+        /// 0-based page index that failed.
+        page: usize,
+        /// Operator-readable reason.
+        detail: String,
+    },
+}
 
 /// Canonical Cargo package name of this crate.
 ///
