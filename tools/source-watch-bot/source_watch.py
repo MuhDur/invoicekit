@@ -21,7 +21,6 @@ import subprocess
 import sys
 import tomllib
 from typing import Any
-from urllib.error import URLError
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
@@ -401,7 +400,7 @@ def fetch_source(source: Source, timeout_seconds: float) -> Snapshot:
                 body = response.read(MAX_FETCH_BYTES + 1)
                 headers = {key.lower(): value for key, value in response.headers.items()}
                 status = getattr(response, "status", None)
-        except URLError as exc:
+        except OSError as exc:
             raise FetchError(f"{source.id}: fetch failed: {exc}") from exc
         if len(body) > MAX_FETCH_BYTES:
             raise FetchError(f"{source.id}: response exceeds {MAX_FETCH_BYTES} bytes")

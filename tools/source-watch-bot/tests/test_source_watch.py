@@ -168,6 +168,30 @@ def test_fetch_error_is_reported_without_opening_issue(tmp_path: Path) -> None:
     assert result["opened"] == []
 
 
+def test_http_timeout_is_reported_without_aborting(
+    tmp_path: Path,
+    monkeypatch: object,
+) -> None:
+    """HTTP socket timeouts are reported per-source and do not abort the run."""
+    registry = tmp_path / "sources.toml"
+    write_registry(registry, "https://example.invalid/source.txt")
+
+    def raise_timeout(*_args: object, **_kwargs: object) -> object:
+        raise TimeoutError("mock timeout")
+
+    monkeypatch.setattr(source_watch, "urlopen", raise_timeout)
+    result = source_watch.run_once(
+        registry_path=registry,
+        state_path=tmp_path / "state.json",
+        sink=source_watch.DryRunSink(),
+        timeout_seconds=1.0,
+    )
+
+    assert result["events"][0]["status"] == "fetch-error"
+    assert "mock timeout" in result["events"][0]["error"]
+    assert result["opened"] == []
+
+
 def test_source_watch_workflow_is_daily_and_runs_tests() -> None:
     """The GitHub Action deploys the daily bot and keeps test coverage wired."""
     workflow = (REPO / ".github" / "workflows" / "source-watch.yml").read_text(encoding="utf-8")
