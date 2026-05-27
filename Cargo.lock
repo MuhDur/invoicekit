@@ -2636,6 +2636,18 @@ name = "invoicekit-transmit-peppol"
 version = "0.0.0"
 
 [[package]]
+name = "invoicekit-transmit-peppol-partner"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-format-ubl",
+ "invoicekit-ir",
+ "invoicekit-reconcile",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "invoicekit-validate"
 version = "0.0.0"
 dependencies = [

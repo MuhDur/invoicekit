@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+[package]
+name = "invoicekit-transmit-peppol-partner"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Partner Peppol AP GatewayAdapter for Storecove / ecosio / B2BRouter. Env-var-driven config + injectable HttpClient + SecretResolver."
+publish = false
+
+[lib]
+name = "invoicekit_transmit_peppol_partner"
+path = "src/lib.rs"
+
+[dependencies]
+invoicekit-ir = { path = "../ir", version = "0.0.0" }
+invoicekit-reconcile = { path = "../reconcile", version = "0.0.0" }
+invoicekit-format-ubl = { path = "../format-ubl", version = "0.0.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
+
+[lints]
+workspace = true

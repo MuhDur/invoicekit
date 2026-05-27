@@ -95,6 +95,7 @@ members = [
   "bridges/maxio",
   "bridges/chargebee",
   "bridges/recurly",
+  "crates/transmit-peppol-partner",
   "tools/pdf-visual-regression",
 ]
 
