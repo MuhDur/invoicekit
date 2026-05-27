@@ -24,6 +24,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+pub mod hot_reload;
+
+pub use hot_reload::{HotReloadError, HotReloadRegistry, Snapshot, WatchHandle};
+
 /// Built-in seed manifests, embedded at compile time.
 ///
 /// The registry built by [`Registry::seeded`] parses each of these manifests
