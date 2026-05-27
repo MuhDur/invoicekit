@@ -54,6 +54,9 @@ const INVOICEKIT_EXTENSION_NAMESPACE_URI: &str = "urn:invoicekit:ubl:extension";
 const CORE_CUSTOMIZATION_ID: &str = "urn:invoicekit:ubl:2.1:core";
 const CORE_PROFILE_ID: &str = "urn:invoicekit:profile:core";
 const DEFAULT_LANGUAGE: &str = "und";
+const UBL_TOP_LEVEL_KEY: &str = "top_level";
+const UBL_TOP_LEVEL_ELEMENT_KEY: &str = "element";
+const UBL_TOP_LEVEL_XML_KEY: &str = "xml";
 
 /// Errors returned by [`to_xml`] and [`from_xml`].
 #[derive(Debug, Error)]
@@ -116,6 +119,16 @@ pub enum UblError {
         /// Operation that failed.
         operation: &'static str,
         /// Validator or I/O diagnostic.
+        message: String,
+    },
+    /// A preserved UBL fragment in an extension payload is not safe to replay.
+    #[error(
+        "invalid preserved UBL top-level fragment for `{element}`: {message}; hint: preserve fragments produced by from_xml or remove the invalid UBL document-fields payload"
+    )]
+    InvalidPreservedTopLevel {
+        /// Expected OASIS UBL top-level element slot.
+        element: String,
+        /// Validation diagnostic.
         message: String,
     },
 }
@@ -222,9 +235,9 @@ pub fn to_xml(document: &CommercialDocument) -> Result<String, UblError> {
 
 /// Parse a UBL 2.1 `Invoice` or `CreditNote` document into InvoiceKit IR.
 ///
-/// The parser extracts the current core IR surface. UBL elements that do not
-/// have an IR field yet are accepted by the XML reader but are not represented
-/// semantically in the returned [`CommercialDocument`].
+/// The parser extracts the current core IR surface. Non-core top-level UBL
+/// elements are preserved in a UBL-specific [`JurisdictionExtension`] so later
+/// profile passes can round-trip them without silent loss.
 ///
 /// # Errors
 ///
@@ -341,6 +354,8 @@ struct ParseState {
     metadata_source_system: Option<String>,
     ubl_buyer_reference: Option<String>,
     ubl_accounting_cost: Option<String>,
+    preserved_top_level: Vec<PreservedTopLevelXml>,
+    capture: Option<XmlCapture>,
     current_extension_uri: Option<String>,
     supplier: PartyBuilder,
     customer: PartyBuilder,
@@ -373,6 +388,16 @@ impl ParseState {
                 other => return Err(UblError::UnsupportedRoot(other.to_owned())),
             });
         }
+        if let Some(capture) = self.capture.as_mut() {
+            capture.start_element(element, attrs)?;
+            return Ok(());
+        }
+        if let Some(document_kind) = self.document_type.and_then(document_kind_from_type) {
+            if should_preserve_top_level(stack, element, document_kind) {
+                self.capture = Some(XmlCapture::new(element, attrs)?);
+                return Ok(());
+            }
+        }
         if is_element(element, "UBLExtension", UBL_EXT_NAMESPACE_URI)
             && is_root_ubl_extensions(stack)
         {
@@ -399,6 +424,17 @@ impl ParseState {
     }
 
     fn end_element(&mut self, element: &ParsedElement) -> Result<(), UblError> {
+        if let Some(capture) = self.capture.as_mut() {
+            capture.end_element(element)?;
+            if capture.is_finished() {
+                let capture = self
+                    .capture
+                    .take()
+                    .ok_or(UblError::MissingElement("preserved top-level UBL element"))?;
+                self.preserved_top_level.push(capture.finish());
+            }
+            return Ok(());
+        }
         let name = element.local_name.as_str();
         if name == "InvoiceLine" || name == "CreditNoteLine" {
             let line = self
@@ -429,6 +465,10 @@ impl ParseState {
 
     #[allow(clippy::too_many_lines)]
     fn text(&mut self, stack: &[ParsedElement], raw: &str) -> Result<(), UblError> {
+        if let Some(capture) = self.capture.as_mut() {
+            capture.text(raw);
+            return Ok(());
+        }
         let value = raw.trim();
         if value.is_empty() {
             return Ok(());
@@ -672,6 +712,17 @@ impl ParseState {
         if let Some(value) = self.ubl_accounting_cost {
             document_fields.insert("accounting_cost".to_owned(), Value::String(value));
         }
+        if !self.preserved_top_level.is_empty() {
+            let preserved: Vec<Value> = self
+                .preserved_top_level
+                .into_iter()
+                .filter(|item| !is_default_profile_fragment(item))
+                .map(PreservedTopLevelXml::into_value)
+                .collect();
+            if !preserved.is_empty() {
+                document_fields.insert(UBL_TOP_LEVEL_KEY.to_owned(), Value::Array(preserved));
+            }
+        }
         if !document_fields.is_empty() {
             extensions.push(JurisdictionExtension::new(
                 UBL_DOCUMENT_FIELDS_EXTENSION_URN,
@@ -746,6 +797,91 @@ impl ParseState {
                     (field, INVOICEKIT_EXTENSION_NAMESPACE_URI),
                 ],
             )
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PreservedTopLevelXml {
+    element: String,
+    xml: String,
+}
+
+impl PreservedTopLevelXml {
+    fn into_value(self) -> Value {
+        let mut payload = Map::new();
+        payload.insert(
+            UBL_TOP_LEVEL_ELEMENT_KEY.to_owned(),
+            Value::String(self.element),
+        );
+        payload.insert(UBL_TOP_LEVEL_XML_KEY.to_owned(), Value::String(self.xml));
+        Value::Object(payload)
+    }
+}
+
+fn is_default_profile_fragment(item: &PreservedTopLevelXml) -> bool {
+    matches!(
+        (item.element.as_str(), item.xml.as_str()),
+        (
+            "cbc:CustomizationID",
+            "<cbc:CustomizationID>urn:invoicekit:ubl:2.1:core</cbc:CustomizationID>"
+        ) | (
+            "cbc:ProfileID",
+            "<cbc:ProfileID>urn:invoicekit:profile:core</cbc:ProfileID>"
+        )
+    )
+}
+
+#[derive(Debug)]
+struct XmlCapture {
+    element: String,
+    xml: String,
+    depth: usize,
+}
+
+impl XmlCapture {
+    fn new(element: &ParsedElement, attrs: &[XmlAttribute]) -> Result<Self, UblError> {
+        let mut capture = Self {
+            element: ubl_element_qname(element)?,
+            xml: String::new(),
+            depth: 0,
+        };
+        capture.start_element(element, attrs)?;
+        Ok(capture)
+    }
+
+    fn start_element(
+        &mut self,
+        element: &ParsedElement,
+        attrs: &[XmlAttribute],
+    ) -> Result<(), UblError> {
+        write_start_element(&mut self.xml, element, attrs)?;
+        self.depth += 1;
+        Ok(())
+    }
+
+    fn end_element(&mut self, element: &ParsedElement) -> Result<(), UblError> {
+        let name = ubl_element_qname(element)?;
+        write!(self.xml, "</{name}>").expect("writing to a String cannot fail");
+        self.depth = self
+            .depth
+            .checked_sub(1)
+            .ok_or(UblError::MissingElement("preserved top-level UBL element"))?;
+        Ok(())
+    }
+
+    fn text(&mut self, raw: &str) {
+        write_xml_text(raw, &mut self.xml);
+    }
+
+    const fn is_finished(&self) -> bool {
+        self.depth == 0
+    }
+
+    fn finish(self) -> PreservedTopLevelXml {
+        PreservedTopLevelXml {
+            element: self.element,
+            xml: self.xml,
+        }
     }
 }
 
@@ -977,71 +1113,120 @@ fn serialize_document(
         r#"<{root_name} xmlns="{root_namespace}" xmlns:cac="{UBL_CAC_NAMESPACE_URI}" xmlns:cbc="{UBL_CBC_NAMESPACE_URI}" xmlns:ext="{UBL_EXT_NAMESPACE_URI}" xmlns:ik="{INVOICEKIT_EXTENSION_NAMESPACE_URI}">"#
     )
     .expect("writing to a String cannot fail");
-    write_invoicekit_metadata_extension(&mut xml, &document.meta);
-    write_text_element(&mut xml, "cbc:CustomizationID", CORE_CUSTOMIZATION_ID);
-    write_text_element(&mut xml, "cbc:ProfileID", CORE_PROFILE_ID);
-    write_text_element(
-        &mut xml,
-        "cbc:ID",
-        &string_value(&document.document_number)?,
-    );
-    write_text_element(&mut xml, "cbc:UUID", document.id.as_str());
-    write_text_element(&mut xml, "cbc:IssueDate", document.issue_date.as_str());
-    if document.document_type == DocumentType::Invoice {
-        if let Some(date) = &document.due_date {
-            write_text_element(&mut xml, "cbc:DueDate", date.as_str());
-        }
-    }
-    if document.document_type == DocumentType::Invoice {
-        write_text_element(&mut xml, "cbc:InvoiceTypeCode", "380");
-    } else {
-        if let Some(date) = &document.tax_point_date {
-            write_text_element(&mut xml, "cbc:TaxPointDate", date.as_str());
-        }
-        write_text_element(&mut xml, "cbc:CreditNoteTypeCode", "381");
-    }
-    for note in &document.notes {
-        write_note(&mut xml, note);
-    }
-    if document.document_type == DocumentType::Invoice {
-        if let Some(date) = &document.tax_point_date {
-            write_text_element(&mut xml, "cbc:TaxPointDate", date.as_str());
-        }
-    }
-    write_text_element(&mut xml, "cbc:DocumentCurrencyCode", &currency);
-    write_ubl_document_fields(&mut xml, document);
-    write_party(
-        &mut xml,
-        "cac:AccountingSupplierParty",
-        Some("cac:Party"),
-        &document.supplier,
-    )?;
-    write_party(
-        &mut xml,
-        "cac:AccountingCustomerParty",
-        Some("cac:Party"),
-        &document.customer,
-    )?;
-    if let Some(payee) = &document.payee {
-        write_party(&mut xml, "cac:PayeeParty", None, payee)?;
-    }
-    for instruction in &document.payment_instructions {
-        write_payment_instruction(&mut xml, instruction);
-    }
-    if let Some(terms) = &document.payment_terms {
-        xml.push_str("<cac:PaymentTerms>");
-        write_text_element(&mut xml, "cbc:Note", &terms.description);
-        xml.push_str("</cac:PaymentTerms>");
-    }
-    if !document.tax_summary.is_empty() {
-        write_tax_total(&mut xml, &document.tax_summary, &currency);
-    }
-    write_monetary_total(&mut xml, &document.monetary_total, &currency);
+    write_document_header(&mut xml, document, &currency)?;
+    write_document_parties(&mut xml, document)?;
+    write_document_settlement(&mut xml, document, &currency)?;
     for line in &document.lines {
         write_line(&mut xml, document.document_type, line, &currency);
     }
     write!(xml, "</{root_name}>").expect("writing to a String cannot fail");
     Ok(xml)
+}
+
+fn write_document_header(
+    xml: &mut String,
+    document: &CommercialDocument,
+    currency: &str,
+) -> Result<(), UblError> {
+    write_invoicekit_metadata_extension(xml, &document.meta);
+    write_preserved_top_level(xml, document, "cbc:UBLVersionID")?;
+    write_preserved_or_default_text(xml, document, "cbc:CustomizationID", CORE_CUSTOMIZATION_ID)?;
+    write_preserved_or_default_text(xml, document, "cbc:ProfileID", CORE_PROFILE_ID)?;
+    write_preserved_top_level(xml, document, "cbc:ProfileExecutionID")?;
+    write_text_element(xml, "cbc:ID", &string_value(&document.document_number)?);
+    write_preserved_top_level(xml, document, "cbc:CopyIndicator")?;
+    write_text_element(xml, "cbc:UUID", document.id.as_str());
+    write_text_element(xml, "cbc:IssueDate", document.issue_date.as_str());
+    write_preserved_top_level(xml, document, "cbc:IssueTime")?;
+    if document.document_type == DocumentType::Invoice {
+        if let Some(date) = &document.due_date {
+            write_text_element(xml, "cbc:DueDate", date.as_str());
+        }
+    }
+    if document.document_type == DocumentType::Invoice {
+        write_text_element(xml, "cbc:InvoiceTypeCode", "380");
+    } else {
+        if let Some(date) = &document.tax_point_date {
+            write_text_element(xml, "cbc:TaxPointDate", date.as_str());
+        }
+        write_text_element(xml, "cbc:CreditNoteTypeCode", "381");
+    }
+    for note in &document.notes {
+        write_note(xml, note);
+    }
+    if document.document_type == DocumentType::Invoice {
+        if let Some(date) = &document.tax_point_date {
+            write_text_element(xml, "cbc:TaxPointDate", date.as_str());
+        }
+    }
+    write_text_element(xml, "cbc:DocumentCurrencyCode", currency);
+    write_preserved_top_level(xml, document, "cbc:TaxCurrencyCode")?;
+    write_preserved_top_level(xml, document, "cbc:PricingCurrencyCode")?;
+    write_preserved_top_level(xml, document, "cbc:PaymentCurrencyCode")?;
+    write_preserved_top_level(xml, document, "cbc:PaymentAlternativeCurrencyCode")?;
+    write_preserved_top_level(xml, document, "cbc:AccountingCostCode")?;
+    write_ubl_document_field(xml, document, "accounting_cost", "cbc:AccountingCost");
+    write_preserved_top_level(xml, document, "cbc:LineCountNumeric")?;
+    write_ubl_document_field(xml, document, "buyer_reference", "cbc:BuyerReference");
+    if document.document_type == DocumentType::Invoice {
+        write_invoice_preserved_before_supplier(xml, document)?;
+    } else {
+        write_credit_note_preserved_before_supplier(xml, document)?;
+    }
+    Ok(())
+}
+
+fn write_document_parties(xml: &mut String, document: &CommercialDocument) -> Result<(), UblError> {
+    write_party(
+        xml,
+        "cac:AccountingSupplierParty",
+        Some("cac:Party"),
+        &document.supplier,
+    )?;
+    write_party(
+        xml,
+        "cac:AccountingCustomerParty",
+        Some("cac:Party"),
+        &document.customer,
+    )?;
+    if let Some(payee) = &document.payee {
+        write_party(xml, "cac:PayeeParty", None, payee)?;
+    }
+    write_preserved_top_level(xml, document, "cac:BuyerCustomerParty")?;
+    write_preserved_top_level(xml, document, "cac:SellerSupplierParty")?;
+    write_preserved_top_level(xml, document, "cac:TaxRepresentativeParty")?;
+    write_preserved_top_level(xml, document, "cac:Delivery")?;
+    write_preserved_top_level(xml, document, "cac:DeliveryTerms")?;
+    Ok(())
+}
+
+fn write_document_settlement(
+    xml: &mut String,
+    document: &CommercialDocument,
+    currency: &str,
+) -> Result<(), UblError> {
+    for instruction in &document.payment_instructions {
+        write_payment_instruction(xml, instruction);
+    }
+    if let Some(terms) = &document.payment_terms {
+        xml.push_str("<cac:PaymentTerms>");
+        write_text_element(xml, "cbc:Note", &terms.description);
+        xml.push_str("</cac:PaymentTerms>");
+    }
+    if document.document_type == DocumentType::Invoice {
+        write_preserved_top_level(xml, document, "cac:PrepaidPayment")?;
+        write_preserved_top_level(xml, document, "cac:AllowanceCharge")?;
+        write_preserved_exchange_rates(xml, document)?;
+    } else {
+        write_preserved_exchange_rates(xml, document)?;
+        write_preserved_top_level(xml, document, "cac:AllowanceCharge")?;
+    }
+    if !document.tax_summary.is_empty() {
+        write_tax_total(xml, &document.tax_summary, currency);
+    }
+    write_preserved_top_level(xml, document, "cac:WithholdingTaxTotal")?;
+    write_monetary_total(xml, &document.monetary_total, currency);
+    Ok(())
 }
 
 fn write_invoicekit_metadata_extension(xml: &mut String, meta: &DocumentMeta) {
@@ -1058,12 +1243,73 @@ fn write_invoicekit_metadata_extension(xml: &mut String, meta: &DocumentMeta) {
     );
 }
 
-fn write_ubl_document_fields(xml: &mut String, document: &CommercialDocument) {
-    if let Some(value) = ubl_document_field(document, "accounting_cost") {
-        write_text_element(xml, "cbc:AccountingCost", value);
+fn write_invoice_preserved_before_supplier(
+    xml: &mut String,
+    document: &CommercialDocument,
+) -> Result<(), UblError> {
+    for element in [
+        "cac:InvoicePeriod",
+        "cac:OrderReference",
+        "cac:BillingReference",
+        "cac:DespatchDocumentReference",
+        "cac:ReceiptDocumentReference",
+        "cac:StatementDocumentReference",
+        "cac:OriginatorDocumentReference",
+        "cac:ContractDocumentReference",
+        "cac:AdditionalDocumentReference",
+        "cac:ProjectReference",
+        "cac:Signature",
+    ] {
+        write_preserved_top_level(xml, document, element)?;
     }
-    if let Some(value) = ubl_document_field(document, "buyer_reference") {
-        write_text_element(xml, "cbc:BuyerReference", value);
+    Ok(())
+}
+
+fn write_credit_note_preserved_before_supplier(
+    xml: &mut String,
+    document: &CommercialDocument,
+) -> Result<(), UblError> {
+    for element in [
+        "cac:InvoicePeriod",
+        "cac:DiscrepancyResponse",
+        "cac:OrderReference",
+        "cac:BillingReference",
+        "cac:DespatchDocumentReference",
+        "cac:ReceiptDocumentReference",
+        "cac:ContractDocumentReference",
+        "cac:AdditionalDocumentReference",
+        "cac:StatementDocumentReference",
+        "cac:OriginatorDocumentReference",
+        "cac:Signature",
+    ] {
+        write_preserved_top_level(xml, document, element)?;
+    }
+    Ok(())
+}
+
+fn write_preserved_exchange_rates(
+    xml: &mut String,
+    document: &CommercialDocument,
+) -> Result<(), UblError> {
+    for element in [
+        "cac:TaxExchangeRate",
+        "cac:PricingExchangeRate",
+        "cac:PaymentExchangeRate",
+        "cac:PaymentAlternativeExchangeRate",
+    ] {
+        write_preserved_top_level(xml, document, element)?;
+    }
+    Ok(())
+}
+
+fn write_ubl_document_field(
+    xml: &mut String,
+    document: &CommercialDocument,
+    key: &str,
+    element_name: &str,
+) {
+    if let Some(value) = ubl_document_field(document, key) {
+        write_text_element(xml, element_name, value);
     }
 }
 
@@ -1074,6 +1320,277 @@ fn ubl_document_field<'a>(document: &'a CommercialDocument, key: &str) -> Option
         .find(|extension| extension.urn == UBL_DOCUMENT_FIELDS_EXTENSION_URN)
         .and_then(|extension| extension.payload.get(key))
         .and_then(Value::as_str)
+}
+
+fn write_preserved_or_default_text(
+    xml: &mut String,
+    document: &CommercialDocument,
+    element: &str,
+    default: &str,
+) -> Result<(), UblError> {
+    if !write_preserved_top_level(xml, document, element)? {
+        write_text_element(xml, element, default);
+    }
+    Ok(())
+}
+
+fn write_preserved_top_level(
+    xml: &mut String,
+    document: &CommercialDocument,
+    element: &str,
+) -> Result<bool, UblError> {
+    let Some(items) = document
+        .extensions
+        .iter()
+        .find(|extension| extension.urn == UBL_DOCUMENT_FIELDS_EXTENSION_URN)
+        .and_then(|extension| extension.payload.get(UBL_TOP_LEVEL_KEY))
+        .and_then(Value::as_array)
+    else {
+        return Ok(false);
+    };
+
+    let mut wrote = false;
+    for item in items {
+        let matches_element =
+            item.get(UBL_TOP_LEVEL_ELEMENT_KEY).and_then(Value::as_str) == Some(element);
+        if matches_element {
+            if let Some(fragment) = item.get(UBL_TOP_LEVEL_XML_KEY).and_then(Value::as_str) {
+                validate_preserved_top_level_fragment(document, element, fragment)?;
+                xml.push_str(fragment);
+                wrote = true;
+            }
+        }
+    }
+    Ok(wrote)
+}
+
+fn validate_preserved_top_level_fragment(
+    document: &CommercialDocument,
+    expected_element: &str,
+    fragment: &str,
+) -> Result<(), UblError> {
+    validate_preserved_top_level_slot(document, expected_element)?;
+    validate_preserved_fragment_xml(expected_element, fragment)
+}
+
+fn validate_preserved_top_level_slot(
+    document: &CommercialDocument,
+    expected_element: &str,
+) -> Result<(), UblError> {
+    let Some(document_kind) = document_kind_from_type(document.document_type) else {
+        return invalid_preserved_top_level(
+            expected_element,
+            "document type cannot contain UBL Invoice/CreditNote top-level fragments",
+        );
+    };
+    if coverage_for(document_kind, expected_element).is_none() {
+        return invalid_preserved_top_level(
+            expected_element,
+            "element is not valid for this UBL document type",
+        );
+    }
+    Ok(())
+}
+
+fn validate_preserved_fragment_xml(expected_element: &str, fragment: &str) -> Result<(), UblError> {
+    let wrapped = format!(
+        r#"<Wrapper xmlns:cac="{UBL_CAC_NAMESPACE_URI}" xmlns:cbc="{UBL_CBC_NAMESPACE_URI}" xmlns:ext="{UBL_EXT_NAMESPACE_URI}" xmlns:ik="{INVOICEKIT_EXTENSION_NAMESPACE_URI}">{fragment}</Wrapper>"#
+    );
+    let mut reader = Reader::from_str(&wrapped);
+    reader.config_mut().trim_text(false);
+    let mut state = PreservedFragmentValidation::new(expected_element);
+
+    loop {
+        let event = reader
+            .read_event()
+            .map_err(|err| UblError::InvalidPreservedTopLevel {
+                element: expected_element.to_owned(),
+                message: format!("fragment XML is not well formed: {err}"),
+            })?;
+        match event {
+            Event::Start(start) => {
+                state.start(&reader, &start)?;
+            }
+            Event::Empty(start) => {
+                state.empty(&reader, &start)?;
+            }
+            Event::End(end) => {
+                state.end(end.name().as_ref())?;
+            }
+            Event::Text(text) => {
+                state.outer_text(text.xml_content(state.xml_version)?.as_ref(), "text")?;
+            }
+            Event::CData(cdata) => {
+                state.outer_text(cdata.xml_content(state.xml_version)?.as_ref(), "CDATA")?;
+            }
+            Event::GeneralRef(reference) => {
+                state.outer_text(
+                    reference.xml_content(state.xml_version)?.as_ref(),
+                    "entity text",
+                )?;
+            }
+            Event::Decl(decl) => {
+                let version = decl.version()?;
+                state.xml_version = if version.as_ref() == b"1.1" {
+                    XmlVersion::Explicit1_1
+                } else {
+                    XmlVersion::Explicit1_0
+                };
+            }
+            Event::DocType(_) => {
+                return invalid_preserved_top_level(expected_element, "DOCTYPE is not allowed");
+            }
+            Event::PI(_) | Event::Comment(_) => {}
+            Event::Eof => break,
+        }
+    }
+    state.finish()
+}
+
+struct PreservedFragmentValidation<'a> {
+    expected_element: &'a str,
+    xml_version: XmlVersion,
+    namespace_stack: Vec<NamespaceFrame>,
+    element_stack: Vec<ParsedElement>,
+    depth: usize,
+    saw_wrapper: bool,
+    saw_child: bool,
+}
+
+impl<'a> PreservedFragmentValidation<'a> {
+    fn new(expected_element: &'a str) -> Self {
+        Self {
+            expected_element,
+            xml_version: XmlVersion::default(),
+            namespace_stack: vec![NamespaceFrame::default()],
+            element_stack: Vec::new(),
+            depth: 0,
+            saw_wrapper: false,
+            saw_child: false,
+        }
+    }
+
+    fn start(&mut self, reader: &Reader<&[u8]>, start: &BytesStart<'_>) -> Result<(), UblError> {
+        let (element, _, frame) =
+            read_element_start(reader, start, self.xml_version, self.namespace_stack.last())?;
+        if self.depth == 0 {
+            if element.local_name != "Wrapper" {
+                return invalid_preserved_top_level(
+                    self.expected_element,
+                    "validation wrapper did not parse",
+                );
+            }
+            self.saw_wrapper = true;
+        } else if self.depth == 1 {
+            validate_preserved_child(self.expected_element, &element, self.saw_child)?;
+            self.saw_child = true;
+        }
+        self.element_stack.push(element);
+        self.namespace_stack.push(frame);
+        self.depth += 1;
+        Ok(())
+    }
+
+    fn empty(&mut self, reader: &Reader<&[u8]>, start: &BytesStart<'_>) -> Result<(), UblError> {
+        let (element, _, _) =
+            read_element_start(reader, start, self.xml_version, self.namespace_stack.last())?;
+        if self.depth == 1 {
+            validate_preserved_child(self.expected_element, &element, self.saw_child)?;
+            self.saw_child = true;
+        } else if self.depth == 0 {
+            return invalid_preserved_top_level(
+                self.expected_element,
+                "fragment wrapper cannot be empty",
+            );
+        }
+        Ok(())
+    }
+
+    fn end(&mut self, raw: &[u8]) -> Result<(), UblError> {
+        if self.depth == 0 {
+            return invalid_preserved_top_level(
+                self.expected_element,
+                "fragment has more closing tags than opening tags",
+            );
+        }
+        let element = read_element_end(raw, self.namespace_stack.last())?;
+        let opened =
+            self.element_stack
+                .pop()
+                .ok_or_else(|| UblError::InvalidPreservedTopLevel {
+                    element: self.expected_element.to_owned(),
+                    message: "fragment has more closing tags than opening tags".to_owned(),
+                })?;
+        if element != opened {
+            return invalid_preserved_top_level(
+                self.expected_element,
+                format!(
+                    "closing tag `{}` does not match opening tag `{}`",
+                    element.local_name, opened.local_name
+                ),
+            );
+        }
+        self.depth -= 1;
+        self.namespace_stack.pop();
+        Ok(())
+    }
+
+    fn outer_text(&self, text: &str, kind: &str) -> Result<(), UblError> {
+        if self.depth <= 1 && !text.trim().is_empty() {
+            return invalid_preserved_top_level(
+                self.expected_element,
+                format!("fragment has {kind} outside its root element"),
+            );
+        }
+        Ok(())
+    }
+
+    fn finish(self) -> Result<(), UblError> {
+        if !self.saw_wrapper {
+            return invalid_preserved_top_level(self.expected_element, "fragment did not parse");
+        }
+        if !self.saw_child {
+            return invalid_preserved_top_level(self.expected_element, "fragment is empty");
+        }
+        if self.depth != 0 {
+            return invalid_preserved_top_level(self.expected_element, "fragment is not balanced");
+        }
+        if !self.element_stack.is_empty() {
+            return invalid_preserved_top_level(self.expected_element, "fragment is not balanced");
+        }
+        Ok(())
+    }
+}
+
+fn validate_preserved_child(
+    expected_element: &str,
+    element: &ParsedElement,
+    already_saw_child: bool,
+) -> Result<(), UblError> {
+    if already_saw_child {
+        return invalid_preserved_top_level(
+            expected_element,
+            "fragment has multiple root elements",
+        );
+    }
+    let actual = ubl_element_qname(element)?;
+    if actual != expected_element {
+        return invalid_preserved_top_level(
+            expected_element,
+            format!("fragment root `{actual}` does not match expected slot"),
+        );
+    }
+    Ok(())
+}
+
+fn invalid_preserved_top_level<T>(
+    element: &str,
+    message: impl Into<String>,
+) -> Result<T, UblError> {
+    Err(UblError::InvalidPreservedTopLevel {
+        element: element.to_owned(),
+        message: message.into(),
+    })
 }
 
 fn write_party(
@@ -1402,6 +1919,46 @@ fn read_element_name(raw: &[u8], frame: &NamespaceFrame) -> Result<ParsedElement
     })
 }
 
+fn write_start_element(
+    xml: &mut String,
+    element: &ParsedElement,
+    attrs: &[XmlAttribute],
+) -> Result<(), UblError> {
+    let name = ubl_element_qname(element)?;
+    write!(xml, "<{name}").expect("writing to a String cannot fail");
+    for attr in attrs {
+        write!(xml, " {}", attr.local_name).expect("writing to a String cannot fail");
+        xml.push_str("=\"");
+        write_xml_attr(&attr.value, xml);
+        xml.push('"');
+    }
+    xml.push('>');
+    Ok(())
+}
+
+fn ubl_element_qname(element: &ParsedElement) -> Result<String, UblError> {
+    let Some(namespace) = element.namespace_uri.as_deref() else {
+        return Ok(element.local_name.clone());
+    };
+    let prefix = match namespace {
+        UBL_CBC_NAMESPACE_URI => "cbc",
+        UBL_CAC_NAMESPACE_URI => "cac",
+        UBL_EXT_NAMESPACE_URI => "ext",
+        INVOICEKIT_EXTENSION_NAMESPACE_URI => "ik",
+        UBL_INVOICE_NAMESPACE_URI | UBL_CREDIT_NOTE_NAMESPACE_URI => "",
+        other => {
+            return Err(UblError::InvalidName(format!(
+                "unsupported preserved namespace `{other}`"
+            )))
+        }
+    };
+    if prefix.is_empty() {
+        Ok(element.local_name.clone())
+    } else {
+        Ok(format!("{prefix}:{}", element.local_name))
+    }
+}
+
 fn attr_value<'a>(attrs: &'a [XmlAttribute], local_name: &str) -> Option<&'a str> {
     attrs
         .iter()
@@ -1494,6 +2051,39 @@ fn party_role(stack: &[ParsedElement]) -> Option<PartyRole> {
     }
 }
 
+const fn document_kind_from_type(document_type: DocumentType) -> Option<UblDocumentKind> {
+    match document_type {
+        DocumentType::Invoice => Some(UblDocumentKind::Invoice),
+        DocumentType::CreditNote => Some(UblDocumentKind::CreditNote),
+        DocumentType::DebitNote | DocumentType::ProForma | DocumentType::SelfBilled => None,
+    }
+}
+
+fn should_preserve_top_level(
+    stack: &[ParsedElement],
+    element: &ParsedElement,
+    document_kind: UblDocumentKind,
+) -> bool {
+    if stack.len() != 1 {
+        return false;
+    }
+    let Ok(qname) = ubl_element_qname(element) else {
+        return false;
+    };
+    if qname == "cbc:AccountingCost" || qname == "cbc:BuyerReference" {
+        return false;
+    }
+    coverage_for(document_kind, &qname).is_some_and(|row| {
+        matches!(
+            row.class,
+            UblCoverageClass::ProfileExtensionPayload
+                | UblCoverageClass::LossinessLedgerPreserved
+                | UblCoverageClass::UblDocumentFieldExtension
+                | UblCoverageClass::UnsupportedGap
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
@@ -1501,9 +2091,10 @@ mod tests {
     use super::{
         coverage_for, crate_name, from_xml, to_xml, top_level_coverage,
         validate_oasis_ubl_2_1_schema, UblCoverageClass, UblDocumentKind, UblError, BEAD_ID,
-        INVOICEKIT_EXTENSION_NAMESPACE_URI, INVOICEKIT_METADATA_EXTENSION_URN,
-        OASIS_UBL_2_1_SCHEMA_VALIDATED_FIXTURES, UBL_CBC_NAMESPACE_URI,
-        UBL_DOCUMENT_FIELDS_EXTENSION_URN, UBL_EXT_NAMESPACE_URI,
+        CORE_CUSTOMIZATION_ID, CORE_PROFILE_ID, INVOICEKIT_EXTENSION_NAMESPACE_URI,
+        INVOICEKIT_METADATA_EXTENSION_URN, OASIS_UBL_2_1_SCHEMA_VALIDATED_FIXTURES,
+        UBL_CAC_NAMESPACE_URI, UBL_CBC_NAMESPACE_URI, UBL_DOCUMENT_FIELDS_EXTENSION_URN,
+        UBL_EXT_NAMESPACE_URI, UBL_TOP_LEVEL_ELEMENT_KEY, UBL_TOP_LEVEL_KEY,
     };
     use invoicekit_canonical::canonicalize_xml;
     use invoicekit_ir::{
@@ -1514,7 +2105,7 @@ mod tests {
         TaxCategorySummary,
     };
     use rust_decimal::Decimal;
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     #[test]
     fn crate_name_is_cargo_package_name() {
@@ -1568,6 +2159,21 @@ mod tests {
                 .unwrap()
                 .class,
             UblCoverageClass::LossinessLedgerPreserved
+        );
+    }
+
+    #[test]
+    fn coverage_matrix_has_no_unsupported_top_level_gaps() {
+        let unsupported = [UblDocumentKind::Invoice, UblDocumentKind::CreditNote]
+            .into_iter()
+            .flat_map(top_level_coverage)
+            .filter(|row| row.class == UblCoverageClass::UnsupportedGap)
+            .map(|row| row.element)
+            .collect::<Vec<_>>();
+
+        assert!(
+            unsupported.is_empty(),
+            "unsupported UBL top-level rows must be preserved or mapped: {unsupported:?}"
         );
     }
 
@@ -1631,6 +2237,154 @@ mod tests {
         assert!(xml.contains("AccountingCost"));
         assert!(xml.contains("BuyerReference"));
         assert_eq!(from_xml(&xml).unwrap(), document);
+    }
+
+    #[test]
+    fn non_core_top_level_fields_are_preserved_and_replayed() {
+        let document = fixture(DocumentType::Invoice, 14);
+        let ubl_version = format!(
+            r#"<cbc:UBLVersionID xmlns:cbc="{UBL_CBC_NAMESPACE_URI}">2.1</cbc:UBLVersionID>"#
+        );
+        let profile_execution = format!(
+            r#"<cbc:ProfileExecutionID xmlns:cbc="{UBL_CBC_NAMESPACE_URI}">exec-14</cbc:ProfileExecutionID>"#
+        );
+        let copy_indicator = format!(
+            r#"<cbc:CopyIndicator xmlns:cbc="{UBL_CBC_NAMESPACE_URI}">false</cbc:CopyIndicator>"#
+        );
+        let issue_time = format!(
+            r#"<cbc:IssueTime xmlns:cbc="{UBL_CBC_NAMESPACE_URI}">12:00:00</cbc:IssueTime>"#
+        );
+        let currency_fields = format!(
+            r#"<cbc:TaxCurrencyCode xmlns:cbc="{UBL_CBC_NAMESPACE_URI}">USD</cbc:TaxCurrencyCode><cbc:AccountingCostCode xmlns:cbc="{UBL_CBC_NAMESPACE_URI}">DEPT-14</cbc:AccountingCostCode><cbc:LineCountNumeric xmlns:cbc="{UBL_CBC_NAMESPACE_URI}">1</cbc:LineCountNumeric>"#
+        );
+        let order_reference = format!(
+            r#"<cac:OrderReference xmlns:cac="{UBL_CAC_NAMESPACE_URI}" xmlns:cbc="{UBL_CBC_NAMESPACE_URI}"><cbc:ID>ORDER-14</cbc:ID></cac:OrderReference>"#
+        );
+        let xml = to_xml(&document)
+            .unwrap()
+            .replacen(
+                "<cbc:CustomizationID",
+                &format!("{ubl_version}<cbc:CustomizationID"),
+                1,
+            )
+            .replace(CORE_CUSTOMIZATION_ID, "urn:example:customization")
+            .replace(CORE_PROFILE_ID, "urn:example:profile")
+            .replacen(
+                "</cbc:ProfileID><cbc:ID",
+                &format!("</cbc:ProfileID>{profile_execution}<cbc:ID"),
+                1,
+            )
+            .replacen("<cbc:UUID", &format!("{copy_indicator}<cbc:UUID"), 1)
+            .replacen(
+                "</cbc:IssueDate><cbc:DueDate",
+                &format!("</cbc:IssueDate>{issue_time}<cbc:DueDate"),
+                1,
+            )
+            .replacen(
+                "</cbc:DocumentCurrencyCode>",
+                &format!("</cbc:DocumentCurrencyCode>{currency_fields}"),
+                1,
+            )
+            .replacen(
+                "<cac:AccountingSupplierParty",
+                &format!("{order_reference}<cac:AccountingSupplierParty"),
+                1,
+            );
+
+        let parsed = from_xml(&xml).unwrap();
+        let payload = parsed
+            .extensions
+            .iter()
+            .find(|extension| extension.urn == UBL_DOCUMENT_FIELDS_EXTENSION_URN)
+            .map(|extension| &extension.payload)
+            .unwrap();
+        let preserved = payload
+            .get(UBL_TOP_LEVEL_KEY)
+            .and_then(Value::as_array)
+            .unwrap();
+
+        for element in [
+            "cbc:UBLVersionID",
+            "cbc:CustomizationID",
+            "cbc:ProfileID",
+            "cbc:ProfileExecutionID",
+            "cbc:CopyIndicator",
+            "cbc:IssueTime",
+            "cbc:TaxCurrencyCode",
+            "cbc:AccountingCostCode",
+            "cbc:LineCountNumeric",
+            "cac:OrderReference",
+        ] {
+            assert!(
+                preserved.iter().any(|item| {
+                    item.get(UBL_TOP_LEVEL_ELEMENT_KEY).and_then(Value::as_str) == Some(element)
+                }),
+                "missing preserved top-level element {element}"
+            );
+        }
+
+        let serialized = to_xml(&parsed).unwrap();
+        assert!(serialized.contains("urn:example:customization"));
+        assert!(serialized.contains("urn:example:profile"));
+        assert!(serialized.contains("TaxCurrencyCode"));
+        assert!(serialized.contains(">USD<"));
+        assert!(serialized.contains("OrderReference"));
+        assert_eq!(from_xml(&serialized).unwrap(), parsed);
+
+        let schema_report = validate_oasis_ubl_2_1_schema(&serialized).unwrap();
+        assert!(
+            schema_report.is_valid(),
+            "expected preserved-field output to be schema valid, findings: {:?}",
+            schema_report.findings
+        );
+    }
+
+    #[test]
+    fn rejects_mismatched_preserved_top_level_fragment() {
+        let mut document = fixture(DocumentType::Invoice, 15);
+        document.extensions.push(
+            JurisdictionExtension::new(
+                UBL_DOCUMENT_FIELDS_EXTENSION_URN,
+                json!({
+                    UBL_TOP_LEVEL_KEY: [{
+                        UBL_TOP_LEVEL_ELEMENT_KEY: "cbc:UBLVersionID",
+                        "xml": "<cbc:ProfileID>not-a-version</cbc:ProfileID>"
+                    }]
+                }),
+            )
+            .unwrap(),
+        );
+
+        let err = to_xml(&document).unwrap_err();
+        assert!(matches!(
+            err,
+            UblError::InvalidPreservedTopLevel { element, .. }
+                if element == "cbc:UBLVersionID"
+        ));
+    }
+
+    #[test]
+    fn rejects_mismatched_preserved_top_level_closing_tag() {
+        let mut document = fixture(DocumentType::Invoice, 16);
+        document.extensions.push(
+            JurisdictionExtension::new(
+                UBL_DOCUMENT_FIELDS_EXTENSION_URN,
+                json!({
+                    UBL_TOP_LEVEL_KEY: [{
+                        UBL_TOP_LEVEL_ELEMENT_KEY: "cbc:UBLVersionID",
+                        "xml": "<cbc:UBLVersionID>2.1</cbc:ProfileID>"
+                    }]
+                }),
+            )
+            .unwrap(),
+        );
+
+        let err = to_xml(&document).unwrap_err();
+        assert!(matches!(
+            err,
+            UblError::InvalidPreservedTopLevel { element, .. }
+                if element == "cbc:UBLVersionID"
+        ));
     }
 
     #[test]
