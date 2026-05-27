@@ -57,6 +57,7 @@ jobs:
           cargo bench -p invoicekit-bench-harness --bench ir_round_trip -- --warm-up-time 1 --measurement-time 3 --sample-size 20
           cargo bench -p invoicekit-bench-harness --bench xml_canonicalization -- --warm-up-time 1 --measurement-time 3 --sample-size 20
           cargo bench -p invoicekit-bench-harness --bench ubl_parse -- --warm-up-time 1 --measurement-time 3 --sample-size 20
+          cargo bench -p invoicekit-bench-harness --bench cii_parse -- --warm-up-time 1 --measurement-time 3 --sample-size 20
       - name: Evaluate budget vs. baseline
         id: budget
         run: |
@@ -94,6 +95,7 @@ jobs:
           cargo bench -p invoicekit-bench-harness --bench ir_round_trip -- --warm-up-time 1 --measurement-time 3 --sample-size 20
           cargo bench -p invoicekit-bench-harness --bench xml_canonicalization -- --warm-up-time 1 --measurement-time 3 --sample-size 20
           cargo bench -p invoicekit-bench-harness --bench ubl_parse -- --warm-up-time 1 --measurement-time 3 --sample-size 20
+          cargo bench -p invoicekit-bench-harness --bench cii_parse -- --warm-up-time 1 --measurement-time 3 --sample-size 20
       - name: Publish to GitHub Pages branch (gh-pages)
         uses: peaceiris/actions-gh-pages@v4
         with:

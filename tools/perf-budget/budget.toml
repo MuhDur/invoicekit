@@ -31,6 +31,11 @@ max_regression_pct = 5.0
 # Owned by `crates/bench-harness/benches/ubl_parse.rs`.
 max_regression_pct = 10.0
 
+[operations.cii-parse]
+# UN/CEFACT CII D16B parser on a synthetic 1 MiB invoice.
+# Owned by `crates/bench-harness/benches/cii_parse.rs`.
+max_regression_pct = 10.0
+
 # Future tracked operations land here as their owning beads add benches:
 #   [operations.validate]
 #   [operations.render]

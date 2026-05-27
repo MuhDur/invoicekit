@@ -12,6 +12,7 @@ members = [
   "crates/ir",
   "crates/canonical",
   "crates/format-ubl",
+  "crates/format-cii",
   "crates/validate",
   "crates/validate-ubl-cii",
   "crates/render-pdf",
