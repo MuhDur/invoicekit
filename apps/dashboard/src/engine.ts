@@ -2,6 +2,8 @@ export type BillingState = "trial" | "active" | "past_due" | "suspended";
 
 export type ActivityKind = "sent" | "validated" | "failed" | "archived";
 
+export type TransmissionState = "accepted" | "archived" | "failed" | "queued" | "rejected" | "sent" | "validating";
+
 export interface RecentActivityItem {
   readonly id: string;
   readonly kind: ActivityKind;
@@ -35,7 +37,39 @@ export interface TenantOverview {
   readonly generatedAt: string;
 }
 
+export interface TransmissionSummary {
+  readonly id: string;
+  readonly documentId: string;
+  readonly state: TransmissionState;
+  readonly gateway: string;
+  readonly recipient: string;
+  readonly recipientCountry: string;
+  readonly issueDate: string;
+  readonly updatedAt: string;
+  readonly amount: string;
+  readonly currency: string;
+  readonly receiptUrl?: string;
+  readonly evidenceBundleUrl?: string;
+}
+
+export interface TransmissionPageInfo {
+  readonly endCursor?: string;
+  readonly hasNextPage: boolean;
+  readonly limit: number;
+}
+
+export interface TransmissionPage {
+  readonly items: readonly TransmissionSummary[];
+  readonly pageInfo: TransmissionPageInfo;
+}
+
+export interface TransmissionListParams {
+  readonly cursor?: string;
+  readonly limit?: number;
+}
+
 export interface DashboardEngineClient {
+  listTransmissions(params?: TransmissionListParams): Promise<TransmissionPage>;
   tenantOverview(): Promise<TenantOverview>;
 }
 
@@ -71,11 +105,23 @@ export function createHttpDashboardClient(options: EngineRpcClientOptions = {}):
   }
 
   return {
+    async listTransmissions(params = {}) {
+      return callEngineMethod({
+        endpoint,
+        fetcher,
+        method: "engine.list_transmissions",
+        params,
+        parse: parseTransmissionPage,
+        requestId: requestIdFactory()
+      });
+    },
     async tenantOverview() {
       return callEngineMethod({
         endpoint,
         fetcher,
         method: "engine.tenant_overview",
+        params: {},
+        parse: parseTenantOverview,
         requestId: requestIdFactory()
       });
     }
@@ -103,20 +149,29 @@ export function billingTone(state: BillingState): "neutral" | "good" | "warning"
   }
 }
 
-interface EngineMethodCall {
+interface EngineMethodCall<Result> {
   readonly endpoint: string;
   readonly fetcher: FetchLike;
-  readonly method: "engine.tenant_overview";
+  readonly method: "engine.list_transmissions" | "engine.tenant_overview";
+  readonly params: unknown;
+  readonly parse: (value: unknown) => Result;
   readonly requestId: string;
 }
 
-async function callEngineMethod({ endpoint, fetcher, method, requestId }: EngineMethodCall): Promise<TenantOverview> {
+async function callEngineMethod<Result extends TenantOverview | TransmissionPage>({
+  endpoint,
+  fetcher,
+  method,
+  params,
+  parse,
+  requestId
+}: EngineMethodCall<Result>): Promise<Result> {
   const response = await fetcher(endpoint, {
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: requestId,
       method,
-      params: {}
+      params
     }),
     credentials: "include",
     headers: {
@@ -147,7 +202,7 @@ async function callEngineMethod({ endpoint, fetcher, method, requestId }: Engine
     });
   }
 
-  return parseTenantOverview(envelope.result);
+  return parse(envelope.result);
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -211,6 +266,47 @@ function parseRecentActivity(value: unknown): RecentActivityItem {
   };
 }
 
+function parseTransmissionPage(value: unknown): TransmissionPage {
+  const record = asRecord(value, "transmission page");
+
+  return {
+    items: readArray(record, "items", "transmission page").map(parseTransmissionSummary),
+    pageInfo: parseTransmissionPageInfo(readRequired(record, "pageInfo", "transmission page"))
+  };
+}
+
+function parseTransmissionPageInfo(value: unknown): TransmissionPageInfo {
+  const record = asRecord(value, "transmission page info");
+  const endCursor = record.endCursor;
+
+  return {
+    ...(typeof endCursor === "string" ? { endCursor } : {}),
+    hasNextPage: readBoolean(record, "hasNextPage", "transmission page info"),
+    limit: readNumber(record, "limit", "transmission page info")
+  };
+}
+
+function parseTransmissionSummary(value: unknown): TransmissionSummary {
+  const record = asRecord(value, "transmission summary");
+  const receiptUrl = record.receiptUrl;
+  const evidenceBundleUrl = record.evidenceBundleUrl;
+
+  return {
+    id: readString(record, "id", "transmission summary"),
+    documentId: readString(record, "documentId", "transmission summary"),
+    state: readTransmissionState(record, "state", "transmission summary"),
+    gateway: readString(record, "gateway", "transmission summary"),
+    recipient: readString(record, "recipient", "transmission summary"),
+    recipientCountry: readString(record, "recipientCountry", "transmission summary"),
+    issueDate: readString(record, "issueDate", "transmission summary"),
+    updatedAt: readString(record, "updatedAt", "transmission summary"),
+    amount: readString(record, "amount", "transmission summary"),
+    currency: readString(record, "currency", "transmission summary"),
+    ...(typeof receiptUrl === "string" ? { receiptUrl } : {}),
+    ...(typeof evidenceBundleUrl === "string" ? { evidenceBundleUrl } : {})
+  };
+}
+
 function asRecord(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new EngineRpcError(`Invalid ${label}: expected object`, { data: value });
@@ -244,6 +340,16 @@ function readNumber(record: Record<string, unknown>, key: string, label: string)
 
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new EngineRpcError(`Invalid ${label}: ${key} must be a finite number`, { data: record });
+  }
+
+  return value;
+}
+
+function readBoolean(record: Record<string, unknown>, key: string, label: string): boolean {
+  const value = readRequired(record, key, label);
+
+  if (typeof value !== "boolean") {
+    throw new EngineRpcError(`Invalid ${label}: ${key} must be a boolean`, { data: record });
   }
 
   return value;
@@ -291,6 +397,24 @@ function readActivityKind(record: Record<string, unknown>, key: string, label: s
   }
 
   throw new EngineRpcError(`Invalid ${label}: unsupported activity kind`, { data: record });
+}
+
+function readTransmissionState(record: Record<string, unknown>, key: string, label: string): TransmissionState {
+  const value = readString(record, key, label);
+
+  if (
+    value === "accepted" ||
+    value === "archived" ||
+    value === "failed" ||
+    value === "queued" ||
+    value === "rejected" ||
+    value === "sent" ||
+    value === "validating"
+  ) {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported transmission state`, { data: record });
 }
 
 function dashboardEngineEndpoint(): string {

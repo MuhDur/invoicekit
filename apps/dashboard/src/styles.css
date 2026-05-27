@@ -103,6 +103,7 @@ a {
   padding: 32px;
 }
 
+.documents-page,
 .overview {
   display: grid;
   gap: 24px;
@@ -151,7 +152,8 @@ h1 {
 .activity-panel,
 .billing-banner,
 .error-panel,
-.loading-panel {
+.loading-panel,
+.table-panel {
   border: 1px solid #dbe0d6;
   border-radius: 8px;
   background: #ffffff;
@@ -233,7 +235,8 @@ h1 {
   font-size: 1.125rem;
 }
 
-.activity-panel {
+.activity-panel,
+.table-panel {
   overflow: hidden;
 }
 
@@ -250,6 +253,92 @@ h1 {
 .panel-heading h2 {
   margin: 0;
   font-size: 1.125rem;
+}
+
+.panel-heading p {
+  margin: 2px 0 0;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.documents-table {
+  width: 100%;
+  min-width: 960px;
+  border-collapse: collapse;
+}
+
+.documents-table th,
+.documents-table td {
+  border-bottom: 1px solid #edf0eb;
+  padding: 14px 16px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.documents-table th {
+  color: #536159;
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+}
+
+.documents-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.document-cell,
+.recipient-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.document-cell {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.document-cell strong,
+.recipient-cell {
+  color: #14211a;
+  font-weight: 800;
+}
+
+.document-cell small,
+.recipient-cell small {
+  color: #66736c;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.artifact-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.artifact-links a,
+.artifact-links span {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  color: #24322b;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.artifact-links .muted {
+  color: #66736c;
+}
+
+.empty-table-cell {
+  color: #66736c;
+  text-align: center;
 }
 
 .activity-list {

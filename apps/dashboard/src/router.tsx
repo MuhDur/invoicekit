@@ -1,11 +1,13 @@
 import { Link, Outlet, createRootRoute, createRoute, createRouter, useRouterState } from "@tanstack/react-router";
 import { Suspense } from "react";
 import { Activity, Gauge, Inbox, Settings } from "lucide-react";
+import { DocumentsRoute } from "../routes/documents";
 import { OverviewRoute } from "../routes/overview";
 
 function AppShell() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const overviewActive = pathname === "/" || pathname === "/overview";
+  const documentsActive = pathname.startsWith("/documents");
 
   return (
     <div className="app-shell">
@@ -22,10 +24,10 @@ function AppShell() {
             <Gauge size={18} aria-hidden="true" />
             Overview
           </Link>
-          <span className="nav-item nav-item-disabled">
+          <Link className="nav-item" data-active={documentsActive ? true : undefined} to="/documents">
             <Inbox size={18} aria-hidden="true" />
             Documents
-          </span>
+          </Link>
           <span className="nav-item nav-item-disabled">
             <Activity size={18} aria-hidden="true" />
             Activity
@@ -62,7 +64,13 @@ const overviewRoute = createRoute({
   component: OverviewRoute
 });
 
-const routeTree = rootRoute.addChildren([overviewIndexRoute, overviewRoute]);
+const documentsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/documents",
+  component: DocumentsRoute
+});
+
+const routeTree = rootRoute.addChildren([overviewIndexRoute, overviewRoute, documentsRoute]);
 
 export const router = createRouter({
   defaultPreload: "intent",
