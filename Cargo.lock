@@ -1638,6 +1638,7 @@ name = "invoicekit-cli"
 version = "0.0.0"
 dependencies = [
  "invoicekit-ir",
+ "invoicekit-migration",
  "serde_json",
 ]
 
@@ -1750,6 +1751,13 @@ version = "0.0.0"
 [[package]]
 name = "invoicekit-migration"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-ir",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-money"

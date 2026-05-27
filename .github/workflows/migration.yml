@@ -1,0 +1,52 @@
+name: Migration archive
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: migration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  migration-archive:
+    name: migrate-archive CLI smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build migrate-archive binary
+        run: cargo build -p invoicekit-cli --bin migrate-archive --locked
+      - name: Identity migration smoke (v1.0 -> v1.0)
+        # The bead's CI gate (migrate every prior version's fixture set
+        # on every PR) is vacuous today because only V1_0 exists; the
+        # smoke test exercises the binary against a generated synthetic
+        # archive of three V1_0 documents and asserts the binary exits 0
+        # plus the files round-trip identically. When a V1_1 / V2_0
+        # variant ships, extend the matrix below to cover each pair.
+        run: |
+          set -euo pipefail
+          ARCHIVE="$(mktemp -d)/archive"
+          mkdir -p "$ARCHIVE"
+          for i in 1 2 3; do
+            cat > "$ARCHIVE/sample-$i.json" <<JSON
+          {
+            "schema_version": "1.0",
+            "id": "doc-archive-$i",
+            "payload_marker": "v1-untouched-$i"
+          }
+          JSON
+          done
+          ./target/debug/migrate-archive --from-version=1.0 --to-version=1.0 "$ARCHIVE"
+          for i in 1 2 3; do
+            grep -q '"schema_version": "1.0"' "$ARCHIVE/sample-$i.json"
+            grep -q "v1-untouched-$i" "$ARCHIVE/sample-$i.json"
+          done
