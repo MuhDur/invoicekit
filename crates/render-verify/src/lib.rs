@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The InvoiceKit Authors
 
-//! `invoicekit-render-verify` — InvoiceKit workspace member.
+//! `invoicekit-render-verify` — render-side verification adapters.
 //!
-//! See [`plans/PLAN.md`](../../plans/PLAN.md) for the architectural role of
-//! this crate. The exported API below is the stable workspace-identity
-//! helper every InvoiceKit crate carries; downstream beads layer their
-//! domain logic on top of it without touching this surface.
+//! Currently houses the T-052 veraPDF adapter that parses the
+//! validator-verapdf sidecar's `validator.validate_pdf` JSON
+//! response into a typed [`verapdf::PdfAReport`]. Additional
+//! render verifiers (PDF/A signature checks, font-embedding
+//! audits, etc.) will land here as sibling modules.
+
+pub mod verapdf;
 
 /// Canonical Cargo package name of this crate.
 ///

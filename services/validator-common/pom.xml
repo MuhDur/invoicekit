@@ -18,6 +18,7 @@ Copyright 2026 The InvoiceKit Authors
     <kosit.validator.version>1.6.2</kosit.validator.version>
     <phive.rules.peppol.version>3.2.2</phive.rules.peppol.version>
     <saxon.he.version>12.9</saxon.he.version>
+    <verapdf.library.version>1.27.1</verapdf.library.version>
     <maven.compiler.release>21</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
@@ -58,6 +59,16 @@ Copyright 2026 The InvoiceKit Authors
           <groupId>net.sf.saxon</groupId>
           <artifactId>Saxon-HE</artifactId>
           <version>${saxon.he.version}</version>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <id>verapdf</id>
+      <dependencies>
+        <dependency>
+          <groupId>org.verapdf</groupId>
+          <artifactId>verapdf-library</artifactId>
+          <version>${verapdf.library.version}</version>
         </dependency>
       </dependencies>
     </profile>
