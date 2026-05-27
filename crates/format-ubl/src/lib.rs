@@ -73,6 +73,18 @@ pub enum UblError {
     /// The IR document type cannot be serialized as this UBL family member.
     #[error("document type `{0:?}` is not supported by the UBL serializer; hint: use Invoice or CreditNote")]
     UnsupportedDocumentType(DocumentType),
+    /// An IR field has no schema-valid representation in the target UBL document type.
+    #[error(
+        "field `{field}` cannot be serialized for document type `{document_type:?}`; hint: {hint}"
+    )]
+    UnsupportedDocumentField {
+        /// Document type being serialized.
+        document_type: DocumentType,
+        /// IR field path.
+        field: &'static str,
+        /// Remediation hint.
+        hint: &'static str,
+    },
     /// A required UBL element was missing.
     #[error("missing required UBL element `{0}`; hint: include the element needed to build InvoiceKit IR")]
     MissingElement(&'static str),
@@ -218,32 +230,38 @@ pub fn from_xml(input: &str) -> Result<CommercialDocument, UblError> {
     let mut reader = Reader::from_str(input);
     reader.config_mut().trim_text(false);
     let mut xml_version = XmlVersion::default();
-    let mut stack = Vec::<String>::new();
+    let mut namespace_stack = vec![NamespaceFrame::default()];
+    let mut stack = Vec::<ParsedElement>::new();
     let mut state = ParseState::default();
 
     loop {
         match reader.read_event()? {
             Event::Start(start) => {
-                let name = decode_local_name(start.name().as_ref())?;
-                let attrs = read_attrs(&reader, &start, xml_version)?;
-                state.start_element(&stack, &name, &attrs)?;
-                stack.push(name);
+                let (element, attrs, frame) =
+                    read_element_start(&reader, &start, xml_version, namespace_stack.last())?;
+                state.start_element(&stack, &element, &attrs)?;
+                namespace_stack.push(frame);
+                stack.push(element);
             }
             Event::Empty(start) => {
-                let name = decode_local_name(start.name().as_ref())?;
-                let attrs = read_attrs(&reader, &start, xml_version)?;
-                state.start_element(&stack, &name, &attrs)?;
-                state.end_element(&name)?;
+                let (element, attrs, _) =
+                    read_element_start(&reader, &start, xml_version, namespace_stack.last())?;
+                state.start_element(&stack, &element, &attrs)?;
+                state.end_element(&element)?;
             }
             Event::End(end) => {
-                let name = decode_local_name(end.name().as_ref())?;
-                state.end_element(&name)?;
+                let element = read_element_end(end.name().as_ref(), namespace_stack.last())?;
+                state.end_element(&element)?;
                 let Some(opened) = stack.pop() else {
-                    return Err(UblError::UnsupportedRoot(name));
+                    return Err(UblError::UnsupportedRoot(element.local_name));
                 };
-                if opened != name {
-                    return Err(UblError::UnsupportedRoot(format!("{opened}/{name}")));
+                if opened != element {
+                    return Err(UblError::UnsupportedRoot(format!(
+                        "{}/{}",
+                        opened.local_name, element.local_name
+                    )));
                 }
+                namespace_stack.pop();
             }
             Event::Text(text) => {
                 let text = text.xml_content(xml_version)?;
@@ -310,6 +328,7 @@ struct ParseState {
     metadata_source_system: Option<String>,
     ubl_buyer_reference: Option<String>,
     ubl_accounting_cost: Option<String>,
+    current_extension_uri: Option<String>,
     supplier: PartyBuilder,
     customer: PartyBuilder,
     payee: PartyBuilder,
@@ -329,16 +348,22 @@ struct ParseState {
 impl ParseState {
     fn start_element(
         &mut self,
-        stack: &[String],
-        name: &str,
+        stack: &[ParsedElement],
+        element: &ParsedElement,
         attrs: &[XmlAttribute],
     ) -> Result<(), UblError> {
+        let name = element.local_name.as_str();
         if stack.is_empty() {
             self.document_type = Some(match name {
                 "Invoice" => DocumentType::Invoice,
                 "CreditNote" => DocumentType::CreditNote,
                 other => return Err(UblError::UnsupportedRoot(other.to_owned())),
             });
+        }
+        if is_element(element, "UBLExtension", UBL_EXT_NAMESPACE_URI)
+            && path_ends_ns(stack, &[("UBLExtensions", UBL_EXT_NAMESPACE_URI)])
+        {
+            self.current_extension_uri = None;
         }
         if name == "InvoiceLine" || name == "CreditNoteLine" {
             self.current_line = Some(LineBuilder::default());
@@ -360,7 +385,8 @@ impl ParseState {
         Ok(())
     }
 
-    fn end_element(&mut self, name: &str) -> Result<(), UblError> {
+    fn end_element(&mut self, element: &ParsedElement) -> Result<(), UblError> {
+        let name = element.local_name.as_str();
         if name == "InvoiceLine" || name == "CreditNoteLine" {
             let line = self
                 .current_line
@@ -382,13 +408,27 @@ impl ParseState {
                 self.payment_instructions.push(payment);
             }
         }
+        if is_element(element, "UBLExtension", UBL_EXT_NAMESPACE_URI) {
+            self.current_extension_uri = None;
+        }
         Ok(())
     }
 
     #[allow(clippy::too_many_lines)]
-    fn text(&mut self, stack: &[String], raw: &str) -> Result<(), UblError> {
+    fn text(&mut self, stack: &[ParsedElement], raw: &str) -> Result<(), UblError> {
         let value = raw.trim();
         if value.is_empty() {
+            return Ok(());
+        }
+
+        if path_ends_ns(
+            stack,
+            &[
+                ("UBLExtension", UBL_EXT_NAMESPACE_URI),
+                ("ExtensionURI", UBL_EXT_NAMESPACE_URI),
+            ],
+        ) {
+            self.current_extension_uri = Some(value.to_owned());
             return Ok(());
         }
 
@@ -579,11 +619,11 @@ impl ParseState {
             });
         } else if path_ends(stack, &["PaymentTerms", "Note"]) {
             self.payment_terms_description = Some(value.to_owned());
-        } else if path_ends(stack, &["DocumentMeta", "TenantID"]) {
+        } else if self.is_invoicekit_metadata_field(stack, "TenantID") {
             self.metadata_tenant_id = Some(value.to_owned());
-        } else if path_ends(stack, &["DocumentMeta", "TraceID"]) {
+        } else if self.is_invoicekit_metadata_field(stack, "TraceID") {
             self.metadata_trace_id = Some(value.to_owned());
-        } else if path_ends(stack, &["DocumentMeta", "SourceSystem"]) {
+        } else if self.is_invoicekit_metadata_field(stack, "SourceSystem") {
             self.metadata_source_system = Some(value.to_owned());
         }
 
@@ -679,6 +719,19 @@ impl ParseState {
                 &mut self.payee
             }
         }
+    }
+
+    fn is_invoicekit_metadata_field(&self, stack: &[ParsedElement], field: &str) -> bool {
+        self.current_extension_uri.as_deref() == Some(INVOICEKIT_METADATA_EXTENSION_URN)
+            && in_element_ns(stack, "UBLExtension", UBL_EXT_NAMESPACE_URI)
+            && path_ends_ns(
+                stack,
+                &[
+                    ("ExtensionContent", UBL_EXT_NAMESPACE_URI),
+                    ("DocumentMeta", INVOICEKIT_EXTENSION_NAMESPACE_URI),
+                    (field, INVOICEKIT_EXTENSION_NAMESPACE_URI),
+                ],
+            )
     }
 }
 
@@ -861,11 +914,48 @@ struct XmlAttribute {
     value: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ParsedElement {
+    local_name: String,
+    namespace_uri: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct NamespaceFrame {
+    bindings: Vec<(String, String)>,
+}
+
+impl NamespaceFrame {
+    fn set(&mut self, prefix: &str, uri: String) {
+        if let Some((_, value)) = self.bindings.iter_mut().find(|(item, _)| item == prefix) {
+            *value = uri;
+        } else {
+            self.bindings.push((prefix.to_owned(), uri));
+        }
+    }
+
+    fn lookup(&self, prefix: &str) -> Option<String> {
+        self.bindings
+            .iter()
+            .rev()
+            .find(|(item, _)| item == prefix)
+            .map(|(_, uri)| uri.clone())
+    }
+}
+
 fn serialize_document(
     document: &CommercialDocument,
     root_name: &str,
     root_namespace: &str,
 ) -> Result<String, UblError> {
+    if document.document_type == DocumentType::CreditNote && document.due_date.is_some() {
+        return Err(UblError::UnsupportedDocumentField {
+            document_type: document.document_type,
+            field: "due_date",
+            hint: "UBL 2.1 CreditNote has no top-level cbc:DueDate; omit due_date or model the value in a profile-specific extension",
+        });
+    }
+
     let currency = string_value(&document.currency)?;
     let mut xml = String::new();
     write!(
@@ -1226,27 +1316,61 @@ fn decimal_value(path: &'static str, value: &str) -> Result<DecimalValue, UblErr
         })
 }
 
-fn read_attrs(
+fn read_element_start(
     reader: &Reader<&[u8]>,
     start: &BytesStart<'_>,
     xml_version: XmlVersion,
-) -> Result<Vec<XmlAttribute>, UblError> {
+    current: Option<&NamespaceFrame>,
+) -> Result<(ParsedElement, Vec<XmlAttribute>, NamespaceFrame), UblError> {
+    let mut frame = current.cloned().unwrap_or_default();
     let mut attrs = Vec::new();
     for attr in start.attributes().with_checks(true) {
         let attr = attr?;
-        let key = decode_local_name(attr.key.as_ref())?;
-        if key == "xmlns" {
-            continue;
-        }
+        let key = decode_xml_name(attr.key.as_ref())?;
         let value = attr
             .decoded_and_normalized_value(xml_version, reader.decoder())?
             .into_owned();
+        if key == "xmlns" {
+            frame.set("", value);
+            continue;
+        }
+        if let Some(prefix) = key.strip_prefix("xmlns:") {
+            frame.set(prefix, value);
+            continue;
+        }
+        let (_, local_name) = split_qname(&key);
         attrs.push(XmlAttribute {
-            local_name: key,
+            local_name: local_name.to_owned(),
             value,
         });
     }
-    Ok(attrs)
+    let element = read_element_name(start.name().as_ref(), &frame)?;
+    Ok((element, attrs, frame))
+}
+
+fn read_element_end(
+    raw: &[u8],
+    current: Option<&NamespaceFrame>,
+) -> Result<ParsedElement, UblError> {
+    let frame = current.ok_or_else(|| UblError::UnsupportedRoot("missing namespace".to_owned()))?;
+    read_element_name(raw, frame)
+}
+
+fn read_element_name(raw: &[u8], frame: &NamespaceFrame) -> Result<ParsedElement, UblError> {
+    let name = decode_xml_name(raw)?;
+    let (prefix, local_name) = split_qname(&name);
+    let namespace_uri =
+        if prefix.is_empty() {
+            frame.lookup("")
+        } else {
+            Some(frame.lookup(prefix).ok_or_else(|| {
+                UblError::InvalidName(format!("unbound namespace prefix `{prefix}`"))
+            })?)
+        };
+    Ok(ParsedElement {
+        local_name: local_name.to_owned(),
+        namespace_uri,
+    })
 }
 
 fn attr_value<'a>(attrs: &'a [XmlAttribute], local_name: &str) -> Option<&'a str> {
@@ -1256,13 +1380,15 @@ fn attr_value<'a>(attrs: &'a [XmlAttribute], local_name: &str) -> Option<&'a str
         .map(|attr| attr.value.as_str())
 }
 
-fn decode_local_name(raw: &[u8]) -> Result<String, UblError> {
-    let name = std::str::from_utf8(raw)
-        .map_err(|_| UblError::InvalidName(String::from_utf8_lossy(raw).into_owned()))?;
-    Ok(name
-        .split_once(':')
-        .map_or(name, |(_, local_name)| local_name)
-        .to_owned())
+fn decode_xml_name(raw: &[u8]) -> Result<String, UblError> {
+    std::str::from_utf8(raw)
+        .map(ToOwned::to_owned)
+        .map_err(|_| UblError::InvalidName(String::from_utf8_lossy(raw).into_owned()))
+}
+
+fn split_qname(name: &str) -> (&str, &str) {
+    name.split_once(':')
+        .map_or(("", name), |(prefix, local_name)| (prefix, local_name))
 }
 
 fn resolve_xml_reference(reference: &str) -> Result<String, UblError> {
@@ -1276,27 +1402,45 @@ fn resolve_xml_reference(reference: &str) -> Result<String, UblError> {
     }
 }
 
-fn path_ends(stack: &[String], suffix: &[&str]) -> bool {
+fn path_ends(stack: &[ParsedElement], suffix: &[&str]) -> bool {
     stack.len() >= suffix.len()
         && stack
             .iter()
             .rev()
             .take(suffix.len())
             .zip(suffix.iter().rev())
-            .all(|(left, right)| left == right)
+            .all(|(left, right)| left.local_name == *right)
 }
 
-fn in_any(stack: &[String], names: &[&str]) -> bool {
+fn path_ends_ns(stack: &[ParsedElement], suffix: &[(&str, &str)]) -> bool {
+    stack.len() >= suffix.len()
+        && stack
+            .iter()
+            .rev()
+            .take(suffix.len())
+            .zip(suffix.iter().rev())
+            .all(|(left, (name, namespace))| is_element(left, name, namespace))
+}
+
+fn in_any(stack: &[ParsedElement], names: &[&str]) -> bool {
     stack
         .iter()
-        .any(|item| names.iter().any(|name| item == name))
+        .any(|item| names.iter().any(|name| item.local_name == *name))
 }
 
-fn is_root_child(stack: &[String], child: &str) -> bool {
-    stack.len() == 2 && stack.last().is_some_and(|name| name == child)
+fn in_element_ns(stack: &[ParsedElement], name: &str, namespace: &str) -> bool {
+    stack.iter().any(|item| is_element(item, name, namespace))
 }
 
-fn party_role(stack: &[String]) -> Option<PartyRole> {
+fn is_root_child(stack: &[ParsedElement], child: &str) -> bool {
+    stack.len() == 2 && stack.last().is_some_and(|name| name.local_name == child)
+}
+
+fn is_element(element: &ParsedElement, local_name: &str, namespace: &str) -> bool {
+    element.local_name == local_name && element.namespace_uri.as_deref() == Some(namespace)
+}
+
+fn party_role(stack: &[ParsedElement]) -> Option<PartyRole> {
     if in_any(stack, &["AccountingSupplierParty"]) {
         Some(PartyRole::Supplier)
     } else if in_any(stack, &["AccountingCustomerParty"]) {
@@ -1314,7 +1458,9 @@ mod tests {
 
     use super::{
         coverage_for, crate_name, from_xml, to_xml, top_level_coverage, UblCoverageClass,
-        UblDocumentKind, UblError, UBL_DOCUMENT_FIELDS_EXTENSION_URN,
+        UblDocumentKind, UblError, BEAD_ID, INVOICEKIT_EXTENSION_NAMESPACE_URI,
+        INVOICEKIT_METADATA_EXTENSION_URN, UBL_CBC_NAMESPACE_URI,
+        UBL_DOCUMENT_FIELDS_EXTENSION_URN,
     };
     use invoicekit_canonical::canonicalize_xml;
     use invoicekit_ir::{
@@ -1403,10 +1549,12 @@ mod tests {
     #[test]
     fn incoming_business_fields_are_preserved_as_ubl_extension() {
         let document = fixture(DocumentType::Invoice, 7);
-        let xml = to_xml(&document).unwrap().replace(
-            "<cac:AccountingSupplierParty",
-            "<cbc:AccountingCost>COST-42</cbc:AccountingCost><cbc:BuyerReference>BUYER-PO-7</cbc:BuyerReference><cac:AccountingSupplierParty",
+        let injected = format!(
+            r#"<cbc:AccountingCost xmlns:cbc="{UBL_CBC_NAMESPACE_URI}">COST-42</cbc:AccountingCost><cbc:BuyerReference xmlns:cbc="{UBL_CBC_NAMESPACE_URI}">BUYER-PO-7</cbc:BuyerReference><cac:AccountingSupplierParty"#
         );
+        let xml = to_xml(&document)
+            .unwrap()
+            .replace("<cac:AccountingSupplierParty", &injected);
 
         let parsed = from_xml(&xml).unwrap();
         assert_eq!(parsed.meta.tenant_id, "tenant-7");
@@ -1440,6 +1588,55 @@ mod tests {
         assert!(xml.contains("AccountingCost"));
         assert!(xml.contains("BuyerReference"));
         assert_eq!(from_xml(&xml).unwrap(), document);
+    }
+
+    #[test]
+    fn credit_note_serializer_does_not_emit_due_date() {
+        let document = fixture(DocumentType::CreditNote, 9);
+        let xml = to_xml(&document).unwrap();
+        assert!(!xml.contains("DueDate"));
+    }
+
+    #[test]
+    fn credit_note_serializer_rejects_root_due_date() {
+        let mut document = fixture(DocumentType::CreditNote, 10);
+        document.due_date = Some(DateOnly::new("2026-06-25").unwrap());
+
+        let err = to_xml(&document).unwrap_err();
+        assert!(matches!(
+            err,
+            UblError::UnsupportedDocumentField {
+                document_type: DocumentType::CreditNote,
+                field: "due_date",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn metadata_extension_requires_matching_extension_uri() {
+        let document = fixture(DocumentType::Invoice, 11);
+        let xml = to_xml(&document)
+            .unwrap()
+            .replace(INVOICEKIT_METADATA_EXTENSION_URN, "urn:foreign:metadata");
+
+        let parsed = from_xml(&xml).unwrap();
+        assert_eq!(parsed.meta.tenant_id, "ubl-import");
+        assert!(parsed.meta.trace_id.starts_with(BEAD_ID));
+        assert_ne!(parsed.meta, document.meta);
+    }
+
+    #[test]
+    fn metadata_extension_requires_invoicekit_namespace() {
+        let document = fixture(DocumentType::Invoice, 12);
+        let xml = to_xml(&document)
+            .unwrap()
+            .replace(INVOICEKIT_EXTENSION_NAMESPACE_URI, "urn:foreign:invoicekit");
+
+        let parsed = from_xml(&xml).unwrap();
+        assert_eq!(parsed.meta.tenant_id, "ubl-import");
+        assert!(parsed.meta.trace_id.starts_with(BEAD_ID));
+        assert_ne!(parsed.meta, document.meta);
     }
 
     #[test]
@@ -1506,6 +1703,8 @@ mod tests {
         let amount = DecimalValue::new(base);
         let supplier = party("supplier", "Supplier GmbH", "DE123456789");
         let customer = party("customer", "Customer BV", "NL123456789B01");
+        let due_date =
+            (document_type == DocumentType::Invoice).then(|| DateOnly::new("2026-06-25").unwrap());
 
         CommercialDocument::new(CommercialDocumentParts {
             schema_version: SchemaVersion::V1_0,
@@ -1513,7 +1712,7 @@ mod tests {
             document_type,
             issue_date: DateOnly::new("2026-05-26").unwrap(),
             tax_point_date: Some(DateOnly::new("2026-05-26").unwrap()),
-            due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+            due_date: due_date.clone(),
             document_number: DocumentNumber::new(format!("INV-{seed:04}")).unwrap(),
             currency: Iso4217Code::new("EUR").unwrap(),
             supplier,
@@ -1521,7 +1720,7 @@ mod tests {
             payee: Some(party("payee", "Payee GmbH", "DE987654321")),
             payment_terms: Some(PaymentTerms {
                 description: "Payable within 30 days".to_owned(),
-                due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+                due_date,
             }),
             payment_instructions: vec![PaymentInstruction {
                 kind: PaymentInstructionKind::IbanBic,
