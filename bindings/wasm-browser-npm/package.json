@@ -1,0 +1,65 @@
+{
+  "name": "@invoicekit/wasm",
+  "version": "0.0.0",
+  "description": "InvoiceKit engine, compiled to WebAssembly. Drop-in for browsers, Node, Deno, Bun, and Cloudflare Workers via wasm-pack's web/bundler/nodejs targets.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/MuhDur/invoicekit",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MuhDur/invoicekit.git",
+    "directory": "bindings/wasm-browser-npm"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/web/invoicekit_wasm.d.ts",
+      "browser": "./dist/web/invoicekit_wasm.js",
+      "workerd": "./dist/bundler/invoicekit_wasm.js",
+      "deno": "./dist/web/invoicekit_wasm.js",
+      "bun": "./dist/bundler/invoicekit_wasm.js",
+      "node": "./dist/node/invoicekit_wasm.js",
+      "import": "./dist/bundler/invoicekit_wasm.js",
+      "default": "./dist/bundler/invoicekit_wasm.js"
+    },
+    "./web": {
+      "types": "./dist/web/invoicekit_wasm.d.ts",
+      "default": "./dist/web/invoicekit_wasm.js"
+    },
+    "./bundler": {
+      "types": "./dist/bundler/invoicekit_wasm.d.ts",
+      "default": "./dist/bundler/invoicekit_wasm.js"
+    },
+    "./node": {
+      "types": "./dist/node/invoicekit_wasm.d.ts",
+      "default": "./dist/node/invoicekit_wasm.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "bun run scripts/build.mjs",
+    "build:web": "wasm-pack build ../../crates/invoicekit-wasm --release --target web --out-dir ../../bindings/wasm-browser-npm/dist/web --out-name invoicekit_wasm --no-default-features",
+    "build:bundler": "wasm-pack build ../../crates/invoicekit-wasm --release --target bundler --out-dir ../../bindings/wasm-browser-npm/dist/bundler --out-name invoicekit_wasm --no-default-features",
+    "build:node": "wasm-pack build ../../crates/invoicekit-wasm --release --target nodejs --out-dir ../../bindings/wasm-browser-npm/dist/node --out-name invoicekit_wasm --no-default-features",
+    "check-size": "bun run scripts/check_size.mjs",
+    "test": "bun test tests/smoke.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "invoice",
+    "e-invoicing",
+    "factur-x",
+    "xrechnung",
+    "peppol",
+    "wasm",
+    "webassembly"
+  ]
+}
