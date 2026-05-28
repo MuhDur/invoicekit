@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
 [package]
 name = "invoicekit-report-vn-gdt"
 version.workspace = true
@@ -7,12 +10,17 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit workspace member: invoicekit-report-vn-gdt"
+description = "Vietnam GDT (General Department of Taxation) e-Invoice clearance adapter. The live GDT REST integration lands in a follow-up report-vn-gdt-http crate."
 publish = false
 
 [lib]
 name = "invoicekit_report_vn_gdt"
 path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
 
 [lints]
 workspace = true
