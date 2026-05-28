@@ -2875,6 +2875,11 @@ dependencies = [
 [[package]]
 name = "invoicekit-report-za-sars"
 version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-rulepack"
