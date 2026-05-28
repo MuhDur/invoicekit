@@ -1,0 +1,27 @@
+{
+  "id": "b75bbd3d-645b-48d4-9b43-5e6f181f6d0f",
+  "name": "InvoiceKit Business Central Connector",
+  "publisher": "The InvoiceKit Authors",
+  "version": "0.1.0.0",
+  "brief": "Send Business Central sales invoices through InvoiceKit.",
+  "description": "Adds an InvoiceKit setup page and a Send via InvoiceKit action to Sales Invoice. The extension posts invoice JSON to an InvoiceKit sidecar, records the returned submission id, and links the evidence bundle receipt.",
+  "privacyStatement": "https://github.com/MuhDur/invoicekit",
+  "EULA": "https://www.apache.org/licenses/LICENSE-2.0",
+  "help": "https://github.com/MuhDur/invoicekit",
+  "url": "https://github.com/MuhDur/invoicekit",
+  "logo": "",
+  "dependencies": [],
+  "screenshots": [],
+  "platform": "16.0.0.0",
+  "application": "16.0.0.0",
+  "idRanges": [
+    {
+      "from": 71500,
+      "to": 71549
+    }
+  ],
+  "features": [
+    "NoImplicitWith"
+  ],
+  "runtime": "5.0"
+}
