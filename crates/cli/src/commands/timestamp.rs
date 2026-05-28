@@ -33,6 +33,7 @@ use invoicekit_evidence::{blake3_hex, unpack};
 use invoicekit_timestamping::{
     HashAlgorithm, MockTimestampClient, TimestampClient, TimestampRequest,
 };
+use invoicekit_verify::canonical_manifest_bytes;
 
 /// Run `invoicekit timestamp`.
 #[must_use]
@@ -68,7 +69,7 @@ pub fn run(argv: &[String]) -> ExitCode {
     // BLAKE3 over the artefacts is folded into the manifest,
     // and the manifest is what the signer signs. Hash the
     // manifest's canonical JSON.
-    let manifest_bytes = match serde_json::to_vec(&bundle.manifest) {
+    let manifest_bytes = match canonical_manifest_bytes(&bundle) {
         Ok(b) => b,
         Err(err) => {
             eprintln!("timestamp: manifest serialise failed: {err}");
