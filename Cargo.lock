@@ -2206,6 +2206,8 @@ dependencies = [
  "invoicekit-replay",
  "invoicekit-signer",
  "invoicekit-timestamping",
+ "invoicekit-validate",
+ "invoicekit-validate-ubl-cii",
  "invoicekit-verify",
  "rusqlite",
  "rustyline",
@@ -2663,6 +2665,11 @@ version = "0.0.0"
 [[package]]
 name = "invoicekit-report-ec-sri"
 version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-report-eg-eta"
