@@ -2018,6 +2018,13 @@ dependencies = [
 [[package]]
 name = "invoicekit-archive"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-evidence",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-bench-harness"
@@ -2072,22 +2079,52 @@ dependencies = [
 [[package]]
 name = "invoicekit-bridge-chargebee"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-ir",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-bridge-lago"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-ir",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-bridge-maxio"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-ir",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-bridge-recurly"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-ir",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-bridge-stripe-invoicing"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-ir",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-canonical"
@@ -2157,6 +2194,12 @@ dependencies = [
 [[package]]
 name = "invoicekit-evidence"
 version = "0.0.0"
+dependencies = [
+ "blake3",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-ffi"
@@ -2211,6 +2254,20 @@ dependencies = [
  "proptest",
  "quick-xml 0.40.1",
  "rust_decimal",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "invoicekit-inbound-peppol"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-format-cii",
+ "invoicekit-format-detect",
+ "invoicekit-format-ubl",
+ "invoicekit-ir",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2416,6 +2473,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoicekit-render-factur-x-acceptance"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-render-pdf",
+ "invoicekit-render-pdf-postproc",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "invoicekit-render-html"
 version = "0.0.0"
 dependencies = [
@@ -2457,6 +2523,12 @@ dependencies = [
 [[package]]
 name = "invoicekit-replay"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-evidence",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-report-ar-afip"
@@ -2680,6 +2752,39 @@ dependencies = [
 [[package]]
 name = "invoicekit-transmit-peppol"
 version = "0.0.0"
+
+[[package]]
+name = "invoicekit-transmit-peppol-native-as4"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-format-ubl",
+ "invoicekit-ir",
+ "invoicekit-reconcile",
+ "pollster",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "invoicekit-transmit-peppol-native-as4-receive"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-transmit-peppol-native-as4",
+ "pollster",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "invoicekit-transmit-peppol-partner"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-format-ubl",
+ "invoicekit-ir",
+ "invoicekit-reconcile",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-transmit-peppol-phase4"
