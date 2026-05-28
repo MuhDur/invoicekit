@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2026 The InvoiceKit Authors
+-->
+<odoo>
+  <record id="view_move_form_invoicekit" model="ir.ui.view">
+    <field name="name">account.move.form.invoicekit</field>
+    <field name="model">account.move</field>
+    <field name="inherit_id" ref="account.view_move_form"/>
+    <field name="arch" type="xml">
+      <xpath expr="//header" position="inside">
+        <button name="action_send_via_invoicekit"
+                type="object"
+                string="Send via InvoiceKit"
+                class="oe_highlight"
+                invisible="state != 'posted' or invoicekit_state == 'transmitted'"/>
+        <field name="invoicekit_state"
+               widget="statusbar"
+               statusbar_visible="not_sent,queued,transmitted"/>
+      </xpath>
+      <xpath expr="//sheet" position="inside">
+        <group string="InvoiceKit" invisible="invoicekit_state == 'not_sent'">
+          <field name="invoicekit_submission_id" readonly="1"/>
+          <field name="invoicekit_evidence_bundle_url" widget="url" readonly="1"/>
+        </group>
+      </xpath>
+    </field>
+  </record>
+</odoo>
