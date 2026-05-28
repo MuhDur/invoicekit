@@ -2363,6 +2363,11 @@ dependencies = [
 [[package]]
 name = "invoicekit-intake-ocr"
 version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-intake-pdf"
@@ -2375,6 +2380,11 @@ dependencies = [
 [[package]]
 name = "invoicekit-intake-vlm"
 version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-ir"
