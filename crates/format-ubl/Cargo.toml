@@ -17,6 +17,10 @@ publish = false
 name = "invoicekit_format_ubl"
 path = "src/lib.rs"
 
+[[bin]]
+name = "invoicekit-ubl-normalize"
+path = "src/bin/normalize_ubl.rs"
+
 [dependencies]
 fastxml = "0.8.1"
 invoicekit-canonical = { path = "../canonical", version = "0.0.0" }

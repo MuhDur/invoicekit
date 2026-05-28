@@ -79,7 +79,14 @@ def main(argv: list[str] | None = None) -> int:
 
     for sidecar in sidecars:
         backend_summary = compare_backend(
-            repo, sidecar, fixtures, args.rust_probe, args.rust_timeout, args.timeout
+            repo,
+            sidecar,
+            fixtures,
+            args.rust_probe,
+            args.rust_timeout,
+            None if args.no_ubl_normalize else args.ubl_normalizer,
+            args.normalizer_timeout,
+            args.timeout,
         )
         summary["backends"][sidecar["backend"]] = backend_summary
         if backend_summary["status"] == "configuration_error":
@@ -123,6 +130,30 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         ],
         help="Command prefix for the Rust findings probe; fixture paths are appended.",
     )
+    parser.add_argument(
+        "--ubl-normalizer",
+        nargs="+",
+        default=[
+            "cargo",
+            "run",
+            "-q",
+            "-p",
+            "invoicekit-format-ubl",
+            "--bin",
+            "invoicekit-ubl-normalize",
+            "--",
+        ],
+        help=(
+            "Command prefix for normalizing projected UBL XML through InvoiceKit; "
+            "--stdin <label> is appended."
+        ),
+    )
+    parser.add_argument(
+        "--no-ubl-normalize",
+        action="store_true",
+        help="Send profile-projected fixture XML directly to sidecars without Rust normalization.",
+    )
+    parser.add_argument("--normalizer-timeout", type=float, default=120.0)
     return parser.parse_args(argv)
 
 
@@ -215,12 +246,36 @@ def run_rust_probe_xml(
     return core_rule_ids(report.get("findings", []))
 
 
+def normalize_ubl_xml(
+    repo: Path, command: list[str], label: str, xml: str, timeout: float
+) -> str:
+    completed = subprocess.run(
+        command + ["--stdin", label],
+        cwd=repo,
+        text=True,
+        input=xml,
+        capture_output=True,
+        check=False,
+        timeout=timeout,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        raise SystemExit(
+            f"UBL normalizer failed for {label} with exit {completed.returncode}: {detail}"
+        )
+    if not completed.stdout.strip():
+        raise SystemExit(f"UBL normalizer emitted empty XML for {label}")
+    return completed.stdout
+
+
 def compare_backend(
     repo: Path,
     sidecar: dict[str, str],
     fixtures: list[Path],
     rust_probe: list[str],
     rust_timeout: float,
+    ubl_normalizer: list[str] | None,
+    normalizer_timeout: float,
     timeout: float,
 ) -> dict[str, object]:
     mismatches: list[dict[str, object]] = []
@@ -230,7 +285,12 @@ def compare_backend(
 
     for fixture in fixtures:
         label = fixture_id(repo, fixture)
-        xml = project_xml(fixture.read_text(encoding="utf-8"), sidecar["projection"])
+        projected_xml = project_xml(fixture.read_text(encoding="utf-8"), sidecar["projection"])
+        xml = (
+            normalize_ubl_xml(repo, ubl_normalizer, label, projected_xml, normalizer_timeout)
+            if ubl_normalizer is not None
+            else projected_xml
+        )
         response = rpc_validate(sidecar, xml, label, timeout)
         results = response.get("result", {}).get("results", [])
         unavailable_finding = oracle_unavailable(results)

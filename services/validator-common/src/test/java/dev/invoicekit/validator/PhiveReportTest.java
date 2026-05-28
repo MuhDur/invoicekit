@@ -3,6 +3,7 @@
 
 package dev.invoicekit.validator;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -86,6 +87,16 @@ final class PhiveReportTest {
         + "<cac:Price><cbc:PriceAmount currencyID=\"EUR\">100.00</cbc:PriceAmount></cac:Price>"
         + "</cac:InvoiceLine>"
         + "</Invoice>";
+
+    @Test
+    void ruleSetSelectionUsesCreditNoteVidForCreditNoteRoots() {
+        assertEquals("VID_OPENPEPPOL_INVOICE_UBL_V3",
+            PhiveReport.vidFieldNameForRootForTest("Invoice"));
+        assertEquals("VID_OPENPEPPOL_CREDIT_NOTE_UBL_V3",
+            PhiveReport.vidFieldNameForRootForTest("CreditNote"));
+        assertEquals("VID_OPENPEPPOL_INVOICE_UBL_V3",
+            PhiveReport.vidFieldNameForRootForTest("Order"));
+    }
 
     @Test
     void invalidPeppolInvoiceEmitsAtLeastOneBrRule() {

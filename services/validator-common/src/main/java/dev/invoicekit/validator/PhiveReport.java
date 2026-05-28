@@ -17,9 +17,9 @@ import org.w3c.dom.Document;
  * 7psv reflection wrapper around phive's Peppol validation
  * pipeline ({@code phive-rules-peppol:3.2.2}). Calls into
  * {@code com.helger.phive.peppol.PeppolValidation.initStandard(...)}
- * to register the latest Peppol BIS Billing 3.0 invoice rule set,
+ * to register the latest Peppol BIS Billing 3.0 rule set,
  * resolves the rule set's {@code DVRCoordinate} from one of the
- * dated {@code PeppolValidation20XX_XX.VID_OPENPEPPOL_INVOICE_UBL_V3}
+ * dated {@code PeppolValidation20XX_XX.VID_OPENPEPPOL_*_UBL_V3}
  * constants, then invokes
  * {@code ValidationExecutionManager.executeValidation(...)} and
  * maps every per-rule finding into the T-032
@@ -81,15 +81,17 @@ final class PhiveReport {
             .getMethod("initStandard", registryIface)
             .invoke(null, registry);
 
-        // Resolve the VID for Peppol BIS Billing 3.0 UBL Invoice
+        String rootElement = inputDoc.getDocumentElement().getLocalName();
+
+        // Resolve the VID for Peppol BIS Billing 3.0 UBL
         // from the most-recent PeppolValidation20XX_XX class on the
         // classpath. The classpath has 2023_05, 2023_11, 2024_05,
         // 2024_11 in phive-rules-peppol:3.2.2.
-        Object vid = pickLatestInvoiceVid();
+        Object vid = pickLatestVid(rootElement);
         if (vid == null) {
             ArrayNode findings = mapper.createArrayNode();
-            findings.add(noMatchingSetFinding(mapper, profile, traceId));
-            return new Outcome(false, "Invoice", findings);
+            findings.add(noMatchingSetFinding(mapper, profile, traceId, rootElement));
+            return new Outcome(false, rootElement, findings);
         }
 
         Class<?> dvrCoordinate = Class.forName("com.helger.diver.api.coord.DVRCoordinate");
@@ -97,8 +99,8 @@ final class PhiveReport {
         Object xset = getOfID.invoke(registry, vid);
         if (xset == null) {
             ArrayNode findings = mapper.createArrayNode();
-            findings.add(noMatchingSetFinding(mapper, profile, traceId));
-            return new Outcome(false, "Invoice", findings);
+            findings.add(noMatchingSetFinding(mapper, profile, traceId, rootElement));
+            return new Outcome(false, rootElement, findings);
         }
 
         // ValidationSourceXML.create(String, org.w3c.dom.Node)
@@ -131,21 +133,22 @@ final class PhiveReport {
                 findings.add(finding);
             }
         }
-        return new Outcome(findings.size() == 0, "Invoice", findings);
+        return new Outcome(findings.size() == 0, rootElement, findings);
     }
 
-    /** Pick the latest PeppolValidation20XX_XX.VID_OPENPEPPOL_INVOICE_UBL_V3 on the classpath. */
-    private static Object pickLatestInvoiceVid() {
+    /** Pick the latest PeppolValidation20XX_XX Peppol BIS Billing UBL VID on the classpath. */
+    private static Object pickLatestVid(String rootElement) {
         String[] candidates = new String[] {
             "com.helger.phive.peppol.PeppolValidation2024_11",
             "com.helger.phive.peppol.PeppolValidation2024_05",
             "com.helger.phive.peppol.PeppolValidation2023_11",
             "com.helger.phive.peppol.PeppolValidation2023_05",
         };
+        String fieldName = vidFieldNameForRoot(rootElement);
         for (String fqn : candidates) {
             try {
                 Class<?> klass = Class.forName(fqn);
-                Field f = klass.getField("VID_OPENPEPPOL_INVOICE_UBL_V3");
+                Field f = klass.getField(fieldName);
                 Object value = f.get(null);
                 if (value != null) return value;
             } catch (Throwable ex) {
@@ -153,6 +156,17 @@ final class PhiveReport {
             }
         }
         return null;
+    }
+
+    private static String vidFieldNameForRoot(String rootElement) {
+        if ("CreditNote".equals(rootElement)) {
+            return "VID_OPENPEPPOL_CREDIT_NOTE_UBL_V3";
+        }
+        return "VID_OPENPEPPOL_INVOICE_UBL_V3";
+    }
+
+    static String vidFieldNameForRootForTest(String rootElement) {
+        return vidFieldNameForRoot(rootElement);
     }
 
     private static Document parseDocument(String xml) {
@@ -316,14 +330,15 @@ final class PhiveReport {
     private static ObjectNode noMatchingSetFinding(
         ObjectMapper mapper,
         String profile,
-        String traceId
+        String traceId,
+        String rootElement
     ) {
         ObjectNode finding = mapper.createObjectNode();
         finding.put("rule_id", "PHIVE-NO-MATCHING-RULESET");
         finding.put("severity", "fatal");
         finding.put("message",
             "No phive validation set matched profile " + profile
-            + " (expected a Peppol BIS Billing 3.0 invoice set).");
+            + " and UBL root " + rootElement + ".");
         ObjectNode term = finding.putObject("term");
         term.put("kind", "business_group");
         term.put("code", "BG-1");

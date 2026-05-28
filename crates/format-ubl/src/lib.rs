@@ -1621,6 +1621,7 @@ fn write_party(
     xml.push_str("<cac:PartyName>");
     write_text_element(xml, "cbc:Name", &party.name);
     xml.push_str("</cac:PartyName>");
+    write_address(xml, &party.address)?;
     for tax_id in &party.tax_ids {
         xml.push_str("<cac:PartyTaxScheme>");
         write_text_element(xml, "cbc:CompanyID", &tax_id.value);
@@ -1629,7 +1630,9 @@ fn write_party(
         xml.push_str("</cac:TaxScheme>");
         xml.push_str("</cac:PartyTaxScheme>");
     }
-    write_address(xml, &party.address)?;
+    xml.push_str("<cac:PartyLegalEntity>");
+    write_text_element(xml, "cbc:RegistrationName", &party.name);
+    xml.push_str("</cac:PartyLegalEntity>");
     if let Some(contact) = &party.contact {
         if contact.name.is_some() || contact.email.is_some() || contact.phone.is_some() {
             xml.push_str("<cac:Contact>");
@@ -2523,6 +2526,26 @@ mod tests {
             "expected schema-valid CreditNote fixture, findings: {:?}",
             report.findings
         );
+    }
+
+    #[test]
+    fn party_serializer_uses_schema_order_and_legal_name() {
+        let xml = to_xml(&fixture(DocumentType::Invoice, 23)).unwrap();
+        let party_start = xml.find("<cac:AccountingSupplierParty").unwrap();
+        let party_end = xml.find("</cac:AccountingSupplierParty>").unwrap();
+        let party_xml = xml
+            .get(party_start..party_end)
+            .expect("supplier party XML tag offsets must be byte aligned");
+        let postal = party_xml.find("<cac:PostalAddress>").unwrap();
+        let tax = party_xml.find("<cac:PartyTaxScheme>").unwrap();
+        let legal = party_xml.find("<cac:PartyLegalEntity>").unwrap();
+        let contact = party_xml.find("<cac:Contact>").unwrap();
+
+        assert!(
+            postal < tax && tax < legal && legal < contact,
+            "cac:Party children must preserve UBL schema order: {party_xml}"
+        );
+        assert!(party_xml.contains(">Supplier GmbH</cbc:RegistrationName>"));
     }
 
     #[test]

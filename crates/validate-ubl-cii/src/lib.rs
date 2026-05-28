@@ -39,8 +39,8 @@ pub const fn crate_name() -> &'static str {
 pub const EN16931_BR_CO_COVERAGE_JSON: &str =
     include_str!("../../rulepack/data/en16931-br-co-coverage.json");
 
-const COVERAGE_RULE_TOTAL: usize = 81;
-const COVERAGE_IMPLEMENTED_NOW: usize = 81;
+const COVERAGE_RULE_TOTAL: usize = 86;
+const COVERAGE_IMPLEMENTED_NOW: usize = 86;
 const COVERAGE_DEFERRED_IR_GAP: usize = 0;
 
 const UBL_INVOICE_NAMESPACE_URI: &str = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2";
@@ -48,6 +48,7 @@ const UBL_CREDIT_NOTE_NAMESPACE_URI: &str =
     "urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2";
 const CII_RSM_NAMESPACE_URI: &str = "urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100";
 const VAT_ID_COUNTRY_PREFIXES: &str = " 1A AD AE AF AG AI AL AM AN AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH EL ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS XI YE YT ZA ZM ZW ";
+const VAT_CATEGORY_UNCL5305_CODES: &str = " AE L M E S Z G O K B ";
 
 const IMPLEMENTED_RULE_IDS: &[&str] = &[
     "BR-01", "BR-02", "BR-03", "BR-04", "BR-05", "BR-06", "BR-07", "BR-08", "BR-09", "BR-10",
@@ -56,9 +57,10 @@ const IMPLEMENTED_RULE_IDS: &[&str] = &[
     "BR-31", "BR-32", "BR-33", "BR-36", "BR-37", "BR-38", "BR-41", "BR-42", "BR-43", "BR-44",
     "BR-45", "BR-46", "BR-47", "BR-48", "BR-49", "BR-50", "BR-51", "BR-52", "BR-53", "BR-54",
     "BR-55", "BR-56", "BR-57", "BR-61", "BR-62", "BR-63", "BR-64", "BR-65", "BR-CO-03", "BR-CO-04",
-    "BR-CO-05", "BR-CO-06", "BR-CO-07", "BR-CO-08", "BR-CO-09", "BR-CO-10", "BR-CO-11", "BR-CO-12",
-    "BR-CO-13", "BR-CO-14", "BR-CO-15", "BR-CO-16", "BR-CO-17", "BR-CO-18", "BR-CO-19", "BR-CO-20",
-    "BR-CO-21", "BR-CO-22", "BR-CO-23", "BR-CO-24", "BR-CO-26",
+    "BR-AE-05", "BR-AE-08", "BR-AE-10", "BR-CL-17", "BR-CL-18", "BR-CO-05", "BR-CO-06", "BR-CO-07",
+    "BR-CO-08", "BR-CO-09", "BR-CO-10", "BR-CO-11", "BR-CO-12", "BR-CO-13", "BR-CO-14", "BR-CO-15",
+    "BR-CO-16", "BR-CO-17", "BR-CO-18", "BR-CO-19", "BR-CO-20", "BR-CO-21", "BR-CO-22", "BR-CO-23",
+    "BR-CO-24", "BR-CO-26",
 ];
 
 const DEFERRED_RULE_IDS: &[&str] = &[];
@@ -192,6 +194,8 @@ pub fn validate_xml(input: &str) -> Result<En16931Report, En16931Error> {
     let mut findings = Vec::new();
 
     run_br_rules(&ctx, &mut findings)?;
+    run_br_ae_rules(&ctx, &mut findings)?;
+    run_br_cl_rules(&ctx, &mut findings)?;
     run_br_co_rules(&ctx, &mut findings)?;
 
     Ok(En16931Report {
@@ -300,6 +304,23 @@ fn run_br_co_rules(
     br_co_23(ctx, findings)?;
     br_co_24(ctx, findings)?;
     br_co_26(ctx, findings)
+}
+
+fn run_br_ae_rules(
+    ctx: &ValidationContext<'_>,
+    findings: &mut Vec<ValidationResult>,
+) -> Result<(), En16931Error> {
+    br_ae_05(ctx, findings)?;
+    br_ae_08(ctx, findings)?;
+    br_ae_10(ctx, findings)
+}
+
+fn run_br_cl_rules(
+    ctx: &ValidationContext<'_>,
+    findings: &mut Vec<ValidationResult>,
+) -> Result<(), En16931Error> {
+    br_cl_17(ctx, findings)?;
+    br_cl_18(ctx, findings)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -662,6 +683,52 @@ fn cii_vat_tax(tax: &XmlNode) -> Option<&XmlNode> {
     tax.path_text(&["TypeCode"])
         .is_some_and(is_vat_code)
         .then_some(tax)
+}
+
+fn line_vat_tax_category(syntax: DocumentSyntax, line: &XmlNode) -> Option<&XmlNode> {
+    match syntax {
+        DocumentSyntax::Ubl => line
+            .path(&["Item", "ClassifiedTaxCategory"])
+            .filter(|node| has_vat_tax_scheme(node)),
+        DocumentSyntax::Cii => line
+            .path(&["SpecifiedLineTradeSettlement", "ApplicableTradeTax"])
+            .and_then(cii_vat_tax),
+    }
+}
+
+fn tax_category_code_is_uncl5305(value: &str) -> bool {
+    let normalized = value.trim();
+    !normalized.contains(' ')
+        && VAT_CATEGORY_UNCL5305_CODES
+            .split_whitespace()
+            .any(|code| code == normalized)
+}
+
+fn category_code(node: &XmlNode, syntax: DocumentSyntax) -> Option<&str> {
+    match syntax {
+        DocumentSyntax::Ubl => node.path_text(&["ID"]),
+        DocumentSyntax::Cii => node.path_text(&["CategoryCode"]),
+    }
+}
+
+fn category_rate(node: &XmlNode, syntax: DocumentSyntax) -> Option<Decimal> {
+    match syntax {
+        DocumentSyntax::Ubl => node.path_text(&["Percent"]).and_then(decimal),
+        DocumentSyntax::Cii => node.path_text(&["RateApplicablePercent"]).and_then(decimal),
+    }
+}
+
+fn has_tax_exemption_reason(node: &XmlNode, syntax: DocumentSyntax) -> bool {
+    match syntax {
+        DocumentSyntax::Ubl => {
+            node.path_text(&["TaxExemptionReason"]).is_some()
+                || node.path_text(&["TaxExemptionReasonCode"]).is_some()
+        }
+        DocumentSyntax::Cii => {
+            node.path_text(&["ExemptionReason"]).is_some()
+                || node.path_text(&["ExemptionReasonCode"]).is_some()
+        }
+    }
 }
 
 fn cii_header_settlement<'doc>(ctx: &ValidationContext<'doc>) -> Option<&'doc XmlNode> {
@@ -2699,6 +2766,167 @@ fn br_65(
     Ok(())
 }
 
+fn br_ae_05(
+    ctx: &ValidationContext<'_>,
+    findings: &mut Vec<ValidationResult>,
+) -> Result<(), En16931Error> {
+    for (index, line) in lines(ctx).iter().copied().enumerate() {
+        let Some(category) = line_vat_tax_category(ctx.syntax, line) else {
+            continue;
+        };
+        if category_code(category, ctx.syntax) == Some("AE")
+            && category_rate(category, ctx.syntax) != Some(Decimal::ZERO)
+        {
+            fail(
+                findings,
+                "BR-AE-05",
+                "BT-152",
+                &format!("/lines/{index}/tax_rate"),
+                "Set the invoice line reverse-charge VAT rate to zero",
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn br_ae_08(
+    ctx: &ValidationContext<'_>,
+    findings: &mut Vec<ValidationResult>,
+) -> Result<(), En16931Error> {
+    if ctx.syntax != DocumentSyntax::Ubl {
+        return Ok(());
+    }
+    for (index, tax) in tax_summaries(ctx).iter().copied().enumerate() {
+        let Some(category) = ubl_vat_tax_category(tax) else {
+            continue;
+        };
+        if category.path_text(&["ID"]) != Some("AE") {
+            continue;
+        }
+        let Some(taxable) = tax.path_text(&["TaxableAmount"]).and_then(decimal) else {
+            continue;
+        };
+        let expected = rounded_2(
+            lines(ctx)
+                .iter()
+                .copied()
+                .filter(|line| {
+                    line.path(&["Item", "ClassifiedTaxCategory"])
+                        .and_then(|category| category.path_text(&["ID"]))
+                        == Some("AE")
+                })
+                .filter_map(|line| line.path_text(&["LineExtensionAmount"]).and_then(decimal))
+                .sum::<Decimal>()
+                + document_allowance_charges(ctx, true)
+                    .into_iter()
+                    .filter(|charge| {
+                        charge
+                            .path(&["TaxCategory"])
+                            .and_then(|category| category.path_text(&["ID"]))
+                            == Some("AE")
+                    })
+                    .filter_map(|charge| allowance_charge_amount(charge, ctx.syntax))
+                    .sum::<Decimal>()
+                - document_allowance_charges(ctx, false)
+                    .into_iter()
+                    .filter(|charge| {
+                        charge
+                            .path(&["TaxCategory"])
+                            .and_then(|category| category.path_text(&["ID"]))
+                            == Some("AE")
+                    })
+                    .filter_map(|charge| allowance_charge_amount(charge, ctx.syntax))
+                    .sum::<Decimal>(),
+        );
+        if taxable != expected {
+            fail(
+                findings,
+                "BR-AE-08",
+                "BT-116",
+                &format!("/tax_summary/{index}/taxable_amount"),
+                "Set reverse-charge VAT taxable amount to matching line amounts plus charges minus allowances",
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn br_ae_10(
+    ctx: &ValidationContext<'_>,
+    findings: &mut Vec<ValidationResult>,
+) -> Result<(), En16931Error> {
+    for (index, tax) in tax_summaries(ctx).iter().copied().enumerate() {
+        let category = match ctx.syntax {
+            DocumentSyntax::Ubl => ubl_vat_tax_category(tax),
+            DocumentSyntax::Cii => cii_vat_tax(tax),
+        };
+        let Some(category) = category else {
+            continue;
+        };
+        if category_code(category, ctx.syntax) == Some("AE")
+            && !has_tax_exemption_reason(category, ctx.syntax)
+        {
+            fail(
+                findings,
+                "BR-AE-10",
+                "BT-121",
+                &format!("/tax_summary/{index}/exemption_reason"),
+                "Set a reverse-charge VAT exemption reason or reason code",
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn br_cl_17(
+    ctx: &ValidationContext<'_>,
+    findings: &mut Vec<ValidationResult>,
+) -> Result<(), En16931Error> {
+    for (index, tax) in tax_summaries(ctx).iter().copied().enumerate() {
+        let category = match ctx.syntax {
+            DocumentSyntax::Ubl => ubl_vat_tax_category(tax),
+            DocumentSyntax::Cii => cii_vat_tax(tax),
+        };
+        let Some(code) = category.and_then(|node| category_code(node, ctx.syntax)) else {
+            continue;
+        };
+        if !tax_category_code_is_uncl5305(code) {
+            fail(
+                findings,
+                "BR-CL-17",
+                "BT-118",
+                &format!("/tax_summary/{index}/category_code"),
+                "Use a UNCL5305 VAT category code",
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn br_cl_18(
+    ctx: &ValidationContext<'_>,
+    findings: &mut Vec<ValidationResult>,
+) -> Result<(), En16931Error> {
+    for (index, line) in lines(ctx).iter().copied().enumerate() {
+        let Some(category) = line_vat_tax_category(ctx.syntax, line) else {
+            continue;
+        };
+        let Some(code) = category_code(category, ctx.syntax) else {
+            continue;
+        };
+        if !tax_category_code_is_uncl5305(code) {
+            fail(
+                findings,
+                "BR-CL-18",
+                "BT-151",
+                &format!("/lines/{index}/tax_category"),
+                "Use a UNCL5305 invoice line VAT category code",
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn br_co_03(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
@@ -3782,6 +4010,11 @@ mod tests {
             ("BR-63", replace(valid_ubl(), "<cac:AccountingCustomerParty><cac:Party><cac:PartyName>", "<cac:AccountingCustomerParty><cac:Party><cbc:EndpointID>buyer.example</cbc:EndpointID><cac:PartyName>")),
             ("BR-64", replace(valid_ubl(), "<cac:Item><cbc:Name>Implementation service</cbc:Name>", "<cac:Item><cbc:Name>Implementation service</cbc:Name><cac:StandardItemIdentification><cbc:ID>1234567890123</cbc:ID></cac:StandardItemIdentification>")),
             ("BR-65", replace(valid_ubl(), "<cac:Item><cbc:Name>Implementation service</cbc:Name>", "<cac:Item><cbc:Name>Implementation service</cbc:Name><cac:CommodityClassification><cbc:ItemClassificationCode>1234</cbc:ItemClassificationCode></cac:CommodityClassification>")),
+            ("BR-AE-05", replace(valid_ubl(), "<cac:ClassifiedTaxCategory><cbc:ID>S</cbc:ID>", "<cac:ClassifiedTaxCategory><cbc:ID>AE</cbc:ID>")),
+            ("BR-AE-08", replace(&replace(&replace(valid_ubl(), "<cac:TaxCategory><cbc:ID>S</cbc:ID>", "<cac:TaxCategory><cbc:ID>AE</cbc:ID>"), "<cac:ClassifiedTaxCategory><cbc:ID>S</cbc:ID>", "<cac:ClassifiedTaxCategory><cbc:ID>AE</cbc:ID>"), "<cbc:TaxableAmount>100.00</cbc:TaxableAmount>", "<cbc:TaxableAmount>99.00</cbc:TaxableAmount>")),
+            ("BR-AE-10", replace(valid_ubl(), "<cac:TaxCategory><cbc:ID>S</cbc:ID>", "<cac:TaxCategory><cbc:ID>AE</cbc:ID>")),
+            ("BR-CL-17", replace(valid_ubl(), "<cac:TaxCategory><cbc:ID>S</cbc:ID>", "<cac:TaxCategory><cbc:ID>AA</cbc:ID>")),
+            ("BR-CL-18", replace(valid_ubl(), "<cac:ClassifiedTaxCategory><cbc:ID>S</cbc:ID>", "<cac:ClassifiedTaxCategory><cbc:ID>AA</cbc:ID>")),
             ("BR-CO-03", insert_before(valid_ubl(), "<cbc:DocumentCurrencyCode>", "<cbc:TaxPointDate>2026-05-27</cbc:TaxPointDate><cac:InvoicePeriod><cbc:DescriptionCode>3</cbc:DescriptionCode></cac:InvoicePeriod>")),
             ("BR-CO-04", replace(valid_ubl(), "<cac:ClassifiedTaxCategory><cbc:ID>S</cbc:ID>", "<cac:ClassifiedTaxCategory>")),
             ("BR-CO-09", replace(valid_ubl(), "<cac:PartyName><cbc:Name>Supplier GmbH</cbc:Name></cac:PartyName>", "<cac:PartyTaxScheme><cbc:CompanyID>ZZ123456789</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme><cac:PartyName><cbc:Name>Supplier GmbH</cbc:Name></cac:PartyName>")),
