@@ -35,8 +35,107 @@ jobs:
             target/openapi/invoicekit-rest.openapi.json
             target/openapi/invoicekit-rest.openapi.json.sha256
 
+  # T-053: veraPDF PDF/A-3 gate. Hard release-time gate that
+  # blocks the per-target release jobs (via `needs:`) so a
+  # tagged release cannot publish without veraPDF clearing
+  # every Factur-X candidate against `--profile=3b` AND
+  # `--profile=3u`. The same gate runs on PR / push via
+  # pdfa3-verapdf.yml; here it acts as the last-line check
+  # before artefacts ship.
+  verapdf-release-gate:
+    name: veraPDF release gate (3b + 3u)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERAPDF_VERSION: "1.30.1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: verapdf-release-gate
+      - name: Install veraPDF ${{ env.VERAPDF_VERSION }} headless
+        run: |
+          set -euo pipefail
+          URL="https://software.verapdf.org/releases/1.30/verapdf-greenfield-${VERAPDF_VERSION}-installer.zip"
+          curl -fsSL "$URL" -o /tmp/verapdf.zip
+          mkdir -p /tmp/verapdf-installer
+          (cd /tmp/verapdf-installer && unzip -q /tmp/verapdf.zip)
+          installer=$(find /tmp/verapdf-installer -maxdepth 3 -name 'verapdf-izpack-installer-*.jar' | head -1)
+          if [ -z "$installer" ]; then
+            echo "::error::veraPDF installer JAR not found under /tmp/verapdf-installer"
+            ls -lR /tmp/verapdf-installer >&2
+            exit 1
+          fi
+          INSTALL_DIR=/tmp/verapdf
+          printf '1\n%s\nO\n1\nN\nY\nN\nN\n1\nN\n' "$INSTALL_DIR" \
+            | java -jar "$installer" -console
+          "$INSTALL_DIR/verapdf" --version
+          echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+      - name: Render Factur-X release candidates
+        run: |
+          set -euo pipefail
+          mkdir -p target/factur-x-acceptance
+          cargo run --release --locked --quiet \
+            -p invoicekit-render-factur-x-acceptance \
+            -- --out target/factur-x-acceptance
+          test -n "$(find target/factur-x-acceptance -name '*.pdf' -print -quit)"
+      - name: veraPDF --profile=3b
+        run: |
+          set -euo pipefail
+          mkdir -p target/verapdf-3b
+          fail=0
+          while IFS= read -r pdf; do
+            report="target/verapdf-3b/$(basename "${pdf%.pdf}").xml"
+            if ! verapdf --flavour 3b --format xml "$pdf" > "$report"; then
+              echo "::error::veraPDF 3b reported a failure for $pdf"
+              cat "$report"
+              fail=1
+            fi
+            if grep -q 'isCompliant="false"' "$report"; then
+              echo "::error::veraPDF 3b: $pdf is non-conformant"
+              cat "$report"
+              fail=1
+            fi
+          done < <(find target/factur-x-acceptance -name '*.pdf' | sort)
+          exit "$fail"
+      - name: veraPDF --profile=3u
+        run: |
+          set -euo pipefail
+          mkdir -p target/verapdf-3u
+          fail=0
+          while IFS= read -r pdf; do
+            report="target/verapdf-3u/$(basename "${pdf%.pdf}").xml"
+            if ! verapdf --flavour 3u --format xml "$pdf" > "$report"; then
+              echo "::error::veraPDF 3u reported a failure for $pdf"
+              cat "$report"
+              fail=1
+            fi
+            if grep -q 'isCompliant="false"' "$report"; then
+              echo "::error::veraPDF 3u: $pdf is non-conformant"
+              cat "$report"
+              fail=1
+            fi
+          done < <(find target/factur-x-acceptance -name '*.pdf' | sort)
+          exit "$fail"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verapdf-release-reports
+          path: |
+            target/factur-x-acceptance/
+            target/verapdf-3b/
+            target/verapdf-3u/
+          if-no-files-found: ignore
+          retention-days: 30
+
   release:
     name: Tagged release (${{ matrix.target }})
+    needs: verapdf-release-gate
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
