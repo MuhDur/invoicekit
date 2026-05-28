@@ -2074,9 +2074,20 @@ dependencies = [
 name = "invoicekit-binding-rest-shim"
 version = "0.0.0"
 dependencies = [
+ "axum",
+ "base64",
+ "blake3",
+ "http-body-util",
  "invoicekit-engine",
+ "invoicekit-evidence",
+ "invoicekit-ir",
+ "invoicekit-render-pdf",
+ "invoicekit-verify",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower",
 ]
 
 [[package]]
@@ -2527,6 +2538,8 @@ dependencies = [
 name = "invoicekit-render-pdf"
 version = "0.0.0"
 dependencies = [
+ "invoicekit-ir",
+ "serde_json",
  "thiserror 2.0.18",
  "typst",
  "typst-kit",

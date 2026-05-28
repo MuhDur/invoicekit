@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit workspace member: invoicekit-binding-rest-shim"
+description = "Axum REST sidecar over the InvoiceKit engine ABI"
 publish = false
 
 [lib]
@@ -15,11 +15,22 @@ name = "invoicekit_binding_rest_shim"
 path = "src/lib.rs"
 
 [dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
+base64 = "0.22"
+blake3 = "1"
+invoicekit-evidence = { path = "../../crates/evidence", version = "0.0.0" }
 invoicekit-engine = { path = "../../crates/invoicekit-engine", version = "0.0.0" }
-
-[dev-dependencies]
+invoicekit-ir = { path = "../../crates/ir", version = "0.0.0" }
+invoicekit-render-pdf = { path = "../../crates/render-pdf", version = "0.0.0" }
+invoicekit-verify = { path = "../../crates/verify", version = "0.0.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+thiserror.workspace = true
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }
 
 [lints]
 workspace = true

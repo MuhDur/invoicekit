@@ -12,8 +12,10 @@
 //! execution is a trusted-template operation, not a sandbox for user-authored
 //! templates; T-051 owns the public template trust boundary.
 
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
+use invoicekit_ir::CommercialDocument;
 use thiserror::Error;
 use typst::diag::{FileError, FileResult, SourceDiagnostic};
 use typst::foundations::{Bytes, Datetime, Smart};
@@ -158,6 +160,23 @@ pub fn render_hello_world_invoice() -> Result<Vec<u8>, RenderPdfError> {
     ))
 }
 
+/// Renders a validated commercial document to deterministic PDF/A-3b bytes.
+///
+/// This is the document-aware renderer used by REST and demo surfaces. It keeps
+/// the trust boundary narrow: callers pass an already-validated IR document,
+/// and this crate owns the generated Typst source.
+///
+/// # Errors
+///
+/// Returns [`RenderPdfError`] if Typst compilation or PDF export fails.
+pub fn render_commercial_document_invoice(
+    document: &CommercialDocument,
+) -> Result<Vec<u8>, RenderPdfError> {
+    let source = trusted_invoice_source(document);
+    let stable_id = format!("invoicekit:document:{}", document.id.as_str());
+    render_trusted_typst_pdf(RenderRequest::new(&source, &stable_id))
+}
+
 /// Fuzz-only entry point: render arbitrary Typst source to PDF bytes.
 ///
 /// This shim exists so libFuzzer can drive the Typst compiler and PDF
@@ -204,6 +223,96 @@ fn render_trusted_typst_pdf(request: RenderRequest<'_>) -> Result<Vec<u8>, Rende
     typst_pdf::pdf(&document, &options).map_err(|diagnostics| RenderPdfError::Export {
         message: join_diagnostics(&diagnostics),
     })
+}
+
+fn trusted_invoice_source(document: &CommercialDocument) -> String {
+    let title = format!("Invoice {}", document.document_number.as_str());
+    let rows = invoice_line_rows(document);
+    let total = money_text(
+        document.currency.as_str(),
+        &document.monetary_total.payable_amount,
+    );
+
+    format!(
+        r#"
+#set document(
+  title: {title},
+  author: "InvoiceKit",
+  date: datetime(year: 2026, month: 1, day: 1),
+)
+#set page(width: 210mm, height: 297mm, margin: 18mm)
+#set text(font: "Libertinus Serif", size: 10pt)
+
+#align(center)[
+  = #text({title})
+]
+
+#v(12pt)
+
+#grid(
+  columns: (1fr, 1fr),
+  [*Supplier* \ #text({supplier})],
+  [*Customer* \ #text({customer})],
+  [*Document number* \ #text({document_number})],
+  [*Issue date* \ #text({issue_date})],
+)
+
+#v(12pt)
+
+#table(
+  columns: (1fr, auto, auto),
+  [*Description*], [*Qty*], [*Amount*],
+{rows})
+
+#v(12pt)
+
+Total due: *#text({total})*
+"#,
+        title = typst_string(&title),
+        supplier = typst_string(&document.supplier.name),
+        customer = typst_string(&document.customer.name),
+        document_number = typst_string(document.document_number.as_str()),
+        issue_date = typst_string(document.issue_date.as_str()),
+        rows = rows,
+        total = typst_string(&total),
+    )
+}
+
+fn invoice_line_rows(document: &CommercialDocument) -> String {
+    let mut rows = String::new();
+    for line in &document.lines {
+        let amount = money_text(document.currency.as_str(), &line.line_extension_amount);
+        let _ = writeln!(
+            rows,
+            "  [#text({})], [#text({})], [#text({})],",
+            typst_string(&line.description),
+            typst_string(&line.quantity.inner().normalize().to_string()),
+            typst_string(&amount)
+        );
+    }
+    rows
+}
+
+fn money_text(currency: &str, amount: &invoicekit_ir::MoneyAmount) -> String {
+    format!("{} {}", currency, amount.inner().normalize())
+}
+
+fn typst_string(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len() + 2);
+    escaped.push('"');
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            c if c.is_control() => escaped.push(' '),
+            c => escaped.push(c),
+        }
+    }
+    escaped.push('"');
+    escaped
 }
 
 /// Canonical Cargo package name of this crate.
@@ -382,9 +491,12 @@ fn join_diagnostics(diagnostics: &[SourceDiagnostic]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        crate_name, render_for_fuzz, render_hello_world_invoice, render_trusted_typst_pdf,
-        PdfProfile, RenderPdfError, RenderRequest,
+        crate_name, render_commercial_document_invoice, render_for_fuzz,
+        render_hello_world_invoice, render_trusted_typst_pdf, typst_string, PdfProfile,
+        RenderPdfError, RenderRequest,
     };
+    use invoicekit_ir::CommercialDocument;
+    use serde_json::json;
 
     #[test]
     fn crate_name_is_cargo_package_name() {
@@ -434,6 +546,37 @@ mod tests {
         let second = render_hello_world_invoice().expect("second render should succeed");
 
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn commercial_document_invoice_renders_pdf_a3_bytes() {
+        let pdf = render_commercial_document_invoice(&sample_doc())
+            .expect("commercial document should render");
+
+        assert!(pdf.starts_with(b"%PDF-"));
+        assert!(
+            pdf.windows(b"pdfaid:part".len())
+                .any(|window| window == b"pdfaid:part"),
+            "PDF/A identification metadata missing from Typst PDF output"
+        );
+    }
+
+    #[test]
+    fn commercial_document_invoice_render_is_deterministic() {
+        let document = sample_doc();
+        let first = render_commercial_document_invoice(&document).expect("first render");
+        let second = render_commercial_document_invoice(&document).expect("second render");
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn typst_string_escapes_user_text() {
+        assert_eq!(
+            typst_string("A \"quote\" \\ slash"),
+            r#""A \"quote\" \\ slash""#
+        );
+        assert_eq!(typst_string("line\nnext"), r#""line\nnext""#);
     }
 
     /// T-055 guard: `InMemoryWorld` constructs its font searcher
@@ -550,5 +693,66 @@ mod tests {
         // Empty input is the libFuzzer baseline; the fuzz target must
         // tolerate either Ok(_) or RenderPdfError without panicking.
         let _ = render_for_fuzz("");
+    }
+
+    fn sample_doc() -> CommercialDocument {
+        CommercialDocument::try_from_value(json!({
+            "schema_version": "1.0",
+            "id": "doc_pdf_vector",
+            "document_type": "invoice",
+            "issue_date": "2026-05-26",
+            "due_date": "2026-06-25",
+            "document_number": "INV-2026-0001",
+            "currency": "EUR",
+            "supplier": {
+                "id": "supplier",
+                "name": "InvoiceKit GmbH",
+                "tax_ids": [{ "scheme": "vat", "value": "DE123456789" }],
+                "address": {
+                    "lines": ["Main Street 1"],
+                    "city": "Berlin",
+                    "postal_code": "10115",
+                    "country": "DE"
+                }
+            },
+            "customer": {
+                "id": "customer",
+                "name": "ACME SAS",
+                "tax_ids": [{ "scheme": "vat", "value": "FR123456789" }],
+                "address": {
+                    "lines": ["Rue Example 2"],
+                    "city": "Paris",
+                    "postal_code": "75001",
+                    "country": "FR"
+                }
+            },
+            "lines": [{
+                "id": "1",
+                "description": "Validation subscription",
+                "quantity": "1",
+                "unit_code": "EA",
+                "unit_price": "119.00",
+                "line_extension_amount": "119.00",
+                "tax_category": "S"
+            }],
+            "tax_summary": [{
+                "category_code": "S",
+                "taxable_amount": "119.00",
+                "tax_amount": "0.00",
+                "tax_rate": "0.00"
+            }],
+            "monetary_total": {
+                "line_extension_amount": "119.00",
+                "tax_exclusive_amount": "119.00",
+                "tax_inclusive_amount": "119.00",
+                "payable_amount": "119.00"
+            },
+            "meta": {
+                "tenant_id": "tenant_pdf",
+                "trace_id": "trace_pdf",
+                "source_system": "render-pdf-test"
+            }
+        }))
+        .unwrap()
     }
 }
