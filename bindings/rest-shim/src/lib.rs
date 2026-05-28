@@ -26,9 +26,11 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
 use invoicekit_evidence::{manifest_for, pack, EvidenceBundle};
 use invoicekit_ir::CommercialDocument;
-use invoicekit_verify::{verify_packed, VerifyOptions, VerifyReport};
+use invoicekit_verify::{verify_packed, CheckOutcome, VerifyOptions, VerifyReport};
+use schemars::{schema_for, JsonSchema};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
+use sha2::{Digest as _, Sha256};
 use thiserror::Error;
 
 const FIXED_BUNDLE_CREATED_AT: &str = "2026-01-01T00:00:00Z";
@@ -123,16 +125,16 @@ struct StoredInvoice {
     bundle: Vec<u8>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 struct TransmissionRecord {
     id: String,
     invoice_id: String,
-    state: &'static str,
-    gateway: &'static str,
+    state: String,
+    gateway: String,
 }
 
 /// JSON contract returned by `POST /v1/engine/process_json`.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct EngineProcessResponse {
     /// C-ABI-compatible status code: 0 for ok, 1 for canonical engine error.
     pub status: u32,
@@ -141,7 +143,7 @@ pub struct EngineProcessResponse {
 }
 
 /// JSON contract returned by `POST /v1/invoices`.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct InvoiceResponse {
     /// Stable sidecar invoice identifier.
     pub id: String,
@@ -154,36 +156,81 @@ pub struct InvoiceResponse {
 }
 
 /// JSON contract returned by `POST /v1/invoices/{id}/transmit`.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct TransmitResponse {
     /// Transmission tracking identifier.
     pub transmission_id: String,
     /// Initial state-machine state.
-    pub state: &'static str,
+    pub state: String,
 }
 
-#[derive(Debug, Deserialize)]
+/// JSON body accepted by `POST /v1/reconcile`.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 struct ReconcileRequest {
+    /// Invoice identifiers to reconcile against the sidecar store.
     invoice_ids: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+/// JSON contract returned by `POST /v1/reconcile`.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 struct ReconcileResponse {
+    /// One result per requested invoice identifier.
     matches: Vec<ReconcileMatch>,
 }
 
-#[derive(Debug, Serialize)]
+/// Reconciliation result for one invoice identifier.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 struct ReconcileMatch {
+    /// Requested invoice identifier.
     invoice_id: String,
+    /// True when the sidecar currently stores this invoice.
     present: bool,
 }
 
-#[derive(Debug, Deserialize)]
+/// Query parameters accepted by `GET /v1/capabilities`.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 struct CapabilitiesQuery {
+    /// Source country or runtime route code.
     from: Option<String>,
+    /// Destination country or runtime route code.
     to: Option<String>,
+    /// Effective date used to filter capability windows.
     date: Option<String>,
+    /// Scenario such as B2B or B2G.
     scenario: Option<String>,
+}
+
+/// JSON contract returned by `POST /v1/bundles/verify`.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct VerifyBundleResponse {
+    /// Aggregate verdict.
+    pub ok: bool,
+    /// Per-artefact re-hashing + manifest reconciliation.
+    pub content_address: VerifyCheckOutcome,
+    /// Detached signature over `manifest.json`.
+    pub signature: VerifyCheckOutcome,
+    /// DSSE sidecar bound to canonical `manifest.json` bytes.
+    pub manifest_envelope: VerifyCheckOutcome,
+    /// RFC 3161 timestamp re-binding to the manifest imprint.
+    pub timestamp: VerifyCheckOutcome,
+}
+
+/// REST-serializable outcome for one verification check.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "kebab-case")]
+pub enum VerifyCheckOutcome {
+    /// The check passed.
+    Passed,
+    /// The check was not requested.
+    Skipped {
+        /// One-line operator-readable reason.
+        reason: String,
+    },
+    /// The check failed.
+    Failed {
+        /// One-line operator-readable error.
+        error: String,
+    },
 }
 
 async fn process_engine_json(body: Bytes) -> Json<EngineProcessResponse> {
@@ -289,8 +336,8 @@ async fn transmit_invoice(
     let record = TransmissionRecord {
         id: transmission_id.clone(),
         invoice_id: id,
-        state: "accepted",
-        gateway: "mock",
+        state: "accepted".to_owned(),
+        gateway: "mock".to_owned(),
     };
     state
         .transmissions
@@ -301,7 +348,7 @@ async fn transmit_invoice(
         StatusCode::ACCEPTED,
         Json(TransmitResponse {
             transmission_id,
-            state: "accepted",
+            state: "accepted".to_owned(),
         }),
     ))
 }
@@ -363,10 +410,10 @@ async fn get_bundle(
     Ok(response)
 }
 
-async fn verify_bundle(body: Bytes) -> Result<Json<VerifyReport>, ApiError> {
+async fn verify_bundle(body: Bytes) -> Result<Json<VerifyBundleResponse>, ApiError> {
     let report = verify_packed(&body, &VerifyOptions::content_only())
         .map_err(|err| ApiError::BadBundle(err.to_string()))?;
-    Ok(Json(report))
+    Ok(Json(report.into()))
 }
 
 async fn get_capabilities(Query(query): Query<CapabilitiesQuery>) -> Result<Json<Value>, ApiError> {
@@ -395,8 +442,19 @@ async fn get_capabilities(Query(query): Query<CapabilitiesQuery>) -> Result<Json
     })))
 }
 
-async fn openapi_json() -> Json<Value> {
-    Json(openapi_document())
+async fn openapi_json() -> Response {
+    let body = openapi_document_bytes();
+    let hash = openapi_sha256_hex_for_bytes(&body);
+    let mut response = (StatusCode::OK, body).into_response();
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    if let Ok(value) = HeaderValue::from_str(&hash) {
+        headers.insert("x-invoicekit-openapi-sha256", value);
+    }
+    response
 }
 
 fn engine_request_from_body(body: &[u8]) -> Result<Vec<u8>, ApiError> {
@@ -528,47 +586,409 @@ fn query_json(query: &CapabilitiesQuery) -> Value {
     })
 }
 
-fn openapi_document() -> Value {
+impl From<VerifyReport> for VerifyBundleResponse {
+    fn from(report: VerifyReport) -> Self {
+        Self {
+            ok: report.ok,
+            content_address: report.content_address.into(),
+            signature: report.signature.into(),
+            manifest_envelope: report.manifest_envelope.into(),
+            timestamp: report.timestamp.into(),
+        }
+    }
+}
+
+impl From<CheckOutcome> for VerifyCheckOutcome {
+    fn from(outcome: CheckOutcome) -> Self {
+        match outcome {
+            CheckOutcome::Passed => Self::Passed,
+            CheckOutcome::Skipped { reason } => Self::Skipped { reason },
+            CheckOutcome::Failed { error } => Self::Failed { error },
+        }
+    }
+}
+
+/// Build the deterministic OpenAPI 3.1 document for the REST shim.
+///
+/// The component schemas are generated from the Rust DTOs with `schemars`.
+/// Release tooling serializes this document and publishes a sidecar SHA-256
+/// hash so SDK generators can pin the exact contract they consumed.
+#[must_use]
+pub fn openapi_document() -> Value {
+    let components = openapi_components();
+
     json!({
         "openapi": "3.1.0",
         "info": {
             "title": "InvoiceKit REST shim",
             "version": env!("CARGO_PKG_VERSION"),
-            "description": "Thin REST sidecar over the InvoiceKit engine ABI."
+            "description": "Thin REST sidecar over the InvoiceKit engine ABI.",
+            "x-invoicekit-generated-from": [
+                "EngineProcessResponse",
+                "InvoiceResponse",
+                "TransmitResponse",
+                "TransmissionRecord",
+                "ReconcileRequest",
+                "ReconcileResponse",
+                "VerifyBundleResponse",
+                "ApiErrorBody"
+            ]
         },
+        "servers": [
+            {"url": "https://api.invoicekit.org", "description": "Hosted API"},
+            {"url": "http://127.0.0.1:8081", "description": "Local REST shim"}
+        ],
         "paths": {
-            "/v1/engine/process_json": {"post": {"summary": "Process raw Engine ABI JSON"}},
-            "/v1/invoices": {"post": {"summary": "Create an invoice through the engine ABI"}},
-            "/v1/invoices/{id}/validate": {"post": {"summary": "Re-run validation for a stored invoice"}},
-            "/v1/invoices/{id}/render": {"post": {"summary": "Render a deterministic PDF for a stored invoice"}},
-            "/v1/invoices/{id}/transmit": {"post": {"summary": "Submit a stored invoice through the mock gateway"}},
-            "/v1/transmissions/{id}": {"get": {"summary": "Return current transmission state"}},
-            "/v1/reconcile": {"post": {"summary": "Bulk reconcile invoice identifiers"}},
-            "/v1/bundles/{id}": {"get": {"summary": "Download the invoice evidence bundle"}},
-            "/v1/bundles/verify": {"post": {"summary": "Verify an uploaded evidence bundle"}},
-            "/v1/capabilities": {"get": {"summary": "Lookup country/profile/date capabilities"}},
-            "/v1/openapi.json": {"get": {"summary": "Return this OpenAPI 3.1 document"}},
-            "/openapi.json": {"get": {"summary": "Return this OpenAPI 3.1 document"}}
+            "/v1/engine/process_json": {
+                "post": {
+                    "operationId": "processEngineAbiJson",
+                    "summary": "Process raw Engine ABI JSON",
+                    "tags": ["engine"],
+                    "requestBody": json_request_body("Raw Engine ABI envelope.", object_schema()),
+                    "responses": ok_response("Engine ABI processing result.", schema_ref("EngineProcessResponse"))
+                }
+            },
+            "/v1/invoices": {
+                "post": {
+                    "operationId": "createInvoice",
+                    "summary": "Create an invoice through the engine ABI",
+                    "tags": ["invoices"],
+                    "parameters": [idempotency_key_header()],
+                    "requestBody": json_request_body(
+                        "Either a raw Engine ABI envelope or a CommercialDocument JSON object.",
+                        object_schema()
+                    ),
+                    "responses": created_response("Stored invoice metadata.", schema_ref("InvoiceResponse"))
+                }
+            },
+            "/v1/invoices/{id}/validate": {
+                "post": {
+                    "operationId": "validateInvoice",
+                    "summary": "Re-run validation for a stored invoice",
+                    "tags": ["invoices"],
+                    "parameters": [path_id_parameter("Invoice identifier returned by createInvoice.")],
+                    "responses": ok_response("Engine ABI validation result.", schema_ref("EngineProcessResponse"))
+                }
+            },
+            "/v1/invoices/{id}/render": {
+                "post": {
+                    "operationId": "renderInvoice",
+                    "summary": "Render a deterministic PDF for a stored invoice",
+                    "tags": ["invoices"],
+                    "parameters": [path_id_parameter("Invoice identifier returned by createInvoice.")],
+                    "responses": binary_response("application/pdf", "Deterministic PDF bytes.")
+                }
+            },
+            "/v1/invoices/{id}/transmit": {
+                "post": {
+                    "operationId": "transmitInvoice",
+                    "summary": "Submit a stored invoice through the mock gateway",
+                    "tags": ["transmissions"],
+                    "parameters": [path_id_parameter("Invoice identifier returned by createInvoice.")],
+                    "responses": accepted_response("Transmission tracker.", schema_ref("TransmitResponse"))
+                }
+            },
+            "/v1/transmissions/{id}": {
+                "get": {
+                    "operationId": "getTransmission",
+                    "summary": "Return current transmission state",
+                    "tags": ["transmissions"],
+                    "parameters": [path_id_parameter("Transmission identifier returned by transmitInvoice.")],
+                    "responses": ok_response("Transmission state.", schema_ref("TransmissionRecord"))
+                }
+            },
+            "/v1/reconcile": {
+                "post": {
+                    "operationId": "reconcileInvoices",
+                    "summary": "Bulk reconcile invoice identifiers",
+                    "tags": ["reconcile"],
+                    "requestBody": json_request_body("Invoice identifiers to reconcile.", schema_ref("ReconcileRequest")),
+                    "responses": ok_response("Reconciliation result.", schema_ref("ReconcileResponse"))
+                }
+            },
+            "/v1/bundles/{id}": {
+                "get": {
+                    "operationId": "getEvidenceBundle",
+                    "summary": "Download the invoice evidence bundle",
+                    "tags": ["evidence"],
+                    "parameters": [path_id_parameter("Bundle identifier returned by createInvoice.")],
+                    "responses": binary_response("application/vnd.invoicekit.bundle", "Packed .ikb evidence bundle bytes.")
+                }
+            },
+            "/v1/bundles/verify": {
+                "post": {
+                    "operationId": "verifyEvidenceBundle",
+                    "summary": "Verify an uploaded evidence bundle",
+                    "tags": ["evidence"],
+                    "requestBody": binary_request_body("application/vnd.invoicekit.bundle", "Packed .ikb evidence bundle bytes."),
+                    "responses": ok_response("Bundle verification report.", schema_ref("VerifyBundleResponse"))
+                }
+            },
+            "/v1/capabilities": {
+                "get": {
+                    "operationId": "getCapabilities",
+                    "summary": "Lookup country/profile/date capabilities",
+                    "tags": ["capabilities"],
+                    "parameters": capability_query_parameters(),
+                    "responses": ok_response("Capability matrix or filtered capability entries.", object_schema())
+                }
+            },
+            "/v1/openapi.json": openapi_path_item("getVersionedOpenApiDocument"),
+            "/openapi.json": openapi_path_item("getOpenApiDocument")
+        },
+        "components": components
+    })
+}
+
+/// Serialize the OpenAPI document with a stable trailing newline.
+///
+/// # Panics
+///
+/// Panics only if `serde_json` cannot serialize the in-memory JSON value
+/// returned by [`openapi_document`].
+#[must_use]
+pub fn openapi_document_bytes() -> Vec<u8> {
+    let mut bytes = serde_json::to_vec_pretty(&openapi_document())
+        .expect("OpenAPI document is built from serializable JSON values");
+    bytes.push(b'\n');
+    bytes
+}
+
+/// Return the SHA-256 hash for [`openapi_document_bytes`].
+#[must_use]
+pub fn openapi_sha256_hex() -> String {
+    openapi_sha256_hex_for_bytes(&openapi_document_bytes())
+}
+
+fn openapi_sha256_hex_for_bytes(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn schema_value<T: JsonSchema>() -> Value {
+    serde_json::to_value(schema_for!(T)).expect("schemars output is always serializable")
+}
+
+fn openapi_components() -> Value {
+    let mut schemas = Map::new();
+    insert_schema::<ApiErrorBody>(&mut schemas, "ApiErrorBody");
+    insert_schema::<CapabilitiesQuery>(&mut schemas, "CapabilitiesQuery");
+    insert_schema::<EngineProcessResponse>(&mut schemas, "EngineProcessResponse");
+    insert_schema::<InvoiceResponse>(&mut schemas, "InvoiceResponse");
+    insert_schema::<ReconcileRequest>(&mut schemas, "ReconcileRequest");
+    insert_schema::<ReconcileResponse>(&mut schemas, "ReconcileResponse");
+    insert_schema::<TransmissionRecord>(&mut schemas, "TransmissionRecord");
+    insert_schema::<TransmitResponse>(&mut schemas, "TransmitResponse");
+    insert_schema::<VerifyBundleResponse>(&mut schemas, "VerifyBundleResponse");
+    json!({ "schemas": schemas })
+}
+
+fn insert_schema<T: JsonSchema>(schemas: &mut Map<String, Value>, name: &str) {
+    let mut schema = schema_value::<T>();
+    hoist_schema_defs(&mut schema, schemas);
+    schemas.insert(name.to_owned(), schema);
+}
+
+fn hoist_schema_defs(schema: &mut Value, schemas: &mut Map<String, Value>) {
+    rewrite_schema_refs(schema);
+    let Some(object) = schema.as_object_mut() else {
+        return;
+    };
+    let Some(defs) = object.remove("$defs").and_then(|value| match value {
+        Value::Object(defs) => Some(defs),
+        _ => None,
+    }) else {
+        return;
+    };
+    for (name, mut def) in defs {
+        hoist_schema_defs(&mut def, schemas);
+        schemas.entry(name).or_insert(def);
+    }
+}
+
+fn rewrite_schema_refs(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            let replacement = object
+                .get("$ref")
+                .and_then(Value::as_str)
+                .and_then(|reference| reference.strip_prefix("#/$defs/"))
+                .map(ToOwned::to_owned);
+            if let Some(def_name) = replacement {
+                object.insert(
+                    "$ref".to_owned(),
+                    Value::String(format!("#/components/schemas/{def_name}")),
+                );
+            }
+            for child in object.values_mut() {
+                rewrite_schema_refs(child);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                rewrite_schema_refs(item);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn schema_ref(name: &str) -> Value {
+    json!({"$ref": format!("#/components/schemas/{name}")})
+}
+
+fn object_schema() -> Value {
+    json!({"type": "object"})
+}
+
+fn json_request_body(description: &str, schema: Value) -> Value {
+    json!({
+        "required": true,
+        "description": description,
+        "content": {
+            "application/json": {"schema": schema}
+        }
+    })
+}
+
+fn binary_request_body(content_type: &str, description: &str) -> Value {
+    json!({
+        "required": true,
+        "description": description,
+        "content": {
+            content_type: {"schema": {"type": "string", "format": "binary"}}
+        }
+    })
+}
+
+fn ok_response(description: &str, schema: Value) -> Value {
+    response_map("200", description, "application/json", schema)
+}
+
+fn created_response(description: &str, schema: Value) -> Value {
+    response_map("201", description, "application/json", schema)
+}
+
+fn accepted_response(description: &str, schema: Value) -> Value {
+    response_map("202", description, "application/json", schema)
+}
+
+fn response_map(status: &str, description: &str, content_type: &str, schema: Value) -> Value {
+    json!({
+        status: {
+            "description": description,
+            "content": {
+                content_type: {"schema": schema}
+            }
+        },
+        "400": error_response("Bad request."),
+        "404": error_response("Resource not found."),
+        "422": error_response("Request was syntactically valid but could not be processed."),
+        "500": error_response("Internal REST shim error.")
+    })
+}
+
+fn binary_response(content_type: &str, description: &str) -> Value {
+    json!({
+        "200": {
+            "description": description,
+            "content": {
+                content_type: {"schema": {"type": "string", "format": "binary"}}
+            }
+        },
+        "404": error_response("Resource not found."),
+        "500": error_response("Internal REST shim error.")
+    })
+}
+
+fn error_response(description: &str) -> Value {
+    json!({
+        "description": description,
+        "content": {
+            "application/json": {"schema": schema_ref("ApiErrorBody")}
+        }
+    })
+}
+
+fn path_id_parameter(description: &str) -> Value {
+    json!({
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": description,
+        "schema": {"type": "string"}
+    })
+}
+
+fn idempotency_key_header() -> Value {
+    json!({
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": false,
+        "description": "Optional idempotency key used to derive the stable invoice identifier.",
+        "schema": {"type": "string"}
+    })
+}
+
+fn capability_query_parameters() -> Vec<Value> {
+    [
+        ("from", "Source country or runtime route code."),
+        ("to", "Destination country or runtime route code."),
+        ("date", "Effective date in YYYY-MM-DD form."),
+        ("scenario", "Scenario such as B2B or B2G."),
+    ]
+    .into_iter()
+    .map(|(name, description)| {
+        json!({
+            "name": name,
+            "in": "query",
+            "required": false,
+            "description": description,
+            "schema": {"type": "string"}
+        })
+    })
+    .collect()
+}
+
+fn openapi_path_item(operation_id: &str) -> Value {
+    json!({
+        "get": {
+            "operationId": operation_id,
+            "summary": "Return this OpenAPI 3.1 document",
+            "tags": ["metadata"],
+            "responses": {
+                "200": {
+                    "description": "OpenAPI 3.1 document generated from Rust DTO schemas.",
+                    "headers": {
+                        "x-invoicekit-openapi-sha256": {
+                            "description": "SHA-256 hash of the exact response body.",
+                            "schema": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+                        }
+                    },
+                    "content": {
+                        "application/json": {"schema": object_schema()}
+                    }
+                }
+            }
         }
     })
 }
 
 /// Standard REST-shim error envelope.
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct ApiErrorBody {
     /// Error payload.
     pub error: ApiErrorInner,
 }
 
 /// Stable error payload for SDK consumers.
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct ApiErrorInner {
     /// Stable error code.
-    pub code: &'static str,
+    pub code: String,
     /// Human-readable message.
     pub message: String,
     /// Remediation hint.
-    pub remediation: &'static str,
+    pub remediation: String,
 }
 
 #[derive(Debug, Error)]
@@ -648,9 +1068,9 @@ impl IntoResponse for ApiError {
         let status = self.status();
         let body = ApiErrorBody {
             error: ApiErrorInner {
-                code: self.code(),
+                code: self.code().to_owned(),
                 message: self.message(),
-                remediation: self.remediation(),
+                remediation: self.remediation().to_owned(),
             },
         };
         (status, Json(body)).into_response()
@@ -675,12 +1095,16 @@ pub const fn crate_name() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_router, crate_name, process_engine_abi_json, EngineProcessResponse};
+    use super::{
+        build_router, crate_name, openapi_document, openapi_document_bytes, openapi_sha256_hex,
+        process_engine_abi_json, EngineProcessResponse,
+    };
     use axum::body::{Body, Bytes};
     use axum::http::{header, Method, Request, StatusCode};
     use http_body_util::BodyExt;
     use serde::Deserialize;
     use serde_json::Value;
+    use sha2::{Digest as _, Sha256};
     use tower::ServiceExt;
 
     const GOLDEN_FIXTURE: &str =
@@ -910,6 +1334,66 @@ mod tests {
         ] {
             assert!(paths.contains_key(path), "OpenAPI missing {path}");
         }
+    }
+
+    #[test]
+    fn openapi_document_uses_generated_component_schemas() {
+        let document = openapi_document();
+        assert_eq!(document["openapi"], "3.1.0");
+        let generated_from = document["info"]["x-invoicekit-generated-from"]
+            .as_array()
+            .unwrap();
+        assert!(generated_from.iter().any(|name| name == "InvoiceResponse"));
+        let schemas = document["components"]["schemas"].as_object().unwrap();
+        for schema in [
+            "ApiErrorBody",
+            "EngineProcessResponse",
+            "InvoiceResponse",
+            "ReconcileRequest",
+            "ReconcileResponse",
+            "TransmissionRecord",
+            "TransmitResponse",
+            "VerifyBundleResponse",
+        ] {
+            assert!(schemas.contains_key(schema), "OpenAPI missing {schema}");
+        }
+        assert_eq!(
+            document["paths"]["/v1/invoices"]["post"]["operationId"],
+            "createInvoice"
+        );
+        assert_eq!(
+            schemas["InvoiceResponse"]["properties"]["id"]["type"],
+            "string"
+        );
+    }
+
+    #[test]
+    fn openapi_document_hash_matches_serialized_bytes() {
+        let bytes = openapi_document_bytes();
+        assert!(bytes.ends_with(b"\n"));
+        assert_eq!(
+            openapi_sha256_hex(),
+            format!("{:x}", Sha256::digest(&bytes))
+        );
+    }
+
+    #[tokio::test]
+    async fn openapi_route_carries_response_body_sha256() {
+        let response = build_router()
+            .oneshot(empty_request(Method::GET, "/v1/openapi.json"))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let header_hash = response
+            .headers()
+            .get("x-invoicekit-openapi-sha256")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let body = response_body(response).await;
+        assert_eq!(header_hash, format!("{:x}", Sha256::digest(&body)));
     }
 
     #[tokio::test]
