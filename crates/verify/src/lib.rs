@@ -12,7 +12,11 @@
 //! 2. **Signature** — verifies a detached [`Signature`]
 //!    against the bundle's `manifest.json` bytes. Skipped when
 //!    no signer is supplied.
-//! 3. **Timestamp** — re-binds the bundle's RFC 3161 token to
+//! 3. **Manifest envelope** — verifies the reserved
+//!    `signatures/manifest.dsse` sidecar against canonical
+//!    `manifest.json` bytes. Skipped when no DSSE verifier is
+//!    supplied.
+//! 4. **Timestamp** — re-binds the bundle's RFC 3161 token to
 //!    the freshly-computed manifest imprint. Skipped when no
 //!    timestamp + client are supplied.
 //!
@@ -22,9 +26,14 @@
 //! semantics.
 
 use invoicekit_evidence::{pack, unpack, BundleError, EvidenceBundle, MANIFEST_ARTEFACT_ID};
+use invoicekit_evidence_dsse::{
+    verify_envelope, DsseEnvelope, ManifestSigner, MANIFEST_PAYLOAD_TYPE,
+    MANIFEST_SIGNATURE_ARTEFACT_ID,
+};
 use invoicekit_signer::{KeyRef, SignRequest, Signature, Signer, SigningError};
 use invoicekit_timestamping::{HashAlgorithm, RfcTimestamp, TimestampClient, TimestampingError};
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 use thiserror::Error;
 
 /// Verification options. Each `Option` is a separate opt-in.
@@ -37,6 +46,14 @@ pub struct VerifyOptions<'a> {
     /// Signature record to verify. `None` skips even when
     /// `signer` is supplied.
     pub signature: Option<&'a Signature>,
+    /// DSSE manifest-envelope verifier. When supplied,
+    /// verification expects `signatures/manifest.dsse` inside
+    /// the bundle and binds it to the canonical manifest bytes.
+    pub manifest_dsse_signer: Option<&'a dyn ManifestSigner>,
+    /// Fail when the manifest DSSE sidecar is absent. This is
+    /// useful for operator policies that require signed
+    /// evidence bundles even before a concrete signer is wired.
+    pub require_manifest_dsse: bool,
     /// Timestamp client (`MockTimestampClient` in tests, the
     /// real TSA client in production). `None` skips the
     /// timestamp check.
@@ -57,6 +74,8 @@ impl VerifyOptions<'_> {
         Self {
             signer: None,
             signature: None,
+            manifest_dsse_signer: None,
+            require_manifest_dsse: false,
             timestamp_client: None,
             timestamp: None,
             timestamp_algorithm: HashAlgorithm::Blake3,
@@ -111,6 +130,9 @@ pub struct VerifyReport {
     pub content_address: CheckOutcome,
     /// Detached signature over `manifest.json`.
     pub signature: CheckOutcome,
+    /// DSSE sidecar at `signatures/manifest.dsse` bound to
+    /// canonical `manifest.json` bytes.
+    pub manifest_envelope: CheckOutcome,
     /// RFC 3161 timestamp re-binding to the manifest imprint.
     pub timestamp: CheckOutcome,
 }
@@ -151,12 +173,17 @@ pub fn verify_packed(
 pub fn verify(bundle: &EvidenceBundle, options: &VerifyOptions<'_>) -> VerifyReport {
     let content_address = run_content_address_check(bundle);
     let signature = run_signature_check(bundle, options);
+    let manifest_envelope = run_manifest_envelope_check(bundle, options);
     let timestamp = run_timestamp_check(bundle, options);
-    let ok = !content_address.is_failed() && !signature.is_failed() && !timestamp.is_failed();
+    let ok = !content_address.is_failed()
+        && !signature.is_failed()
+        && !manifest_envelope.is_failed()
+        && !timestamp.is_failed();
     VerifyReport {
         ok,
         content_address,
         signature,
+        manifest_envelope,
         timestamp,
     }
 }
@@ -176,7 +203,7 @@ fn run_content_address_check(bundle: &EvidenceBundle) -> CheckOutcome {
         }
     };
     match unpack(&packed) {
-        Ok(round_tripped) if &round_tripped == bundle => CheckOutcome::Passed,
+        Ok(round_tripped) if round_tripped.eq(bundle) => CheckOutcome::Passed,
         Ok(_) => CheckOutcome::Failed {
             error: "bundle re-pack round-trip drifted".to_owned(),
         },
@@ -225,9 +252,13 @@ fn run_signature_check(bundle: &EvidenceBundle, options: &VerifyOptions<'_>) -> 
     };
     match signer.sign(&request) {
         Ok(recomputed) => {
-            if recomputed.algorithm == signature.algorithm
-                && recomputed.signature_b64 == signature.signature_b64
-            {
+            let signature_matches = bool::from(
+                recomputed
+                    .signature_b64
+                    .as_bytes()
+                    .ct_eq(signature.signature_b64.as_bytes()),
+            );
+            if recomputed.algorithm.eq(&signature.algorithm) && signature_matches {
                 CheckOutcome::Passed
             } else {
                 CheckOutcome::Failed {
@@ -243,6 +274,53 @@ fn run_signature_check(bundle: &EvidenceBundle, options: &VerifyOptions<'_>) -> 
         },
         Err(err) => CheckOutcome::Failed {
             error: format!("signer error: {err}"),
+        },
+    }
+}
+
+fn run_manifest_envelope_check(
+    bundle: &EvidenceBundle,
+    options: &VerifyOptions<'_>,
+) -> CheckOutcome {
+    let Some(signer) = options.manifest_dsse_signer else {
+        if options.require_manifest_dsse
+            && !bundle
+                .artefacts
+                .contains_key(MANIFEST_SIGNATURE_ARTEFACT_ID)
+        {
+            return CheckOutcome::Failed {
+                error: format!("manifest DSSE artefact missing: {MANIFEST_SIGNATURE_ARTEFACT_ID}"),
+            };
+        }
+        return CheckOutcome::Skipped {
+            reason: "no manifest DSSE signer supplied".to_owned(),
+        };
+    };
+    let Some(bytes) = bundle.artefacts.get(MANIFEST_SIGNATURE_ARTEFACT_ID) else {
+        return CheckOutcome::Failed {
+            error: format!("manifest DSSE artefact missing: {MANIFEST_SIGNATURE_ARTEFACT_ID}"),
+        };
+    };
+    let envelope: DsseEnvelope = match serde_json::from_slice(bytes) {
+        Ok(e) => e,
+        Err(err) => {
+            return CheckOutcome::Failed {
+                error: format!("manifest DSSE parse failed: {err}"),
+            };
+        }
+    };
+    let payload = match manifest_bytes(bundle) {
+        Ok(b) => b,
+        Err(err) => {
+            return CheckOutcome::Failed {
+                error: format!("manifest re-serialise failed: {err}"),
+            };
+        }
+    };
+    match verify_envelope(&envelope, MANIFEST_PAYLOAD_TYPE, &payload, signer) {
+        Ok(()) => CheckOutcome::Passed,
+        Err(err) => CheckOutcome::Failed {
+            error: format!("manifest DSSE verification failed: {err}"),
         },
     }
 }
@@ -368,6 +446,10 @@ pub const fn crate_name() -> &'static str {
 mod tests {
     use super::*;
     use invoicekit_evidence::{manifest_for, EvidenceBundle};
+    use invoicekit_evidence_dsse::{
+        attach_manifest_dsse, wrap, MockSigner as DsseMockSigner, MANIFEST_PAYLOAD_TYPE,
+        MANIFEST_SIGNATURE_ARTEFACT_ID,
+    };
     use invoicekit_signer::{KeyRef, SoftwareSigner};
     use invoicekit_timestamping::{
         HashAlgorithm, MockTimestampClient, TimestampClient, TimestampRequest,
@@ -397,6 +479,10 @@ mod tests {
         assert!(report.ok, "report: {report:?}");
         assert_eq!(report.content_address, CheckOutcome::Passed);
         assert!(matches!(report.signature, CheckOutcome::Skipped { .. }));
+        assert!(matches!(
+            report.manifest_envelope,
+            CheckOutcome::Skipped { .. }
+        ));
         assert!(matches!(report.timestamp, CheckOutcome::Skipped { .. }));
     }
 
@@ -452,6 +538,100 @@ mod tests {
             },
         );
         assert!(report.signature.is_failed());
+    }
+
+    #[test]
+    fn verify_passes_for_manifest_dsse_sidecar() {
+        let signer = DsseMockSigner::default();
+        let bundle = attach_manifest_dsse(&sample_bundle(), &signer).unwrap();
+        let report = verify(
+            &bundle,
+            &VerifyOptions {
+                manifest_dsse_signer: Some(&signer),
+                ..VerifyOptions::content_only()
+            },
+        );
+        assert!(report.ok, "report: {report:?}");
+        assert_eq!(report.manifest_envelope, CheckOutcome::Passed);
+    }
+
+    #[test]
+    fn verify_fails_when_manifest_dsse_is_missing() {
+        let signer = DsseMockSigner::default();
+        let report = verify(
+            &sample_bundle(),
+            &VerifyOptions {
+                manifest_dsse_signer: Some(&signer),
+                ..VerifyOptions::content_only()
+            },
+        );
+        assert!(!report.ok);
+        assert_eq!(
+            report.manifest_envelope,
+            CheckOutcome::Failed {
+                error: format!("manifest DSSE artefact missing: {MANIFEST_SIGNATURE_ARTEFACT_ID}"),
+            }
+        );
+    }
+
+    #[test]
+    fn verify_fails_when_manifest_dsse_payload_mismatches_manifest() {
+        let signer = DsseMockSigner::default();
+        let mut bundle = sample_bundle();
+        let envelope = wrap(&signer, MANIFEST_PAYLOAD_TYPE, b"wrong manifest").unwrap();
+        bundle.artefacts.insert(
+            MANIFEST_SIGNATURE_ARTEFACT_ID.to_owned(),
+            serde_json::to_vec(&envelope).unwrap(),
+        );
+        let report = verify(
+            &bundle,
+            &VerifyOptions {
+                manifest_dsse_signer: Some(&signer),
+                ..VerifyOptions::content_only()
+            },
+        );
+        assert!(!report.ok);
+        assert!(matches!(
+            report.manifest_envelope,
+            CheckOutcome::Failed { ref error }
+                if error.contains("payload drift")
+        ));
+    }
+
+    #[test]
+    fn verify_fails_when_manifest_dsse_signature_is_mutated() {
+        let signer = DsseMockSigner::default();
+        let mut bundle = attach_manifest_dsse(&sample_bundle(), &signer).unwrap();
+        let bytes = bundle
+            .artefacts
+            .get(MANIFEST_SIGNATURE_ARTEFACT_ID)
+            .unwrap();
+        let mut envelope: invoicekit_evidence_dsse::DsseEnvelope =
+            serde_json::from_slice(bytes).unwrap();
+        let signature = envelope.signatures.first_mut().unwrap();
+        let replacement = if signature.sig.starts_with('A') {
+            "B"
+        } else {
+            "A"
+        };
+        signature.sig.replace_range(0..1, replacement);
+        bundle.artefacts.insert(
+            MANIFEST_SIGNATURE_ARTEFACT_ID.to_owned(),
+            serde_json::to_vec(&envelope).unwrap(),
+        );
+        let report = verify(
+            &bundle,
+            &VerifyOptions {
+                manifest_dsse_signer: Some(&signer),
+                ..VerifyOptions::content_only()
+            },
+        );
+        assert!(!report.ok);
+        assert!(matches!(
+            report.manifest_envelope,
+            CheckOutcome::Failed { ref error }
+                if error.contains("signature did not verify")
+        ));
     }
 
     #[test]

@@ -49,6 +49,15 @@ pub const SCHEMA_VERSION: &str = "1.0";
 /// hash + sign the whole bundle by hashing this single entry.
 pub const MANIFEST_ARTEFACT_ID: &str = "manifest.json";
 
+/// Reserved artefact id for the manifest DSSE sidecar.
+///
+/// This artefact is deliberately outside [`Manifest::artefacts`]:
+/// the envelope signs `manifest.json`, so including the
+/// envelope's own hash inside that same manifest would make the
+/// signed payload self-referential. Higher-level verification
+/// checks validate this sidecar explicitly.
+pub const MANIFEST_SIGNATURE_ARTEFACT_ID: &str = "signatures/manifest.dsse";
+
 /// One artefact entry in the bundle ledger.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ArtefactEntry {
@@ -320,6 +329,9 @@ pub fn verify(bundle: &EvidenceBundle) -> Result<(), BundleError> {
     manifest_map.remove(MANIFEST_ARTEFACT_ID);
     for (id, bytes) in &bundle.artefacts {
         let Some(entry) = manifest_map.remove(id.as_str()) else {
+            if id.eq(MANIFEST_SIGNATURE_ARTEFACT_ID) {
+                continue;
+            }
             return Err(BundleError::UnknownArtefact(id.clone()));
         };
         if entry.size != bytes.len() as u64 {
@@ -595,6 +607,20 @@ mod tests {
             err,
             BundleError::UnknownArtefact(ref id) if id == "formats/unlisted.xml"
         ));
+    }
+
+    #[test]
+    fn verify_allows_unlisted_manifest_signature_sidecar() {
+        let mut bundle = sample_bundle("2026-05-27T00:00:00Z");
+        bundle.artefacts.insert(
+            MANIFEST_SIGNATURE_ARTEFACT_ID.to_owned(),
+            br#"{"payload":"e30=","payloadType":"application/vnd.invoicekit.manifest+json","signatures":[]}"#.to_vec(),
+        );
+        verify(&bundle).unwrap();
+
+        let packed = pack(&bundle).unwrap();
+        let unpacked = unpack(&packed).unwrap();
+        assert_eq!(unpacked, bundle);
     }
 
     #[test]

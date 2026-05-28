@@ -381,7 +381,7 @@ impl ManifestSigner for MockSigner {
     fn verify_pae(&self, pae_bytes: &[u8], sig_bytes: &[u8]) -> Result<(), DsseError> {
         let mut expected = b"mock-dsse:".to_vec();
         expected.extend_from_slice(&mock_digest(pae_bytes));
-        if bool::from(expected[..].ct_eq(sig_bytes)) {
+        if bool::from(expected.as_slice().ct_eq(sig_bytes)) {
             Ok(())
         } else {
             Err(DsseError::BadSignature(self.keyid.clone()))
@@ -504,7 +504,7 @@ mod tests {
             .manifest
             .artefacts
             .iter()
-            .any(|a| a.id == MANIFEST_SIGNATURE_ARTEFACT_ID));
+            .any(|a| a.id.eq(MANIFEST_SIGNATURE_ARTEFACT_ID)));
 
         let packed = pack(&attached).unwrap();
         let unpacked = unpack(&packed).unwrap();
@@ -537,7 +537,7 @@ mod tests {
         assert!(matches!(
             err,
             DsseError::PayloadTypeDrift { ref expected, ref got }
-                if expected == "wrong/type" && got == MANIFEST_PAYLOAD_TYPE
+                if expected.eq("wrong/type") && got.eq(MANIFEST_PAYLOAD_TYPE)
         ));
     }
 
@@ -559,7 +559,7 @@ mod tests {
         let bob = MockSigner::new("bob");
         let env = wrap(&alice, MANIFEST_PAYLOAD_TYPE, b"x").unwrap();
         let err = verify_envelope(&env, MANIFEST_PAYLOAD_TYPE, b"x", &bob).unwrap_err();
-        assert!(matches!(err, DsseError::UnknownKey(ref k) if k == "bob"));
+        assert!(matches!(err, DsseError::UnknownKey(ref k) if k.eq("bob")));
     }
 
     #[test]
@@ -582,7 +582,7 @@ mod tests {
             payload_type: MANIFEST_PAYLOAD_TYPE.to_owned(),
             signatures: vec![DsseSignature {
                 keyid: "k".to_owned(),
-                sig: "AA==".to_owned(),
+                sig: base64::engine::general_purpose::STANDARD.encode([0_u8]),
             }],
         };
         let err = env.decoded_payload().unwrap_err();

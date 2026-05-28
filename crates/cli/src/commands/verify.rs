@@ -4,15 +4,16 @@
 //!
 //! Verifies a `.invoicekit` / `.ikb` evidence bundle by
 //! delegating to [`invoicekit_verify::verify_packed`]. The
-//! content-address check is always run; signature + timestamp
-//! checks are skipped today because the CLI doesn't yet wire
-//! a signer or TSA client (T-100 / T-083a / T-082 follow-ups
-//! land those).
+//! content-address check is always run; detached signature,
+//! DSSE manifest-envelope, and timestamp checks are skipped
+//! today because the CLI doesn't yet wire a signer or TSA
+//! client (T-100 / T-083a / T-082 follow-ups land those).
 //!
 //! Exit codes:
 //!
-//! * `0` — bundle verified (content-address ok; signature +
-//!   timestamp skipped, see `--require-*` flags).
+//! * `0` — bundle verified (content-address ok; optional
+//!   signature / envelope / timestamp checks skipped unless
+//!   wired by library callers).
 //! * `1` — verification produced a `Failed` outcome (bundle
 //!   tampered or drifted).
 //! * `2` — usage error (bad args / unreadable file).
@@ -67,6 +68,7 @@ pub fn run(argv: &[String]) -> ExitCode {
         let failed: Vec<&str> = [
             ("content_address", &report.content_address),
             ("signature", &report.signature),
+            ("manifest_envelope", &report.manifest_envelope),
             ("timestamp", &report.timestamp),
         ]
         .into_iter()
