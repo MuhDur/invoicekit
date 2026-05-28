@@ -40,8 +40,8 @@ pub const EN16931_BR_CO_COVERAGE_JSON: &str =
     include_str!("../../rulepack/data/en16931-br-co-coverage.json");
 
 const COVERAGE_RULE_TOTAL: usize = 81;
-const COVERAGE_IMPLEMENTED_NOW: usize = 77;
-const COVERAGE_DEFERRED_IR_GAP: usize = 4;
+const COVERAGE_IMPLEMENTED_NOW: usize = 81;
+const COVERAGE_DEFERRED_IR_GAP: usize = 0;
 
 const UBL_INVOICE_NAMESPACE_URI: &str = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2";
 const UBL_CREDIT_NOTE_NAMESPACE_URI: &str =
@@ -56,12 +56,12 @@ const IMPLEMENTED_RULE_IDS: &[&str] = &[
     "BR-31", "BR-32", "BR-33", "BR-36", "BR-37", "BR-38", "BR-41", "BR-42", "BR-43", "BR-44",
     "BR-45", "BR-46", "BR-47", "BR-48", "BR-49", "BR-50", "BR-51", "BR-52", "BR-53", "BR-54",
     "BR-55", "BR-56", "BR-57", "BR-61", "BR-62", "BR-63", "BR-64", "BR-65", "BR-CO-03", "BR-CO-04",
-    "BR-CO-09", "BR-CO-10", "BR-CO-11", "BR-CO-12", "BR-CO-13", "BR-CO-14", "BR-CO-15", "BR-CO-16",
-    "BR-CO-17", "BR-CO-18", "BR-CO-19", "BR-CO-20", "BR-CO-21", "BR-CO-22", "BR-CO-23", "BR-CO-24",
-    "BR-CO-26",
+    "BR-CO-05", "BR-CO-06", "BR-CO-07", "BR-CO-08", "BR-CO-09", "BR-CO-10", "BR-CO-11", "BR-CO-12",
+    "BR-CO-13", "BR-CO-14", "BR-CO-15", "BR-CO-16", "BR-CO-17", "BR-CO-18", "BR-CO-19", "BR-CO-20",
+    "BR-CO-21", "BR-CO-22", "BR-CO-23", "BR-CO-24", "BR-CO-26",
 ];
 
-const DEFERRED_RULE_IDS: &[&str] = &["BR-CO-05", "BR-CO-06", "BR-CO-07", "BR-CO-08"];
+const DEFERRED_RULE_IDS: &[&str] = &[];
 
 /// XML syntax family accepted by the validator.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -279,6 +279,10 @@ fn run_br_co_rules(
 ) -> Result<(), En16931Error> {
     br_co_03(ctx, findings)?;
     br_co_04(ctx, findings)?;
+    br_co_05(ctx, findings);
+    br_co_06(ctx, findings);
+    br_co_07(ctx, findings);
+    br_co_08(ctx, findings);
     br_co_09(ctx, findings)?;
     br_co_10(ctx, findings)?;
     br_co_11(ctx, findings)?;
@@ -2749,6 +2753,32 @@ fn br_co_04(
     Ok(())
 }
 
+fn br_co_05(_ctx: &ValidationContext<'_>, _findings: &mut Vec<ValidationResult>) {
+    // Reference parity: the pinned CEN/KoSIT UBL and CII Schematron
+    // rows for BR-CO-05 assert true(). The semantic equivalence of
+    // BT-97 free text and BT-98 reason code is not machine-enforced
+    // by the reference artifact, so the correct oracle-matching
+    // behavior is to emit no finding.
+}
+
+fn br_co_06(_ctx: &ValidationContext<'_>, _findings: &mut Vec<ValidationResult>) {
+    // Reference parity: the pinned CEN/KoSIT UBL and CII Schematron
+    // rows for BR-CO-06 assert true(). See BR-CO-05 for why the
+    // Rust validator intentionally emits no finding here.
+}
+
+fn br_co_07(_ctx: &ValidationContext<'_>, _findings: &mut Vec<ValidationResult>) {
+    // Reference parity: the pinned CEN/KoSIT UBL and CII Schematron
+    // rows for BR-CO-07 assert true(). See BR-CO-05 for why the
+    // Rust validator intentionally emits no finding here.
+}
+
+fn br_co_08(_ctx: &ValidationContext<'_>, _findings: &mut Vec<ValidationResult>) {
+    // Reference parity: the pinned CEN/KoSIT UBL and CII Schematron
+    // rows for BR-CO-08 assert true(). See BR-CO-05 for why the
+    // Rust validator intentionally emits no finding here.
+}
+
 fn br_co_09(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
@@ -3638,6 +3668,38 @@ mod tests {
         );
         assert_emits_rule(&duplicate_cii_tax_total, "BR-CO-14");
         assert_emits_rule(&duplicate_cii_tax_total, "BR-CO-15");
+    }
+
+    #[test]
+    fn br_co_05_through_08_are_reference_non_enforceable() {
+        let document_allowance = insert_before(
+            valid_ubl(),
+            "<cac:TaxTotal>",
+            "<cac:AllowanceCharge><cbc:ChargeIndicator>false</cbc:ChargeIndicator><cbc:AllowanceChargeReason>Discount</cbc:AllowanceChargeReason><cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode><cbc:Amount>1.00</cbc:Amount><cac:TaxCategory><cbc:ID>S</cbc:ID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:AllowanceCharge>",
+        );
+        let document_charge = insert_before(
+            valid_ubl(),
+            "<cac:TaxTotal>",
+            "<cac:AllowanceCharge><cbc:ChargeIndicator>true</cbc:ChargeIndicator><cbc:AllowanceChargeReason>Freight</cbc:AllowanceChargeReason><cbc:AllowanceChargeReasonCode>FC</cbc:AllowanceChargeReasonCode><cbc:Amount>1.00</cbc:Amount><cac:TaxCategory><cbc:ID>S</cbc:ID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:AllowanceCharge>",
+        );
+        let line_allowance = replace(
+            valid_ubl(),
+            "<cac:Item><cbc:Name>Implementation service</cbc:Name>",
+            "<cac:AllowanceCharge><cbc:ChargeIndicator>false</cbc:ChargeIndicator><cbc:AllowanceChargeReason>Discount</cbc:AllowanceChargeReason><cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode><cbc:Amount>1.00</cbc:Amount></cac:AllowanceCharge><cac:Item><cbc:Name>Implementation service</cbc:Name>",
+        );
+        let line_charge = replace(
+            valid_ubl(),
+            "<cac:Item><cbc:Name>Implementation service</cbc:Name>",
+            "<cac:AllowanceCharge><cbc:ChargeIndicator>true</cbc:ChargeIndicator><cbc:AllowanceChargeReason>Freight</cbc:AllowanceChargeReason><cbc:AllowanceChargeReasonCode>FC</cbc:AllowanceChargeReasonCode><cbc:Amount>1.00</cbc:Amount></cac:AllowanceCharge><cac:Item><cbc:Name>Implementation service</cbc:Name>",
+        );
+
+        for rule_id in ["BR-CO-05", "BR-CO-06", "BR-CO-07", "BR-CO-08"] {
+            assert!(implemented_rule_ids().contains(&rule_id));
+        }
+        assert_not_emits_rule(&document_allowance, "BR-CO-05");
+        assert_not_emits_rule(&document_charge, "BR-CO-06");
+        assert_not_emits_rule(&line_allowance, "BR-CO-07");
+        assert_not_emits_rule(&line_charge, "BR-CO-08");
     }
 
     #[test]
