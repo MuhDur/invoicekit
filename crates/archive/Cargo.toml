@@ -10,7 +10,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit pluggable archive backend: Archive trait + LocalFsArchive + MockArchive. S3 Object Lock / Azure WORM / GCS retention impls land behind cargo features (T-081 follow-up beads)."
+description = "InvoiceKit pluggable archive backend: Archive trait, LocalFsArchive, S3ObjectLockArchive, AzureWormArchive, and MockArchive."
 publish = false
 
 [lib]
