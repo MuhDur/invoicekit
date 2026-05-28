@@ -1,0 +1,1006 @@
+export type BillingState = "trial" | "active" | "past_due" | "suspended";
+
+export type ActivityKind = "sent" | "validated" | "failed" | "archived";
+
+export type ApiKeyStatus = "active" | "revoked";
+
+export type AuditOutcome = "denied" | "failed" | "succeeded";
+
+export type RecentErrorSeverity = "critical" | "info" | "warning";
+
+export type RecentErrorSource = "gateway" | "retry" | "system" | "validator";
+
+export type TeamMemberRole = "admin" | "operator" | "read_only";
+
+export type TeamMemberStatus = "active" | "disabled" | "invited";
+
+export type TransmissionState = "accepted" | "archived" | "failed" | "queued" | "rejected" | "sent" | "validating";
+
+export type WebhookStatus = "active" | "disabled" | "failing";
+
+export type UpcomingInvoiceStatus = "draft" | "open" | "paid" | "void";
+
+export interface RecentActivityItem {
+  readonly id: string;
+  readonly kind: ActivityKind;
+  readonly documentId: string;
+  readonly counterparty: string;
+  readonly occurredAt: string;
+  readonly summary: string;
+  readonly traceId: string;
+}
+
+export interface DocumentsSentGauge {
+  readonly used: number;
+  readonly limit: number;
+  readonly periodLabel: string;
+}
+
+export interface BillingBanner {
+  readonly state: BillingState;
+  readonly headline: string;
+  readonly detail: string;
+  readonly actionLabel?: string;
+}
+
+export interface TenantOverview {
+  readonly tenantId: string;
+  readonly tenantName: string;
+  readonly documentsSent: DocumentsSentGauge;
+  readonly billing: BillingBanner;
+  readonly recentActivity: readonly RecentActivityItem[];
+  readonly validationFailures: number;
+  readonly generatedAt: string;
+}
+
+export interface UpcomingInvoice {
+  readonly id: string;
+  readonly amountDue: string;
+  readonly currency: string;
+  readonly dueDate: string;
+  readonly status: UpcomingInvoiceStatus;
+}
+
+export interface TenantBilling {
+  readonly planName: string;
+  readonly planSlug: string;
+  readonly state: BillingState;
+  readonly billingEmail: string;
+  readonly currentPeriodEnd: string;
+  readonly documentsIncluded: number;
+  readonly documentsUsed: number;
+  readonly currency: string;
+  readonly monthlyBasePrice: string;
+  readonly portalSessionUrl?: string;
+  readonly upcomingInvoice?: UpcomingInvoice;
+}
+
+export interface ApiKey {
+  readonly id: string;
+  readonly name: string;
+  readonly prefix: string;
+  readonly scopes: readonly string[];
+  readonly status: ApiKeyStatus;
+  readonly createdAt: string;
+  readonly lastUsedAt?: string;
+  readonly expiresAt?: string;
+}
+
+export interface ApiKeyPage {
+  readonly items: readonly ApiKey[];
+  readonly pageInfo: TransmissionPageInfo;
+}
+
+export interface ApiKeyListParams {
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly status?: ApiKeyStatus;
+}
+
+export interface UsageMonth {
+  readonly month: string;
+  readonly documentsSent: number;
+  readonly documentsReceived: number;
+  readonly partnerApCost: string;
+}
+
+export interface TenantUsage {
+  readonly periodLabel: string;
+  readonly totalSent: number;
+  readonly totalReceived: number;
+  readonly partnerApCostTotal: string;
+  readonly currency: string;
+  readonly months: readonly UsageMonth[];
+}
+
+export interface RecentError {
+  readonly id: string;
+  readonly occurredAt: string;
+  readonly source: RecentErrorSource;
+  readonly severity: RecentErrorSeverity;
+  readonly documentId: string;
+  readonly summary: string;
+  readonly remediation: string;
+  readonly traceId: string;
+}
+
+export interface RecentErrorPage {
+  readonly items: readonly RecentError[];
+  readonly pageInfo: TransmissionPageInfo;
+}
+
+export interface RecentErrorListParams {
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly severity?: RecentErrorSeverity;
+}
+
+export interface AuditEvent {
+  readonly id: string;
+  readonly occurredAt: string;
+  readonly actor: string;
+  readonly action: string;
+  readonly resourceType: string;
+  readonly resourceId: string;
+  readonly outcome: AuditOutcome;
+  readonly traceId: string;
+}
+
+export interface AuditEventPage {
+  readonly items: readonly AuditEvent[];
+  readonly pageInfo: TransmissionPageInfo;
+}
+
+export interface AuditEventListParams {
+  readonly actor?: string;
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly outcome?: AuditOutcome;
+}
+
+export interface TeamMember {
+  readonly id: string;
+  readonly email: string;
+  readonly displayName: string;
+  readonly role: TeamMemberRole;
+  readonly status: TeamMemberStatus;
+  readonly lastActiveAt?: string;
+  readonly invitedAt?: string;
+}
+
+export interface TeamMemberPage {
+  readonly items: readonly TeamMember[];
+  readonly pageInfo: TransmissionPageInfo;
+}
+
+export interface TeamMemberListParams {
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly role?: TeamMemberRole;
+}
+
+export interface WebhookEndpoint {
+  readonly id: string;
+  readonly name: string;
+  readonly url: string;
+  readonly eventTypes: readonly string[];
+  readonly status: WebhookStatus;
+  readonly signingSecretPrefix: string;
+  readonly createdAt: string;
+  readonly lastDeliveredAt?: string;
+  readonly failureCount: number;
+}
+
+export interface WebhookEndpointPage {
+  readonly items: readonly WebhookEndpoint[];
+  readonly pageInfo: TransmissionPageInfo;
+}
+
+export interface WebhookEndpointListParams {
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly status?: WebhookStatus;
+}
+
+export interface TransmissionSummary {
+  readonly id: string;
+  readonly documentId: string;
+  readonly state: TransmissionState;
+  readonly gateway: string;
+  readonly recipient: string;
+  readonly recipientCountry: string;
+  readonly issueDate: string;
+  readonly updatedAt: string;
+  readonly amount: string;
+  readonly currency: string;
+  readonly receiptUrl?: string;
+  readonly evidenceBundleUrl?: string;
+}
+
+export interface TransmissionPageInfo {
+  readonly endCursor?: string;
+  readonly hasNextPage: boolean;
+  readonly limit: number;
+}
+
+export interface TransmissionPage {
+  readonly items: readonly TransmissionSummary[];
+  readonly pageInfo: TransmissionPageInfo;
+}
+
+export interface TransmissionListParams {
+  readonly cursor?: string;
+  readonly limit?: number;
+}
+
+export interface DashboardEngineClient {
+  listApiKeys(params?: ApiKeyListParams): Promise<ApiKeyPage>;
+  listAuditEvents(params?: AuditEventListParams): Promise<AuditEventPage>;
+  listRecentErrors(params?: RecentErrorListParams): Promise<RecentErrorPage>;
+  listTeamMembers(params?: TeamMemberListParams): Promise<TeamMemberPage>;
+  listTransmissions(params?: TransmissionListParams): Promise<TransmissionPage>;
+  listWebhooks(params?: WebhookEndpointListParams): Promise<WebhookEndpointPage>;
+  tenantBilling(): Promise<TenantBilling>;
+  tenantUsage(): Promise<TenantUsage>;
+  tenantOverview(): Promise<TenantOverview>;
+}
+
+export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+export interface EngineRpcClientOptions {
+  readonly endpoint?: string;
+  readonly fetcher?: FetchLike;
+  readonly requestIdFactory?: () => string;
+}
+
+export class EngineRpcError extends Error {
+  readonly code: number | undefined;
+  readonly data: unknown;
+  readonly status: number | undefined;
+
+  constructor(message: string, options: { readonly code?: number; readonly data?: unknown; readonly status?: number } = {}) {
+    super(message);
+    this.name = "EngineRpcError";
+    this.code = options.code;
+    this.data = options.data;
+    this.status = options.status;
+  }
+}
+
+export function createHttpDashboardClient(options: EngineRpcClientOptions = {}): DashboardEngineClient {
+  const endpoint = options.endpoint ?? dashboardEngineEndpoint();
+  const fetcher = options.fetcher ?? globalThis.fetch?.bind(globalThis);
+  const requestIdFactory = options.requestIdFactory ?? defaultRequestId;
+
+  if (!fetcher) {
+    throw new EngineRpcError("Fetch is not available for Engine ABI calls");
+  }
+
+  return {
+    async listApiKeys(params = {}) {
+      return callEngineMethod({
+        endpoint,
+        fetcher,
+        method: "engine.list_api_keys",
+        params,
+        parse: parseApiKeyPage,
+        requestId: requestIdFactory()
+      });
+    },
+    async listAuditEvents(params = {}) {
+      return callEngineMethod({
+        endpoint,
+        fetcher,
+        method: "engine.list_audit_events",
+        params,
+        parse: parseAuditEventPage,
+        requestId: requestIdFactory()
+      });
+    },
+    async listRecentErrors(params = {}) {
+      return callEngineMethod({
+        endpoint,
+        fetcher,
+        method: "engine.list_recent_errors",
+        params,
+        parse: parseRecentErrorPage,
+        requestId: requestIdFactory()
+      });
+    },
+    async listTeamMembers(params = {}) {
+      return callEngineMethod({
+        endpoint,
+        fetcher,
+        method: "engine.list_team_members",
+        params,
+        parse: parseTeamMemberPage,
+        requestId: requestIdFactory()
+      });
+    },
+    async listTransmissions(params = {}) {
+      return callEngineMethod({
+        endpoint,
+        fetcher,
+        method: "engine.list_transmissions",
+        params,
+        parse: parseTransmissionPage,
+        requestId: requestIdFactory()
+      });
+    },
+    async listWebhooks(params = {}) {
+      return callEngineMethod({
+        endpoint,
+        fetcher,
+        method: "engine.list_webhooks",
+        params,
+        parse: parseWebhookEndpointPage,
+        requestId: requestIdFactory()
+      });
+    },
+    async tenantBilling() {
+      return callEngineMethod({
+        endpoint,
+        fetcher,
+        method: "engine.tenant_billing",
+        params: {},
+        parse: parseTenantBilling,
+        requestId: requestIdFactory()
+      });
+    },
+    async tenantUsage() {
+      return callEngineMethod({
+        endpoint,
+        fetcher,
+        method: "engine.tenant_usage",
+        params: {},
+        parse: parseTenantUsage,
+        requestId: requestIdFactory()
+      });
+    },
+    async tenantOverview() {
+      return callEngineMethod({
+        endpoint,
+        fetcher,
+        method: "engine.tenant_overview",
+        params: {},
+        parse: parseTenantOverview,
+        requestId: requestIdFactory()
+      });
+    }
+  };
+}
+
+export function usagePercent(gauge: DocumentsSentGauge): number {
+  if (gauge.limit <= 0) {
+    return 0;
+  }
+
+  return Math.min(100, Math.round((gauge.used / gauge.limit) * 100));
+}
+
+export function billingTone(state: BillingState): "neutral" | "good" | "warning" | "critical" {
+  switch (state) {
+    case "active":
+      return "good";
+    case "trial":
+      return "neutral";
+    case "past_due":
+      return "warning";
+    case "suspended":
+      return "critical";
+  }
+}
+
+interface EngineMethodCall<Result> {
+  readonly endpoint: string;
+  readonly fetcher: FetchLike;
+  readonly method:
+    | "engine.list_api_keys"
+    | "engine.list_audit_events"
+    | "engine.list_recent_errors"
+    | "engine.list_team_members"
+    | "engine.list_transmissions"
+    | "engine.list_webhooks"
+    | "engine.tenant_billing"
+    | "engine.tenant_overview"
+    | "engine.tenant_usage";
+  readonly params: unknown;
+  readonly parse: (value: unknown) => Result;
+  readonly requestId: string;
+}
+
+async function callEngineMethod<
+  Result extends
+    | ApiKeyPage
+    | AuditEventPage
+    | RecentErrorPage
+    | TeamMemberPage
+    | TenantBilling
+    | TenantOverview
+    | TenantUsage
+    | TransmissionPage
+    | WebhookEndpointPage
+>({
+  endpoint,
+  fetcher,
+  method,
+  params,
+  parse,
+  requestId
+}: EngineMethodCall<Result>): Promise<Result> {
+  const response = await fetcher(endpoint, {
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: requestId,
+      method,
+      params
+    }),
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  const payload = await readJson(response);
+
+  if (!response.ok) {
+    throw new EngineRpcError(`Engine ABI request failed with HTTP ${response.status}`, {
+      data: payload,
+      status: response.status
+    });
+  }
+
+  const envelope = asRecord(payload, "Engine ABI response");
+  const error = envelope.error;
+
+  if (error !== undefined) {
+    const errorRecord = asRecord(error, "Engine ABI error");
+    const code = readOptionalNumber(errorRecord, "code", "Engine ABI error");
+    throw new EngineRpcError(readString(errorRecord, "message", "Engine ABI error"), {
+      data: errorRecord.data,
+      ...(code !== undefined ? { code } : {})
+    });
+  }
+
+  return parse(envelope.result);
+}
+
+async function readJson(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch (error) {
+    throw new EngineRpcError("Engine ABI returned invalid JSON", {
+      data: error,
+      status: response.status
+    });
+  }
+}
+
+function parseTenantOverview(value: unknown): TenantOverview {
+  const record = asRecord(value, "tenant overview");
+
+  return {
+    tenantId: readString(record, "tenantId", "tenant overview"),
+    tenantName: readString(record, "tenantName", "tenant overview"),
+    documentsSent: parseDocumentsSent(readRequired(record, "documentsSent", "tenant overview")),
+    billing: parseBilling(readRequired(record, "billing", "tenant overview")),
+    recentActivity: readArray(record, "recentActivity", "tenant overview").map(parseRecentActivity),
+    validationFailures: readNumber(record, "validationFailures", "tenant overview"),
+    generatedAt: readString(record, "generatedAt", "tenant overview")
+  };
+}
+
+function parseTenantBilling(value: unknown): TenantBilling {
+  const record = asRecord(value, "tenant billing");
+  const billing: TenantBilling = {
+    planName: readString(record, "planName", "tenant billing"),
+    planSlug: readString(record, "planSlug", "tenant billing"),
+    state: readBillingState(record, "state", "tenant billing"),
+    billingEmail: readString(record, "billingEmail", "tenant billing"),
+    currentPeriodEnd: readString(record, "currentPeriodEnd", "tenant billing"),
+    documentsIncluded: readNumber(record, "documentsIncluded", "tenant billing"),
+    documentsUsed: readNumber(record, "documentsUsed", "tenant billing"),
+    currency: readString(record, "currency", "tenant billing"),
+    monthlyBasePrice: readString(record, "monthlyBasePrice", "tenant billing")
+  };
+  const upcomingInvoice = readOptionalRecord(record, "upcomingInvoice", "tenant billing");
+
+  appendOptionalStringField(billing, "portalSessionUrl", readOptionalString(record, "portalSessionUrl", "tenant billing"));
+
+  if (upcomingInvoice !== undefined) {
+    Object.assign(billing, { upcomingInvoice: parseUpcomingInvoice(upcomingInvoice) });
+  }
+
+  return billing;
+}
+
+function parseUpcomingInvoice(value: unknown): UpcomingInvoice {
+  const record = asRecord(value, "upcoming invoice");
+
+  return {
+    id: readString(record, "id", "upcoming invoice"),
+    amountDue: readString(record, "amountDue", "upcoming invoice"),
+    currency: readString(record, "currency", "upcoming invoice"),
+    dueDate: readString(record, "dueDate", "upcoming invoice"),
+    status: readUpcomingInvoiceStatus(record, "status", "upcoming invoice")
+  };
+}
+
+function parseApiKeyPage(value: unknown): ApiKeyPage {
+  const record = asRecord(value, "API key page");
+
+  return {
+    items: readArray(record, "items", "API key page").map(parseApiKey),
+    pageInfo: parseTransmissionPageInfo(readRequired(record, "pageInfo", "API key page"))
+  };
+}
+
+function parseApiKey(value: unknown): ApiKey {
+  const record = asRecord(value, "API key");
+  const apiKey: ApiKey = {
+    id: readString(record, "id", "API key"),
+    name: readString(record, "name", "API key"),
+    prefix: readString(record, "prefix", "API key"),
+    scopes: readStringArray(record, "scopes", "API key"),
+    status: readApiKeyStatus(record, "status", "API key"),
+    createdAt: readString(record, "createdAt", "API key")
+  };
+
+  appendOptionalStringField(apiKey, "lastUsedAt", readOptionalString(record, "lastUsedAt", "API key"));
+  appendOptionalStringField(apiKey, "expiresAt", readOptionalString(record, "expiresAt", "API key"));
+
+  return apiKey;
+}
+
+function parseDocumentsSent(value: unknown): DocumentsSentGauge {
+  const record = asRecord(value, "documents sent gauge");
+
+  return {
+    used: readNumber(record, "used", "documents sent gauge"),
+    limit: readNumber(record, "limit", "documents sent gauge"),
+    periodLabel: readString(record, "periodLabel", "documents sent gauge")
+  };
+}
+
+function parseBilling(value: unknown): BillingBanner {
+  const record = asRecord(value, "billing banner");
+  const actionLabel = record.actionLabel;
+
+  return {
+    state: readBillingState(record, "state", "billing banner"),
+    headline: readString(record, "headline", "billing banner"),
+    detail: readString(record, "detail", "billing banner"),
+    ...(typeof actionLabel === "string" ? { actionLabel } : {})
+  };
+}
+
+function parseRecentActivity(value: unknown): RecentActivityItem {
+  const record = asRecord(value, "recent activity item");
+
+  return {
+    id: readString(record, "id", "recent activity item"),
+    kind: readActivityKind(record, "kind", "recent activity item"),
+    documentId: readString(record, "documentId", "recent activity item"),
+    counterparty: readString(record, "counterparty", "recent activity item"),
+    occurredAt: readString(record, "occurredAt", "recent activity item"),
+    summary: readString(record, "summary", "recent activity item"),
+    traceId: readString(record, "traceId", "recent activity item")
+  };
+}
+
+function parseAuditEventPage(value: unknown): AuditEventPage {
+  const record = asRecord(value, "audit event page");
+
+  return {
+    items: readArray(record, "items", "audit event page").map(parseAuditEvent),
+    pageInfo: parseTransmissionPageInfo(readRequired(record, "pageInfo", "audit event page"))
+  };
+}
+
+function parseAuditEvent(value: unknown): AuditEvent {
+  const record = asRecord(value, "audit event");
+
+  return {
+    id: readString(record, "id", "audit event"),
+    occurredAt: readString(record, "occurredAt", "audit event"),
+    actor: readString(record, "actor", "audit event"),
+    action: readString(record, "action", "audit event"),
+    resourceType: readString(record, "resourceType", "audit event"),
+    resourceId: readString(record, "resourceId", "audit event"),
+    outcome: readAuditOutcome(record, "outcome", "audit event"),
+    traceId: readString(record, "traceId", "audit event")
+  };
+}
+
+function parseRecentErrorPage(value: unknown): RecentErrorPage {
+  const record = asRecord(value, "recent error page");
+
+  return {
+    items: readArray(record, "items", "recent error page").map(parseRecentError),
+    pageInfo: parseTransmissionPageInfo(readRequired(record, "pageInfo", "recent error page"))
+  };
+}
+
+function parseRecentError(value: unknown): RecentError {
+  const record = asRecord(value, "recent error");
+
+  return {
+    id: readString(record, "id", "recent error"),
+    occurredAt: readString(record, "occurredAt", "recent error"),
+    source: readRecentErrorSource(record, "source", "recent error"),
+    severity: readRecentErrorSeverity(record, "severity", "recent error"),
+    documentId: readString(record, "documentId", "recent error"),
+    summary: readString(record, "summary", "recent error"),
+    remediation: readString(record, "remediation", "recent error"),
+    traceId: readString(record, "traceId", "recent error")
+  };
+}
+
+function parseTeamMemberPage(value: unknown): TeamMemberPage {
+  const record = asRecord(value, "team member page");
+
+  return {
+    items: readArray(record, "items", "team member page").map(parseTeamMember),
+    pageInfo: parseTransmissionPageInfo(readRequired(record, "pageInfo", "team member page"))
+  };
+}
+
+function parseTeamMember(value: unknown): TeamMember {
+  const record = asRecord(value, "team member");
+  const lastActiveAt = readOptionalString(record, "lastActiveAt", "team member");
+  const invitedAt = readOptionalString(record, "invitedAt", "team member");
+
+  return {
+    id: readString(record, "id", "team member"),
+    email: readString(record, "email", "team member"),
+    displayName: readString(record, "displayName", "team member"),
+    role: readTeamMemberRole(record, "role", "team member"),
+    status: readTeamMemberStatus(record, "status", "team member"),
+    ...(lastActiveAt !== undefined ? { lastActiveAt } : {}),
+    ...(invitedAt !== undefined ? { invitedAt } : {})
+  };
+}
+
+function parseWebhookEndpointPage(value: unknown): WebhookEndpointPage {
+  const record = asRecord(value, "webhook endpoint page");
+
+  return {
+    items: readArray(record, "items", "webhook endpoint page").map(parseWebhookEndpoint),
+    pageInfo: parseTransmissionPageInfo(readRequired(record, "pageInfo", "webhook endpoint page"))
+  };
+}
+
+function parseWebhookEndpoint(value: unknown): WebhookEndpoint {
+  const record = asRecord(value, "webhook endpoint");
+  const webhook: WebhookEndpoint = {
+    id: readString(record, "id", "webhook endpoint"),
+    name: readString(record, "name", "webhook endpoint"),
+    url: readString(record, "url", "webhook endpoint"),
+    eventTypes: readStringArray(record, "eventTypes", "webhook endpoint"),
+    status: readWebhookStatus(record, "status", "webhook endpoint"),
+    signingSecretPrefix: readString(record, "signingSecretPrefix", "webhook endpoint"),
+    createdAt: readString(record, "createdAt", "webhook endpoint"),
+    failureCount: readNumber(record, "failureCount", "webhook endpoint")
+  };
+
+  appendOptionalStringField(webhook, "lastDeliveredAt", readOptionalString(record, "lastDeliveredAt", "webhook endpoint"));
+
+  return webhook;
+}
+
+function parseTenantUsage(value: unknown): TenantUsage {
+  const record = asRecord(value, "tenant usage");
+
+  return {
+    periodLabel: readString(record, "periodLabel", "tenant usage"),
+    totalSent: readNumber(record, "totalSent", "tenant usage"),
+    totalReceived: readNumber(record, "totalReceived", "tenant usage"),
+    partnerApCostTotal: readString(record, "partnerApCostTotal", "tenant usage"),
+    currency: readString(record, "currency", "tenant usage"),
+    months: readArray(record, "months", "tenant usage").map(parseUsageMonth)
+  };
+}
+
+function parseUsageMonth(value: unknown): UsageMonth {
+  const record = asRecord(value, "usage month");
+
+  return {
+    month: readString(record, "month", "usage month"),
+    documentsSent: readNumber(record, "documentsSent", "usage month"),
+    documentsReceived: readNumber(record, "documentsReceived", "usage month"),
+    partnerApCost: readString(record, "partnerApCost", "usage month")
+  };
+}
+
+function parseTransmissionPage(value: unknown): TransmissionPage {
+  const record = asRecord(value, "transmission page");
+
+  return {
+    items: readArray(record, "items", "transmission page").map(parseTransmissionSummary),
+    pageInfo: parseTransmissionPageInfo(readRequired(record, "pageInfo", "transmission page"))
+  };
+}
+
+function parseTransmissionPageInfo(value: unknown): TransmissionPageInfo {
+  const record = asRecord(value, "transmission page info");
+  const endCursor = record.endCursor;
+
+  return {
+    ...(typeof endCursor === "string" ? { endCursor } : {}),
+    hasNextPage: readBoolean(record, "hasNextPage", "transmission page info"),
+    limit: readNumber(record, "limit", "transmission page info")
+  };
+}
+
+function parseTransmissionSummary(value: unknown): TransmissionSummary {
+  const record = asRecord(value, "transmission summary");
+  const receiptUrl = record.receiptUrl;
+  const evidenceBundleUrl = record.evidenceBundleUrl;
+
+  return {
+    id: readString(record, "id", "transmission summary"),
+    documentId: readString(record, "documentId", "transmission summary"),
+    state: readTransmissionState(record, "state", "transmission summary"),
+    gateway: readString(record, "gateway", "transmission summary"),
+    recipient: readString(record, "recipient", "transmission summary"),
+    recipientCountry: readString(record, "recipientCountry", "transmission summary"),
+    issueDate: readString(record, "issueDate", "transmission summary"),
+    updatedAt: readString(record, "updatedAt", "transmission summary"),
+    amount: readString(record, "amount", "transmission summary"),
+    currency: readString(record, "currency", "transmission summary"),
+    ...(typeof receiptUrl === "string" ? { receiptUrl } : {}),
+    ...(typeof evidenceBundleUrl === "string" ? { evidenceBundleUrl } : {})
+  };
+}
+
+function asRecord(value: unknown, label: string): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new EngineRpcError(`Invalid ${label}: expected object`, { data: value });
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function readRequired(record: Record<string, unknown>, key: string, label: string): unknown {
+  const value = record[key];
+
+  if (value === undefined) {
+    throw new EngineRpcError(`Invalid ${label}: missing ${key}`, { data: record });
+  }
+
+  return value;
+}
+
+function readString(record: Record<string, unknown>, key: string, label: string): string {
+  const value = readRequired(record, key, label);
+
+  if (typeof value !== "string") {
+    throw new EngineRpcError(`Invalid ${label}: ${key} must be a string`, { data: record });
+  }
+
+  return value;
+}
+
+function readOptionalString(record: Record<string, unknown>, key: string, label: string): string | undefined {
+  const value = record[key];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "string") {
+    throw new EngineRpcError(`Invalid ${label}: ${key} must be a string`, { data: record });
+  }
+
+  return value;
+}
+
+function readOptionalRecord(record: Record<string, unknown>, key: string, label: string): Record<string, unknown> | undefined {
+  const value = record[key];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return asRecord(value, `${label} ${key}`);
+}
+
+function appendOptionalStringField(target: object, key: string, value: string | undefined): void {
+  if (value === undefined) {
+    return;
+  }
+
+  Object.assign(target, { [key]: value });
+}
+
+function readNumber(record: Record<string, unknown>, key: string, label: string): number {
+  const value = readRequired(record, key, label);
+
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new EngineRpcError(`Invalid ${label}: ${key} must be a finite number`, { data: record });
+  }
+
+  return value;
+}
+
+function readBoolean(record: Record<string, unknown>, key: string, label: string): boolean {
+  const value = readRequired(record, key, label);
+
+  if (typeof value !== "boolean") {
+    throw new EngineRpcError(`Invalid ${label}: ${key} must be a boolean`, { data: record });
+  }
+
+  return value;
+}
+
+function readOptionalNumber(record: Record<string, unknown>, key: string, label: string): number | undefined {
+  const value = record[key];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new EngineRpcError(`Invalid ${label}: ${key} must be a finite number`, { data: record });
+  }
+
+  return value;
+}
+
+function readArray(record: Record<string, unknown>, key: string, label: string): readonly unknown[] {
+  const value = readRequired(record, key, label);
+
+  if (!Array.isArray(value)) {
+    throw new EngineRpcError(`Invalid ${label}: ${key} must be an array`, { data: record });
+  }
+
+  return value;
+}
+
+function readStringArray(record: Record<string, unknown>, key: string, label: string): readonly string[] {
+  return readArray(record, key, label).map((value) => {
+    if (typeof value !== "string") {
+      throw new EngineRpcError(`Invalid ${label}: ${key} must contain only strings`, { data: record });
+    }
+
+    return value;
+  });
+}
+
+function readApiKeyStatus(record: Record<string, unknown>, key: string, label: string): ApiKeyStatus {
+  const value = readString(record, key, label);
+
+  if (value === "active" || value === "revoked") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported API key status`, { data: record });
+}
+
+function readBillingState(record: Record<string, unknown>, key: string, label: string): BillingState {
+  const value = readString(record, key, label);
+
+  if (value === "active" || value === "past_due" || value === "suspended" || value === "trial") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported billing state`, { data: record });
+}
+
+function readActivityKind(record: Record<string, unknown>, key: string, label: string): ActivityKind {
+  const value = readString(record, key, label);
+
+  if (value === "archived" || value === "failed" || value === "sent" || value === "validated") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported activity kind`, { data: record });
+}
+
+function readAuditOutcome(record: Record<string, unknown>, key: string, label: string): AuditOutcome {
+  const value = readString(record, key, label);
+
+  if (value === "denied" || value === "failed" || value === "succeeded") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported audit outcome`, { data: record });
+}
+
+function readRecentErrorSeverity(
+  record: Record<string, unknown>,
+  key: string,
+  label: string
+): RecentErrorSeverity {
+  const value = readString(record, key, label);
+
+  if (value === "critical" || value === "info" || value === "warning") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported error severity`, { data: record });
+}
+
+function readRecentErrorSource(record: Record<string, unknown>, key: string, label: string): RecentErrorSource {
+  const value = readString(record, key, label);
+
+  if (value === "gateway" || value === "retry" || value === "system" || value === "validator") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported error source`, { data: record });
+}
+
+function readTeamMemberRole(record: Record<string, unknown>, key: string, label: string): TeamMemberRole {
+  const value = readString(record, key, label);
+
+  if (value === "admin" || value === "operator" || value === "read_only") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported team member role`, { data: record });
+}
+
+function readTeamMemberStatus(record: Record<string, unknown>, key: string, label: string): TeamMemberStatus {
+  const value = readString(record, key, label);
+
+  if (value === "active" || value === "disabled" || value === "invited") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported team member status`, { data: record });
+}
+
+function readWebhookStatus(record: Record<string, unknown>, key: string, label: string): WebhookStatus {
+  const value = readString(record, key, label);
+
+  if (value === "active" || value === "disabled" || value === "failing") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported webhook status`, { data: record });
+}
+
+function readUpcomingInvoiceStatus(
+  record: Record<string, unknown>,
+  key: string,
+  label: string
+): UpcomingInvoiceStatus {
+  const value = readString(record, key, label);
+
+  if (value === "draft" || value === "open" || value === "paid" || value === "void") {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported upcoming invoice status`, { data: record });
+}
+
+function readTransmissionState(record: Record<string, unknown>, key: string, label: string): TransmissionState {
+  const value = readString(record, key, label);
+
+  if (
+    value === "accepted" ||
+    value === "archived" ||
+    value === "failed" ||
+    value === "queued" ||
+    value === "rejected" ||
+    value === "sent" ||
+    value === "validating"
+  ) {
+    return value;
+  }
+
+  throw new EngineRpcError(`Invalid ${label}: unsupported transmission state`, { data: record });
+}
+
+function dashboardEngineEndpoint(): string {
+  const env = (import.meta as ImportMeta & { readonly env?: Record<string, string | undefined> }).env;
+  return env?.VITE_ENGINE_ABI_URL ?? "/engine";
+}
+
+function defaultRequestId(): string {
+  const randomUuid = globalThis.crypto?.randomUUID?.();
+  return randomUuid ?? `dashboard_${Date.now()}`;
+}
