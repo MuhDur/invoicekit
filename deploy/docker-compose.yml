@@ -65,6 +65,7 @@ services:
       INVOICEKIT_SIGNER_SOCK: /run/invoicekit/signer.sock
       INVOICEKIT_ARCHIVE_S3_ENDPOINT: http://archive-minio:9000
       INVOICEKIT_INTAKE_PADDLEOCR_URL: http://intake-paddleocr:7001
+      INVOICEKIT_INTAKE_SMOLDOCLING_URL: http://intake-smoldocling:7002
     ports:
       - "8080:8080"
     volumes:
@@ -145,6 +146,23 @@ services:
       timeout: 5s
       retries: 5
 
+  intake-smoldocling:
+    # Layer 4 ONNX sidecar; bead T-063 / services/intake-smoldocling.
+    image: ghcr.io/muhdur/invoicekit/intake-smoldocling:scaffold
+    restart: unless-stopped
+    environment:
+      INVOICEKIT_SMOLDOCLING_MODEL_PATH: /var/lib/invoicekit/smoldocling.onnx
+      INVOICEKIT_SMOLDOCLING_DEVICE: cpu
+    ports:
+      - "7002:7002"
+    volumes:
+      - smoldocling-model:/var/lib/invoicekit:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:7002/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
   archive-minio:
     # Object-Lock-capable S3-compatible storage; bead T-081.
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
@@ -177,3 +195,4 @@ volumes:
   postgres-data:
   archive-data:
   signer-socket:
+  smoldocling-model:
