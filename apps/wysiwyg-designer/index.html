@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>InvoiceKit WYSIWYG designer</title>
+    <style>
+      :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+      body { margin: 0; display: grid; grid-template-columns: 1fr 320px; height: 100vh; }
+      #canvas-host { position: relative; background: #f6f6f6; overflow: auto; }
+      #inspector-host { border-left: 1px solid #ddd; padding: 1rem; overflow: auto; }
+      #preview-host { position: fixed; right: 320px; bottom: 0; width: 360px; height: 480px; border: 1px solid #ddd; }
+      .designer-page { position: relative; background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin: 1rem auto; }
+      .designer-block { position: absolute; border: 1px dashed #999; padding: 2px 4px; font-size: 12px; cursor: move; }
+      .designer-block.selected { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25); }
+    </style>
+  </head>
+  <body>
+    <div id="canvas-host"></div>
+    <aside id="inspector-host"></aside>
+    <iframe id="preview-host" sandbox="allow-scripts"></iframe>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

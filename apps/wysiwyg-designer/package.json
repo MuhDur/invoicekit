@@ -1,0 +1,17 @@
+{
+  "name": "@invoicekit/wysiwyg-designer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot src/main.ts",
+    "build": "bun build src/main.ts --outdir dist --target browser",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "verify": "bun run typecheck && bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "1.1.13",
+    "typescript": "5.9.3"
+  }
+}
