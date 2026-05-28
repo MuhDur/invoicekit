@@ -44,3 +44,6 @@ venv/
 
 # Tooling caches
 .cargo/registry/
+
+# T-1300 docker-compose: operator-managed secret files
+deploy/secrets/

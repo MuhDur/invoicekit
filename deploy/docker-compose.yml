@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
 # InvoiceKit single-host managed-stack deployment.
 #
 # Layout per plans/PLAN.md §4.1 / §6 Track 13 (T-1300).
@@ -7,11 +10,9 @@
 # image source, and the bead that owns its build / configuration so an
 # operator can trace any production component back to its specification.
 #
-# Service images are pinned to the `:scaffold` tag until T-1300 lands the
-# first production-ready images. T-1300 replaces every `:scaffold` tag with
-# `:v{{ version }}` pulls from ghcr.io/MuhDur/invoicekit/* and wires in the
-# real env-var and secret bindings; see PLAN.md §6 Track 11/13 for the full
-# managed-API + sidecar topology.
+# Service images are pinned to the `:scaffold` tag until follow-up T-1300a
+# lands the first production-ready CI image build; `deploy/smoke.sh` runs
+# the health checks the operator should see green after `compose up`.
 
 name: invoicekit
 
@@ -44,32 +45,89 @@ services:
         condition: service_started
       validator-phive:
         condition: service_started
+      validator-saxon:
+        condition: service_started
       validator-verapdf:
+        condition: service_started
+      validator-phase4:
         condition: service_started
       signer-agent:
         condition: service_started
+      archive-minio:
+        condition: service_healthy
+    environment:
+      INVOICEKIT_POSTGRES_URL: postgres://invoicekit@postgres:5432/invoicekit
+      INVOICEKIT_VALIDATOR_KOSIT_URL: http://validator-kosit:8080
+      INVOICEKIT_VALIDATOR_PHIVE_URL: http://validator-phive:8080
+      INVOICEKIT_VALIDATOR_SAXON_URL: http://validator-saxon:8080
+      INVOICEKIT_VALIDATOR_VERAPDF_URL: http://validator-verapdf:8080
+      INVOICEKIT_PHASE4_URL: http://validator-phase4:8090
+      INVOICEKIT_SIGNER_SOCK: /run/invoicekit/signer.sock
+      INVOICEKIT_ARCHIVE_S3_ENDPOINT: http://archive-minio:9000
     ports:
       - "8080:8080"
+    volumes:
+      - signer-socket:/run/invoicekit
 
   signer-agent:
     # Built from services/invoicekit-signer-agent; bead T-083.
     image: ghcr.io/muhdur/invoicekit/signer-agent:scaffold
     restart: unless-stopped
+    environment:
+      INVOICEKIT_SIGNER_SOCK: /run/invoicekit/signer.sock
+    volumes:
+      - signer-socket:/run/invoicekit
 
   validator-kosit:
     # JVM sidecar; bead T-030 / services/validator-kosit.
     image: ghcr.io/muhdur/invoicekit/validator-kosit:scaffold
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
 
   validator-phive:
     # JVM sidecar; bead T-030 / services/validator-phive.
     image: ghcr.io/muhdur/invoicekit/validator-phive:scaffold
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  validator-saxon:
+    # JVM sidecar; bead T-030 / services/validator-saxon.
+    image: ghcr.io/muhdur/invoicekit/validator-saxon:scaffold
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
 
   validator-verapdf:
     # JVM sidecar; bead T-058 / services/validator-verapdf.
     image: ghcr.io/muhdur/invoicekit/validator-verapdf:scaffold
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  validator-phase4:
+    # JVM AS4 sidecar; bead T-092 / services/validator-phase4.
+    image: ghcr.io/muhdur/invoicekit/validator-phase4:scaffold
+    restart: unless-stopped
+    environment:
+      INVOICEKIT_PHASE4_PORT: "8090"
+      PEPPOL_AP_SML_MODE: acceptance
+    secrets:
+      - peppol_ap_cert_p12
+      - peppol_ap_cert_pass
 
   archive-minio:
     # Object-Lock-capable S3-compatible storage; bead T-081.
@@ -83,13 +141,23 @@ services:
       - archive-data:/data
     secrets:
       - minio_password
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
 
 secrets:
   postgres_password:
     file: ./secrets/postgres_password
   minio_password:
     file: ./secrets/minio_password
+  peppol_ap_cert_p12:
+    file: ./secrets/peppol_ap_cert_p12
+  peppol_ap_cert_pass:
+    file: ./secrets/peppol_ap_cert_pass
 
 volumes:
   postgres-data:
   archive-data:
+  signer-socket:
