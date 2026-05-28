@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+[package]
+name = "invoicekit-intake-citation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "InvoiceKit bounding-box citation taxonomy. Schema every intake layer (digital PDF text, server-side OCR, VLM) emits so the audit UI can highlight the exact source region for every extracted field, and the evidence bundle carries the citations alongside the canonical document."
+publish = false
+
+[lib]
+name = "invoicekit_intake_citation"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
+
+[lints]
+workspace = true
