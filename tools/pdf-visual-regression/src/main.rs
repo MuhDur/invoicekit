@@ -580,6 +580,10 @@ fn write_report(
 mod tests {
     use super::*;
     use image::{ImageBuffer, Rgba};
+    use std::collections::BTreeSet;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn solid(w: u32, h: u32, px: [u8; 4]) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
         let mut img = ImageBuffer::new(w, h);
@@ -781,13 +785,25 @@ mod tests {
         assert_ne!(format!("{exit_code:?}"), format!("{:?}", ExitCode::SUCCESS));
     }
 
+    #[test]
+    fn tempdir_names_are_unique_under_fast_calls() {
+        let mut seen = BTreeSet::new();
+        for _ in 0..128 {
+            let path = tempdir();
+            assert!(seen.insert(path), "tempdir helper reused a path");
+        }
+    }
+
     fn tempdir() -> PathBuf {
+        let sequence = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            "pdf-visual-regression-test-{}",
+            "pdf-visual-regression-test-{}-{}-{}",
+            std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            sequence
         ));
         fs::create_dir_all(&path).unwrap();
         path
