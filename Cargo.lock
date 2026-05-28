@@ -2616,6 +2616,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoicekit-signer-eidas"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-signer",
+ "invoicekit-timestamping",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "invoicekit-tax-calculation"
 version = "0.0.0"
 dependencies = [
