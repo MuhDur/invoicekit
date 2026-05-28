@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
 [package]
 name = "invoicekit-bridge-lago"
 version.workspace = true
@@ -7,12 +10,18 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit workspace member: invoicekit-bridge-lago"
+description = "InvoiceKit bridge for Lago. Parses Lago `invoice.created` / `invoice.finalized` / `invoice.payment_status_updated` webhook events, extracts the typed invoice summary, and surfaces dropped fields via LossinessLedger. Same shape as the Stripe Invoicing bridge so engine-side code can dispatch on a common surface."
 publish = false
 
 [lib]
 name = "invoicekit_bridge_lago"
 path = "src/lib.rs"
+
+[dependencies]
+invoicekit-ir = { path = "../../crates/ir", version = "0.0.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
 
 [lints]
 workspace = true
