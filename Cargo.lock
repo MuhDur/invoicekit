@@ -2508,6 +2508,7 @@ version = "0.0.0"
 dependencies = [
  "invoicekit-intake-pdf",
  "lopdf",
+ "quick-xml 0.40.1",
  "thiserror 2.0.18",
 ]
 
