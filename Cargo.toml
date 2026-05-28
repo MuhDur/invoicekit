@@ -98,6 +98,7 @@ members = [
   "crates/inbound-peppol",
   "crates/intake-citation",
   "crates/signer",
+  "crates/signer-cfdi",
   "crates/signer-eidas",
   "crates/signer-zatca",
   "crates/timestamping",
