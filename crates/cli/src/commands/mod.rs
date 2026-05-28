@@ -9,6 +9,7 @@
 
 pub mod capabilities;
 pub mod codelist_update;
+pub mod diff;
 pub mod doctor;
 pub mod migrate_archive;
 pub mod pack;
