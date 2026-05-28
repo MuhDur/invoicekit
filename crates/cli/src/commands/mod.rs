@@ -10,5 +10,6 @@
 pub mod capabilities;
 pub mod codelist_update;
 pub mod migrate_archive;
+pub mod pack;
 pub mod replay;
 pub mod verify;
