@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
 [package]
 name = "invoicekit-bridge-recurly"
 version.workspace = true
@@ -7,12 +10,18 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit workspace member: invoicekit-bridge-recurly"
+description = "InvoiceKit bridge for Recurly. Parses Recurly new_invoice_notification / paid_charge_invoice_notification webhook events, extracts a typed invoice summary, and surfaces dropped fields via LossinessLedger."
 publish = false
 
 [lib]
 name = "invoicekit_bridge_recurly"
 path = "src/lib.rs"
+
+[dependencies]
+invoicekit-ir = { path = "../../crates/ir", version = "0.0.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
 
 [lints]
 workspace = true

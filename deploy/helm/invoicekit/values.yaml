@@ -1,0 +1,144 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# Default values for the InvoiceKit chart.
+# Override per environment via `helm install -f my-values.yaml`.
+
+# Global image registry + tag prefix. Every service-specific
+# `image.repository` below is appended to this.
+global:
+  imageRegistry: ghcr.io/muhdur/invoicekit
+  imageTag: scaffold
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: []
+
+# PostgreSQL — recommended to swap for a managed service in
+# production (RDS / Cloud SQL / Azure Database). The bundled
+# pod is fine for dev clusters and CI.
+postgres:
+  enabled: true
+  image:
+    repository: postgres
+    tag: 16-alpine
+  storage:
+    size: 10Gi
+    storageClassName: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  auth:
+    database: invoicekit
+    username: invoicekit
+    # The password is read from the Kubernetes secret named
+    # by `.Values.postgres.auth.existingSecret`; the operator
+    # must create that secret out of band.
+    existingSecret: invoicekit-postgres
+
+# Managed API server (HTTP).
+managedApi:
+  enabled: true
+  image:
+    repository: managed-api-server
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+  service:
+    type: ClusterIP
+    port: 8080
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: invoicekit.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+# Signer agent — DaemonSet so every node has a local socket
+# for engine pods scheduled on the same node. Keys never
+# leave the node.
+signerAgent:
+  enabled: true
+  image:
+    repository: signer-agent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+# Validator sidecars. Each runs as its own Deployment so they
+# scale independently. Set `replicaCount: 0` to disable a
+# specific backend.
+validators:
+  kosit:
+    enabled: true
+    image:
+      repository: validator-kosit
+    replicaCount: 1
+    port: 8080
+  phive:
+    enabled: true
+    image:
+      repository: validator-phive
+    replicaCount: 1
+    port: 8080
+  saxon:
+    enabled: true
+    image:
+      repository: validator-saxon
+    replicaCount: 1
+    port: 8080
+  verapdf:
+    enabled: true
+    image:
+      repository: validator-verapdf
+    replicaCount: 1
+    port: 8080
+  phase4:
+    enabled: true
+    image:
+      repository: validator-phase4
+    replicaCount: 1
+    port: 8090
+    sml:
+      mode: acceptance
+    existingSecret: invoicekit-peppol-ap-cert
+
+# Object-Lock-capable storage. For production the operator
+# typically disables this in-cluster MinIO and points
+# `.Values.archive.endpoint` at an AWS S3 bucket with Object
+# Lock + Compliance Mode enabled.
+archive:
+  enabled: true
+  image:
+    repository: minio/minio
+    tag: RELEASE.2025-04-22T22-12-26Z
+  storage:
+    size: 50Gi
+    storageClassName: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  endpoint: ""
+  existingSecret: invoicekit-archive
+
+# Shared labels stamped on every chart resource.
+commonLabels: {}

@@ -95,7 +95,9 @@ members = [
   "bridges/maxio",
   "bridges/chargebee",
   "bridges/recurly",
+  "crates/transmit-peppol-partner",
   "tools/pdf-visual-regression",
+  "tools/render-factur-x-acceptance",
 ]
 
 [workspace.package]

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
 [package]
 name = "invoicekit-replay"
 version.workspace = true
@@ -7,12 +10,18 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit workspace member: invoicekit-replay"
+description = "InvoiceKit replay-from-bundle: re-runs the recorded pipeline from a .invoicekit bundle and reports byte-equality or a structured diff against the originally-recorded outputs. Audit / debug feature."
 publish = false
 
 [lib]
 name = "invoicekit_replay"
 path = "src/lib.rs"
+
+[dependencies]
+invoicekit-evidence = { path = "../evidence", version = "0.0.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
 
 [lints]
 workspace = true

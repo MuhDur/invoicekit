@@ -1,0 +1,34 @@
+{{- $fullname := include "invoicekit.fullname" . -}}
+InvoiceKit {{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}".
+
+Verify the stack came up:
+
+  kubectl --namespace {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+Reach the managed API from inside the cluster at:
+
+  http://{{ $fullname }}-managed-api:{{ .Values.managedApi.service.port }}
+
+{{- if .Values.managedApi.ingress.enabled }}
+Or from outside via the configured ingress:
+
+  {{- range .Values.managedApi.ingress.hosts }}
+  http://{{ .host }}{{ (index .paths 0).path }}
+  {{- end }}
+{{- else }}
+Forward the managed API port for local probing:
+
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ $fullname }}-managed-api 8080:{{ .Values.managedApi.service.port }}
+{{- end }}
+
+Before you ship to production:
+
+  1. Replace the bundled `archive.minio` StatefulSet with a managed
+     S3 bucket that has Object Lock + Compliance Mode enabled.
+  2. Provision a Peppol AP P12 certificate and put it in the
+     secret named `.Values.validators.phase4.existingSecret`
+     (keys: `cert.p12`, `cert.pass`).
+  3. Replace the bundled `postgres` StatefulSet with a managed
+     PostgreSQL service (RDS / Cloud SQL / Azure Database).
+  4. Front the managed API with a TLS-terminating reverse proxy
+     (T-110 bindings/rest-shim or a cluster ingress controller).

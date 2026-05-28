@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+apiVersion: v2
+name: invoicekit
+description: |
+  InvoiceKit managed-stack Helm chart. Kubernetes counterpart
+  to deploy/docker-compose.yml. Ships every service the
+  T-1300 compose file does, behind a single `values.yaml`
+  contract.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/MuhDur/invoicekit
+sources:
+  - https://github.com/MuhDur/invoicekit
+maintainers:
+  - name: The InvoiceKit Authors
+    url: https://github.com/MuhDur/invoicekit
+keywords:
+  - invoicing
+  - peppol
+  - en16931
+  - factur-x
+  - signing
+  - audit

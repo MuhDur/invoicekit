@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+[package]
+name = "invoicekit-render-factur-x-acceptance"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "T-053 acceptance binary: render 30 Factur-X PDFs (5 per profile x 6 profiles) for the veraPDF gate in .github/workflows/pdfa3-verapdf.yml."
+publish = false
+
+# Binary-only crate. The bridge between the Typst-backed
+# render-pdf and the lopdf-backed render-pdf-postproc that the
+# release-pipeline veraPDF gate consumes. Pulled into the Typst
+# advisory waiver scope alongside invoicekit-render-pdf.
+[[bin]]
+name = "render-factur-x-acceptance"
+path = "src/main.rs"
+
+[dependencies]
+invoicekit-render-pdf = { path = "../../crates/render-pdf", version = "0.0.0" }
+invoicekit-render-pdf-postproc = { path = "../../crates/render-pdf-postproc", version = "0.0.0" }
+thiserror.workspace = true
+
+[lints]
+workspace = true

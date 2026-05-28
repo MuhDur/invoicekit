@@ -1,0 +1,86 @@
+{{/*
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2026 The InvoiceKit Authors
+
+  Validator sidecars. Renders one Deployment + Service per
+  enabled backend so each scales + restarts independently.
+*/}}
+
+{{- range $name, $cfg := .Values.validators }}
+{{- if $cfg.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "invoicekit.fullname" $ }}-validator-{{ $name }}
+  labels:
+    {{- include "invoicekit.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: validator-{{ $name }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ $cfg.port }}
+      targetPort: {{ $cfg.port }}
+      protocol: TCP
+      name: rpc
+  selector:
+    {{- include "invoicekit.selectorLabels" (merge (dict "component" (printf "validator-%s" $name)) $) | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "invoicekit.fullname" $ }}-validator-{{ $name }}
+  labels:
+    {{- include "invoicekit.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: validator-{{ $name }}
+spec:
+  replicas: {{ $cfg.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "invoicekit.selectorLabels" (merge (dict "component" (printf "validator-%s" $name)) $) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "invoicekit.selectorLabels" (merge (dict "component" (printf "validator-%s" $name)) $) | nindent 8 }}
+    spec:
+      {{- with $.Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: validator-{{ $name }}
+          image: {{ include "invoicekit.image" (merge (dict "image" $cfg.image) $) }}
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: {{ $cfg.port }}
+              name: rpc
+          {{- if eq $name "phase4" }}
+          env:
+            - name: INVOICEKIT_PHASE4_PORT
+              value: {{ $cfg.port | quote }}
+            - name: PEPPOL_AP_SML_MODE
+              value: {{ $cfg.sml.mode | quote }}
+            - name: PEPPOL_AP_CERT_P12
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $cfg.existingSecret }}
+                  key: cert.p12
+            - name: PEPPOL_AP_CERT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $cfg.existingSecret }}
+                  key: cert.pass
+          {{- end }}
+          readinessProbe:
+            {{- if eq $name "phase4" }}
+            tcpSocket:
+              port: rpc
+            {{- else }}
+            httpGet:
+              path: /health
+              port: rpc
+            {{- end }}
+            initialDelaySeconds: 15
+            periodSeconds: 30
+{{- end }}
+{{- end }}
