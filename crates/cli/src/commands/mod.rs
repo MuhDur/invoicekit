@@ -13,6 +13,7 @@ pub mod capabilities;
 pub mod codelist_update;
 pub mod diff;
 pub mod doctor;
+pub mod init;
 pub mod migrate_archive;
 pub mod pack;
 pub mod repl;
@@ -35,6 +36,7 @@ pub fn dispatch(subcommand: &str, argv: &[String]) -> Option<ExitCode> {
         "codelist-update" => codelist_update::run(argv),
         "diff" => diff::run(argv),
         "doctor" => doctor::run(argv),
+        "init" => init::run(argv),
         "migrate-archive" => migrate_archive::run(argv),
         "pack" => pack::run(argv),
         "replay" => replay::run(argv),
