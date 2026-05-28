@@ -2648,6 +2648,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoicekit-transmit-peppol-native-as4-receive"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-transmit-peppol-native-as4",
+ "pollster",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "invoicekit-validate"
 version = "0.0.0"
 dependencies = [
