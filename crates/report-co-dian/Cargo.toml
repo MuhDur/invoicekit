@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
 [package]
 name = "invoicekit-report-co-dian"
 version.workspace = true
@@ -7,12 +10,17 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit workspace member: invoicekit-report-co-dian"
+description = "Colombia DIAN e-invoicing clearance adapter. Adds DianDocumentKind + CUFE (Código Único de Facturación Electrónica) envelope + NIT validation helpers. The live DIAN SOAP integration lands in a follow-up report-co-dian-http crate."
 publish = false
 
 [lib]
 name = "invoicekit_report_co_dian"
 path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
 
 [lints]
 workspace = true
