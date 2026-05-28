@@ -11,7 +11,18 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NamedNodeMap;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
 
 /**
  * 7psv reflection wrapper around the KoSIT validator
@@ -26,9 +37,8 @@ import java.util.UUID;
  * plus the {@code scenarios.xml} file) is NOT bundled in the
  * validator-common JAR; it lives outside the classpath because
  * KoSIT publishes it as a separate ~10 MB ZIP per ruleset
- * (e.g. {@code validator-configuration-xrechnung-2024-1}). The
- * Dockerfile for validator-kosit downloads the bundle at build
- * time and exposes its scenarios.xml path via the
+ * (e.g. {@code validator-configuration-xrechnung-2024-1}).
+ * Runtime deployments expose the selected scenarios.xml path via the
  * {@code INVOICEKIT_VALIDATOR_KOSIT_SCENARIOS} environment
  * variable. Without that env var KoSIT cannot run domain rule
  * checks — this wrapper returns a typed configuration-missing
@@ -42,6 +52,8 @@ import java.util.UUID;
  */
 final class KositReport {
     static final String SCENARIOS_ENV = "INVOICEKIT_VALIDATOR_KOSIT_SCENARIOS";
+    private static final Pattern BR_RULE_ID =
+        Pattern.compile("\\bBR(?:-[A-Z]{2,})?-\\d+[A-Z]?\\b");
 
     private KositReport() {
     }
@@ -105,16 +117,16 @@ final class KositReport {
             .invoke(check, input);
 
         ArrayNode findings = mapper.createArrayNode();
+        Object accepted = result.getClass().getMethod("isAcceptable").invoke(result);
+        boolean valid = accepted instanceof Boolean ? (Boolean) accepted : true;
         @SuppressWarnings("unchecked")
         Iterable<Object> reports = (Iterable<Object>) result.getClass()
             .getMethod("getReports").invoke(result);
         if (reports != null) {
             for (Object report : reports) {
-                walkReport(report, findings, profile, traceId, mapper);
+                walkReport(report, findings, profile, traceId, mapper, !valid);
             }
         }
-        Object accepted = result.getClass().getMethod("isAcceptable").invoke(result);
-        boolean valid = accepted instanceof Boolean ? (Boolean) accepted : findings.size() == 0;
         String rootElement = parseRoot(xml);
         // Don't shadow the reflection-only outcome with a parse
         // failure — the parse here is best-effort metadata.
@@ -126,26 +138,217 @@ final class KositReport {
         ArrayNode findings,
         String profile,
         String traceId,
-        ObjectMapper mapper
+        ObjectMapper mapper,
+        boolean summaryFallback
     ) throws Throwable {
         Class<?> reportClass = report.getClass();
         Object resultDoc = reportClass.getMethod("getReportDocument").invoke(report);
-        if (resultDoc == null) return;
-        // The KoSIT scenarios produce a structured report XML; the
-        // exact element layout is per-scenarios-bundle, so we scan
-        // for any <messages>/<assertion>-style element whose
-        // attributes look like a rule outcome.
+        if (resultDoc == null) {
+            if (summaryFallback) {
+                findings.add(reportSummaryFinding(mapper, profile, traceId,
+                    "kosit-report-document-unavailable"));
+            }
+            return;
+        }
         try {
-            String docXml = String.valueOf(resultDoc.getClass()
-                .getMethod("getDocumentElement").invoke(resultDoc));
-            findings.add(reportSummaryFinding(mapper, profile, traceId, docXml));
+            Document document = coerceReportDocument(resultDoc);
+            int before = findings.size();
+            if (document != null && document.getDocumentElement() != null) {
+                appendRuleFindings(document.getDocumentElement(), findings,
+                    profile, traceId, mapper, new HashSet<>());
+            }
+            if (summaryFallback && findings.size() == before) {
+                findings.add(reportSummaryFinding(mapper, profile, traceId,
+                    document == null || document.getDocumentElement() == null
+                        ? "kosit-report-document-unavailable"
+                        : document.getDocumentElement().getNodeName()));
+            }
         } catch (Throwable ex) {
-            findings.add(reportSummaryFinding(mapper, profile, traceId,
-                "kosit-report-document-unavailable"));
+            if (summaryFallback) {
+                findings.add(reportSummaryFinding(mapper, profile, traceId,
+                    "kosit-report-document-unavailable"));
+            }
         }
     }
 
+    static ArrayNode reportFindingsFromXmlForTest(
+        String reportXml,
+        String profile,
+        String traceId,
+        ObjectMapper mapper
+    ) {
+        ArrayNode findings = mapper.createArrayNode();
+        Document document = parseDocument(reportXml);
+        if (document != null && document.getDocumentElement() != null) {
+            appendRuleFindings(document.getDocumentElement(), findings,
+                profile, traceId, mapper, new HashSet<>());
+        }
+        return findings;
+    }
+
+    private static Document coerceReportDocument(Object resultDoc) throws Exception {
+        if (resultDoc instanceof Document document) return document;
+        if (resultDoc instanceof Element element) return element.getOwnerDocument();
+        Object root = resultDoc.getClass().getMethod("getDocumentElement").invoke(resultDoc);
+        if (root instanceof Document document) return document;
+        if (root instanceof Element element) return element.getOwnerDocument();
+        return null;
+    }
+
+    private static void appendRuleFindings(
+        Element element,
+        ArrayNode findings,
+        String profile,
+        String traceId,
+        ObjectMapper mapper,
+        Set<String> seen
+    ) {
+        if (isRuleFindingElement(element)) {
+            String ruleId = findRuleId(element);
+            if (ruleId != null) {
+                String location = firstAttribute(element, "location", "path", "xpath");
+                String message = normalizeWhitespace(element.getTextContent());
+                String dedupe = ruleId + "\u0000" + nullToEmpty(location) + "\u0000" + message;
+                if (seen.add(dedupe)) {
+                    findings.add(ruleFinding(mapper, profile, traceId, element,
+                        ruleId, location, message));
+                }
+            }
+        }
+        NodeList children = element.getChildNodes();
+        for (int index = 0; index < children.getLength(); index++) {
+            Node child = children.item(index);
+            if (child instanceof Element childElement) {
+                appendRuleFindings(childElement, findings, profile, traceId, mapper, seen);
+            }
+        }
+    }
+
+    private static boolean isRuleFindingElement(Element element) {
+        String name = elementName(element).toLowerCase(Locale.ROOT);
+        if (name.contains("failed-assert")
+            || name.contains("successful-report")
+            || name.contains("error")
+            || name.contains("warning")
+            || name.contains("violation")) {
+            return true;
+        }
+        String ruleAttribute = firstAttribute(element, "id", "ruleId", "ruleID", "rule-id");
+        if (name.contains("assertion") && firstRuleId(ruleAttribute) != null) return true;
+        String severity = firstAttribute(element, "flag", "severity", "level", "type");
+        if (severity == null) return false;
+        return looksLikeViolationSeverity(severity);
+    }
+
+    private static ObjectNode ruleFinding(
+        ObjectMapper mapper,
+        String profile,
+        String traceId,
+        Element element,
+        String ruleId,
+        String location,
+        String message
+    ) {
+        ObjectNode finding = mapper.createObjectNode();
+        finding.put("rule_id", ruleId);
+        finding.put("severity",
+            normalizeSeverity(firstAttribute(element, "flag", "severity", "level")));
+        if (message != null && !message.isBlank()) {
+            finding.put("message", message);
+        }
+        ObjectNode term = finding.putObject("term");
+        if (ruleId.startsWith("BR-CO-")) {
+            term.put("kind", "business_term");
+        } else {
+            term.put("kind", "business_rule");
+        }
+        term.put("code", ruleId);
+        ObjectNode loc = finding.putObject("location");
+        loc.put("kind", "x_path");
+        loc.put("expression", location == null || location.isBlank() ? "/" : location);
+        ObjectNode citation = finding.putObject("citation");
+        citation.put("source", "KoSIT validator 1.6.2");
+        citation.put("section", ruleId);
+        ObjectNode fix = finding.putObject("suggested_fix");
+        fix.put("summary",
+            "Adjust the invoice to satisfy " + ruleId + " in the KoSIT scenarios.");
+        ObjectNode trace = finding.putObject("trace");
+        trace.put("backend", "jvm:kosit");
+        trace.put("trace_id", traceId == null ? UUID.randomUUID().toString() : traceId);
+        ObjectNode details = trace.putObject("details");
+        details.put("profile", profile);
+        details.put("report_element", elementName(element));
+        String flag = firstAttribute(element, "flag", "severity", "level");
+        if (flag != null && !flag.isBlank()) {
+            details.put("flag", flag);
+        }
+        return finding;
+    }
+
+    private static String findRuleId(Element element) {
+        NamedNodeMap attrs = element.getAttributes();
+        for (int index = 0; index < attrs.getLength(); index++) {
+            String value = attrs.item(index).getNodeValue();
+            String ruleId = firstRuleId(value);
+            if (ruleId != null) return ruleId;
+        }
+        return firstRuleId(element.getTextContent());
+    }
+
+    private static String firstRuleId(String value) {
+        if (value == null) return null;
+        Matcher matcher = BR_RULE_ID.matcher(value);
+        return matcher.find() ? matcher.group() : null;
+    }
+
+    private static String firstAttribute(Element element, String... names) {
+        for (String name : names) {
+            String value = element.getAttribute(name);
+            if (value != null && !value.isBlank()) return value;
+            value = element.getAttributeNS(null, name);
+            if (value != null && !value.isBlank()) return value;
+        }
+        return null;
+    }
+
+    private static String normalizeSeverity(String severity) {
+        if (severity == null || severity.isBlank()) return "violation";
+        String normalized = severity.toLowerCase(Locale.ROOT);
+        if (normalized.contains("fatal")) return "fatal";
+        if (normalized.contains("warn")) return "warning";
+        if (normalized.contains("info")) return "info";
+        return "violation";
+    }
+
+    private static boolean looksLikeViolationSeverity(String severity) {
+        String normalized = severity.toLowerCase(Locale.ROOT);
+        return normalized.contains("fatal")
+            || normalized.contains("error")
+            || normalized.contains("warn")
+            || normalized.contains("violation");
+    }
+
+    private static String elementName(Element element) {
+        String local = element.getLocalName();
+        return local == null || local.isBlank() ? element.getNodeName() : local;
+    }
+
+    private static String normalizeWhitespace(String value) {
+        if (value == null) return "";
+        return value.replaceAll("\\s+", " ").trim();
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
     private static String parseRoot(String xml) {
+        Document document = parseDocument(xml);
+        return document == null || document.getDocumentElement() == null
+            ? null : document.getDocumentElement().getNodeName();
+    }
+
+    private static Document parseDocument(String xml) {
         try {
             javax.xml.parsers.DocumentBuilderFactory f =
                 javax.xml.parsers.DocumentBuilderFactory.newInstance();
@@ -154,11 +357,11 @@ final class KositReport {
             f.setExpandEntityReferences(false);
             f.setFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING, true);
             f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            f.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            f.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
             return f.newDocumentBuilder()
-                .parse(new org.xml.sax.InputSource(new ByteArrayInputStream(
-                    xml.getBytes(StandardCharsets.UTF_8))))
-                .getDocumentElement()
-                .getNodeName();
+                .parse(new InputSource(new ByteArrayInputStream(
+                    xml.getBytes(StandardCharsets.UTF_8))));
         } catch (Throwable ex) {
             return null;
         }
@@ -170,10 +373,6 @@ final class KositReport {
         String traceId,
         String summary
     ) {
-        // The structured KoSIT report is forwarded verbatim as a
-        // single non-fatal info finding under a stable rule id;
-        // a future bead will parse the per-scenario assertions
-        // (BR-* rules) once we pin the scenarios bundle version.
         ObjectNode finding = mapper.createObjectNode();
         finding.put("rule_id", "KOSIT-REPORT-SUMMARY");
         finding.put("severity", "info");
