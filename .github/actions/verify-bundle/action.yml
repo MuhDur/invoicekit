@@ -95,16 +95,21 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        # Resolve relative to the caller's repo so users can pass
-        # workspace-relative paths like `dist/release.ikb`.
-        cd "${{ github.workspace }}/caller-repo"
         BUNDLE="${{ inputs.bundle }}"
-        if [[ ! -f "$BUNDLE" ]]; then
+        if [[ "$BUNDLE" = /* ]]; then
+          CANDIDATE="$BUNDLE"
+        elif [[ -f "${{ github.workspace }}/$BUNDLE" ]]; then
+          CANDIDATE="${{ github.workspace }}/$BUNDLE"
+        else
+          CANDIDATE="${{ github.workspace }}/caller-repo/$BUNDLE"
+        fi
+        if [[ ! -f "$CANDIDATE" ]]; then
           echo "verify-bundle: bundle not found: $BUNDLE" >&2
-          ls -la "$(dirname "$BUNDLE" 2>/dev/null || echo .)" >&2 || true
+          echo "verify-bundle: checked $CANDIDATE" >&2
+          ls -la "$(dirname "$CANDIDATE" 2>/dev/null || echo .)" >&2 || true
           exit 2
         fi
-        ABS=$(readlink -f "$BUNDLE")
+        ABS=$(readlink -f "$CANDIDATE")
         echo "bundle=$ABS" >> "$GITHUB_OUTPUT"
         echo "verify-bundle: resolved bundle to $ABS"
 
