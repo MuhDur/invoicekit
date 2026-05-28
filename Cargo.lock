@@ -2442,6 +2442,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoicekit-mcp-server"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "invoicekit-migration"
 version = "0.0.0"
 dependencies = [
