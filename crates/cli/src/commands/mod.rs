@@ -18,3 +18,4 @@ pub mod show;
 pub mod timestamp;
 pub mod unpack;
 pub mod verify;
+pub mod version;

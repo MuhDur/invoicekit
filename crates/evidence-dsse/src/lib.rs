@@ -38,9 +38,12 @@
 //! [`verify_envelope`], [`ManifestSigner`], [`MockSigner`],
 //! [`MANIFEST_PAYLOAD_TYPE`], [`MANIFEST_SIGNATURE_ARTEFACT_ID`].
 
+use std::io::{Cursor, Read};
+
 use base64::Engine;
 use invoicekit_evidence::EvidenceBundle;
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 use thiserror::Error;
 
 /// Payload type registered for InvoiceKit manifests inside a DSSE envelope.
@@ -89,10 +92,20 @@ impl DsseEnvelope {
     /// Returns [`DsseError::BadBase64`] when the payload field
     /// isn't valid standard base64.
     pub fn decoded_payload(&self) -> Result<Vec<u8>, DsseError> {
-        base64::engine::general_purpose::STANDARD
-            .decode(self.payload.as_bytes())
-            .map_err(|e| DsseError::BadBase64(e.to_string()))
+        read_standard_base64(self.payload.as_bytes())
     }
+}
+
+fn read_standard_base64(bytes: &[u8]) -> Result<Vec<u8>, DsseError> {
+    let mut reader = base64::read::DecoderReader::new(
+        Cursor::new(bytes),
+        &base64::engine::general_purpose::STANDARD,
+    );
+    let mut out = Vec::new();
+    reader
+        .read_to_end(&mut out)
+        .map_err(|e| DsseError::BadBase64(e.to_string()))?;
+    Ok(out)
 }
 
 /// Errors raised by this crate.
@@ -305,25 +318,23 @@ pub fn verify_envelope(
     if envelope.signatures.is_empty() {
         return Err(DsseError::NoSignatures);
     }
-    if envelope.payload_type != expected_payload_type {
+    if !envelope.payload_type.eq(expected_payload_type) {
         return Err(DsseError::PayloadTypeDrift {
             expected: expected_payload_type.to_owned(),
             got: envelope.payload_type.clone(),
         });
     }
     let observed_payload = envelope.decoded_payload()?;
-    if observed_payload != expected_payload {
+    if !bool::from(observed_payload.as_slice().ct_eq(expected_payload)) {
         return Err(DsseError::PayloadDrift);
     }
     let keyid = signer.keyid();
     let signature = envelope
         .signatures
         .iter()
-        .find(|s| s.keyid == keyid)
+        .find(|s| s.keyid.eq(keyid))
         .ok_or_else(|| DsseError::UnknownKey(keyid.to_owned()))?;
-    let sig_bytes = base64::engine::general_purpose::STANDARD
-        .decode(signature.sig.as_bytes())
-        .map_err(|e| DsseError::BadBase64(e.to_string()))?;
+    let sig_bytes = read_standard_base64(signature.sig.as_bytes())?;
     let pae_bytes = pae(expected_payload_type, expected_payload);
     signer.verify_pae(&pae_bytes, &sig_bytes)
 }
@@ -370,7 +381,7 @@ impl ManifestSigner for MockSigner {
     fn verify_pae(&self, pae_bytes: &[u8], sig_bytes: &[u8]) -> Result<(), DsseError> {
         let mut expected = b"mock-dsse:".to_vec();
         expected.extend_from_slice(&mock_digest(pae_bytes));
-        if expected == sig_bytes {
+        if bool::from(expected[..].ct_eq(sig_bytes)) {
             Ok(())
         } else {
             Err(DsseError::BadSignature(self.keyid.clone()))
@@ -523,13 +534,11 @@ mod tests {
         let signer = MockSigner::default();
         let env = wrap(&signer, MANIFEST_PAYLOAD_TYPE, b"x").unwrap();
         let err = verify_envelope(&env, "wrong/type", b"x", &signer).unwrap_err();
-        match err {
-            DsseError::PayloadTypeDrift { expected, got } => {
-                assert_eq!(expected, "wrong/type");
-                assert_eq!(got, MANIFEST_PAYLOAD_TYPE);
-            }
-            other => panic!("unexpected error: {other}"),
-        }
+        assert!(matches!(
+            err,
+            DsseError::PayloadTypeDrift { ref expected, ref got }
+                if expected == "wrong/type" && got == MANIFEST_PAYLOAD_TYPE
+        ));
     }
 
     #[test]
@@ -550,10 +559,7 @@ mod tests {
         let bob = MockSigner::new("bob");
         let env = wrap(&alice, MANIFEST_PAYLOAD_TYPE, b"x").unwrap();
         let err = verify_envelope(&env, MANIFEST_PAYLOAD_TYPE, b"x", &bob).unwrap_err();
-        match err {
-            DsseError::UnknownKey(k) => assert_eq!(k, "bob"),
-            other => panic!("unexpected error: {other}"),
-        }
+        assert!(matches!(err, DsseError::UnknownKey(ref k) if k == "bob"));
     }
 
     #[test]
@@ -561,11 +567,10 @@ mod tests {
         let signer = MockSigner::default();
         let mut env = wrap(&signer, MANIFEST_PAYLOAD_TYPE, b"x").unwrap();
         // Flip a byte in the signature.
-        let mut bad_sig = base64::engine::general_purpose::STANDARD
-            .decode(env.signatures[0].sig.as_bytes())
-            .unwrap();
+        let first_signature = env.signatures.first_mut().unwrap();
+        let mut bad_sig = read_standard_base64(first_signature.sig.as_bytes()).unwrap();
         bad_sig[5] ^= 0xff;
-        env.signatures[0].sig = base64::engine::general_purpose::STANDARD.encode(&bad_sig);
+        first_signature.sig = base64::engine::general_purpose::STANDARD.encode(&bad_sig);
         let err = verify_envelope(&env, MANIFEST_PAYLOAD_TYPE, b"x", &signer).unwrap_err();
         assert!(matches!(err, DsseError::BadSignature(_)));
     }

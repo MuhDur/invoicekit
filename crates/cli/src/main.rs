@@ -9,7 +9,7 @@
 use std::env;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: invoicekit <command> [<args>...]\n\nCommands:\n  capabilities     resolve accepted e-invoice profiles for a route/scenario/date\n  codelist-update  refresh a code-list manifest from a locally-staged upstream payload\n  diff             compare two .ikb evidence bundles artefact-by-artefact\n  doctor           report InvoiceKit environment diagnostics (toolchain, workspace, sidecars)\n  migrate-archive  migrate a directory of invoice JSON archives between schema versions\n  pack             pack a directory of artefacts into a deterministic .ikb evidence bundle\n  unpack           extract every artefact from a .ikb evidence bundle into a directory\n  show             print a human-readable manifest summary for a .ikb evidence bundle\n  timestamp        request an RFC 3161 timestamp for a bundle's manifest (mock TSA today)\n  verify           verify an evidence bundle (.ikb) and report per-check outcomes\n  replay           replay an evidence bundle through the identity replayer and report drift\n\nRun `invoicekit <command> --help` for command-specific flags.\n";
+const USAGE: &str = "usage: invoicekit <command> [<args>...]\n\nCommands:\n  capabilities     resolve accepted e-invoice profiles for a route/scenario/date\n  codelist-update  refresh a code-list manifest from a locally-staged upstream payload\n  diff             compare two .ikb evidence bundles artefact-by-artefact\n  doctor           report InvoiceKit environment diagnostics (toolchain, workspace, sidecars)\n  migrate-archive  migrate a directory of invoice JSON archives between schema versions\n  pack             pack a directory of artefacts into a deterministic .ikb evidence bundle\n  unpack           extract every artefact from a .ikb evidence bundle into a directory\n  show             print a human-readable manifest summary for a .ikb evidence bundle\n  timestamp        request an RFC 3161 timestamp for a bundle's manifest (mock TSA today)\n  verify           verify an evidence bundle (.ikb) and report per-check outcomes\n  replay           replay an evidence bundle through the identity replayer and report drift\n  version          print the binary's version + build profile (--json for structured)\n\nRun `invoicekit <command> --help` for command-specific flags.\n";
 
 fn main() -> ExitCode {
     let _ = invoicekit_cli::crate_name();
@@ -35,6 +35,7 @@ fn main() -> ExitCode {
         "timestamp" => invoicekit_cli::commands::timestamp::run(&rest),
         "verify" => invoicekit_cli::commands::verify::run(&rest),
         "replay" => invoicekit_cli::commands::replay::run(&rest),
+        "version" | "--version" | "-V" => invoicekit_cli::commands::version::run(&rest),
         unknown => {
             eprintln!("invoicekit: unknown subcommand {unknown:?}");
             eprintln!();
