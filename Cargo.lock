@@ -2758,6 +2758,11 @@ version = "0.0.0"
 [[package]]
 name = "invoicekit-report-kr-nts"
 version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-report-mx-cfdi"
