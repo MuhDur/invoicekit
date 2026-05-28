@@ -91,9 +91,34 @@ impl Scenario {
     }
 }
 
-/// Top-level capability matrix file format.
-///
-/// Mirrors `schemas/invoicekit-capabilities-v1.json`.
+/// Runtime environment for a capabilities query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Runtime {
+    /// Native server/runtime binding: Rust binary, Node native, Python, Java,
+    /// .NET, Go, or the REST sidecar.
+    Native,
+    /// Browser or edge WebAssembly artifact.
+    Wasm,
+}
+
+impl Runtime {
+    fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "native" => Some(Self::Native),
+            "wasm" | "browser" | "edge" => Some(Self::Wasm),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Native => "native",
+            Self::Wasm => "wasm",
+        }
+    }
+}
+
 /// Top-level capability matrix file format.
 ///
 /// Mirrors `schemas/invoicekit-capabilities-v1.json`.
@@ -137,7 +162,69 @@ pub struct AcceptedProfile {
     pub format: String,
     /// Delivery channel (`peppol`, `email`, `portal`, `as4-direct`, `manual`).
     pub transport: String,
+    /// Runtime capability flags for serialization and validation.
+    pub capabilities: ProfileRuntimeCapabilities,
 }
+
+/// Capability availability for one operation.
+#[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityLevel {
+    /// Operation can run in-process in the selected runtime.
+    Available,
+    /// Operation needs an external validator, service, CLI, or partner backend.
+    RequiresExternalBackend,
+    /// Operation is not available in a browser/edge WebAssembly artifact.
+    UnavailableInWasm,
+}
+
+/// Runtime capability flags attached to each accepted profile.
+#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileRuntimeCapabilities {
+    /// Whether InvoiceKit can serialize this profile.
+    pub serialize: CapabilityLevel,
+    /// Whether InvoiceKit can perform local non-reference validation.
+    pub local_validate: CapabilityLevel,
+    /// Whether regulator/reference-grade validation is available in-process.
+    pub reference_validate: CapabilityLevel,
+    /// Service backends required for reference validation, such as `jvm:kosit`.
+    pub requires_service: Vec<String>,
+    /// CLI tools required for reference validation, such as `verapdf`.
+    pub requires_cli: Vec<String>,
+    /// Operation names that cannot run in-process for WASM callers. This must
+    /// match the non-`available` operation levels above.
+    pub unavailable_in_wasm: Vec<String>,
+}
+
+/// Typed diagnostic returned when a selected runtime needs an external backend.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+pub struct RequiresExternalBackend {
+    /// Runtime requested by the caller.
+    pub runtime: Runtime,
+    /// Profile that triggered the requirement.
+    pub profile_id: String,
+    /// Operation that cannot run in-process.
+    pub capability: String,
+    /// Required backend identifier.
+    pub backend: String,
+    /// User-facing remediation.
+    pub remediation: String,
+}
+
+impl std::fmt::Display for RequiresExternalBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} {} requires external backend {} for {}",
+            self.runtime.as_str(),
+            self.profile_id,
+            self.backend,
+            self.capability
+        )
+    }
+}
+
+impl std::error::Error for RequiresExternalBackend {}
 
 /// Provenance of a capability row.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -164,6 +251,8 @@ pub struct Query {
     pub scenario: Scenario,
     /// Query date in `YYYY-MM-DD` form.
     pub date: IsoDate,
+    /// Runtime the caller wants to run in.
+    pub runtime: Runtime,
 }
 
 /// High-level outcome of a [`resolve`] call.
@@ -193,6 +282,12 @@ pub struct MatchedEntry {
     /// How many days past the staleness threshold the source data is.
     /// Zero or negative when fresh.
     pub stale_for_days: i64,
+    /// Runtime requested for this match.
+    pub runtime: Runtime,
+    /// External backend diagnostics that must be surfaced to callers.
+    pub requires_external_backend: Vec<RequiresExternalBackend>,
+    /// Operations unavailable in the selected runtime.
+    pub unavailable_in_runtime: Vec<String>,
 }
 
 /// Per-match freshness classification.
@@ -238,6 +333,8 @@ pub enum CapabilityError {
     BadDate(String),
     /// Scenario did not match `B2B|B2C|B2G`.
     BadScenario(String),
+    /// Runtime did not match `native|wasm`.
+    BadRuntime(String),
     /// Matrix JSON failed to parse.
     MatrixParse(String),
     /// Matrix declared a `schema_version` this binary does not understand.
@@ -270,6 +367,9 @@ impl std::fmt::Display for CapabilityError {
             }
             Self::BadScenario(s) => {
                 write!(f, "invalid scenario {s:?} (expected B2B|B2C|B2G)")
+            }
+            Self::BadRuntime(s) => {
+                write!(f, "invalid runtime {s:?} (expected native|wasm)")
             }
             Self::MatrixParse(m) => write!(f, "failed to parse capability matrix: {m}"),
             Self::MatrixSchemaVersionMismatch { expected, found } => {
@@ -306,22 +406,12 @@ fn parse_iso_date(s: &str) -> Result<IsoDate, CapabilityError> {
     if s.len() != 10 {
         return Err(bad());
     }
-    let bytes = s.as_bytes();
-    if bytes[4] != b'-' || bytes[7] != b'-' {
+    if s.get(4..5) != Some("-") || s.get(7..8) != Some("-") {
         return Err(bad());
     }
-    let year: u16 = std::str::from_utf8(&bytes[0..4])
-        .map_err(|_| bad())?
-        .parse()
-        .map_err(|_| bad())?;
-    let month: u8 = std::str::from_utf8(&bytes[5..7])
-        .map_err(|_| bad())?
-        .parse()
-        .map_err(|_| bad())?;
-    let day: u8 = std::str::from_utf8(&bytes[8..10])
-        .map_err(|_| bad())?
-        .parse()
-        .map_err(|_| bad())?;
+    let year: u16 = s.get(0..4).ok_or_else(bad)?.parse().map_err(|_| bad())?;
+    let month: u8 = s.get(5..7).ok_or_else(bad)?.parse().map_err(|_| bad())?;
+    let day: u8 = s.get(8..10).ok_or_else(bad)?.parse().map_err(|_| bad())?;
     if !(1900..=2300).contains(&year) || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return Err(bad());
     }
@@ -346,7 +436,33 @@ pub fn parse_matrix(raw: &str) -> Result<CapabilityMatrix, CapabilityError> {
             found: m.schema_version,
         });
     }
+    validate_matrix_semantics(&m)?;
     Ok(m)
+}
+
+fn validate_matrix_semantics(matrix: &CapabilityMatrix) -> Result<(), CapabilityError> {
+    for entry in &matrix.entries {
+        for profile in &entry.profiles {
+            let expected = wasm_unavailable_operation_names(&profile.capabilities);
+            let actual = normalized_wasm_unavailable_list(profile)?;
+            if actual != expected {
+                return Err(CapabilityError::MatrixParse(format!(
+                    "profile {} capabilities.unavailable_in_wasm {:?} must match non-available WASM operations {:?}",
+                    profile.id, profile.capabilities.unavailable_in_wasm, expected
+                )));
+            }
+            if requires_external_backend(&profile.capabilities)
+                && profile.capabilities.requires_service.is_empty()
+                && profile.capabilities.requires_cli.is_empty()
+            {
+                return Err(CapabilityError::MatrixParse(format!(
+                    "profile {} marks an operation as requires_external_backend but declares no requires_service or requires_cli backend",
+                    profile.id
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Load the bundled capability matrix shipped with this binary.
@@ -378,10 +494,9 @@ fn split_date(s: &str) -> Option<(u16, u8, u8)> {
     if s.len() < 10 {
         return None;
     }
-    let bytes = s.as_bytes();
-    let y: u16 = std::str::from_utf8(&bytes[0..4]).ok()?.parse().ok()?;
-    let m: u8 = std::str::from_utf8(&bytes[5..7]).ok()?.parse().ok()?;
-    let d: u8 = std::str::from_utf8(&bytes[8..10]).ok()?.parse().ok()?;
+    let y: u16 = s.get(0..4)?.parse().ok()?;
+    let m: u8 = s.get(5..7)?.parse().ok()?;
+    let d: u8 = s.get(8..10)?.parse().ok()?;
     Some((y, m, d))
 }
 
@@ -405,6 +520,7 @@ pub fn resolve(matrix: &CapabilityMatrix, query: &Query, today: &str) -> Resolut
             exact,
             matrix.stale_after_days,
             today,
+            query.runtime,
             &mut envelope.warnings,
         );
         envelope.matched = entries;
@@ -424,6 +540,7 @@ pub fn resolve(matrix: &CapabilityMatrix, query: &Query, today: &str) -> Resolut
                 downgraded,
                 matrix.stale_after_days,
                 today,
+                query.runtime,
                 &mut envelope.warnings,
             );
             envelope.matched = entries;
@@ -463,6 +580,7 @@ fn attach_freshness(
     raw: Vec<CapabilityEntry>,
     stale_after_days: u32,
     today: &str,
+    runtime: Runtime,
     warnings: &mut Vec<String>,
 ) -> (Vec<MatchedEntry>, bool) {
     let mut any_stale = false;
@@ -482,6 +600,8 @@ fn attach_freshness(
                 ));
             }
             MatchedEntry {
+                requires_external_backend: external_backend_requirements(&e, runtime),
+                unavailable_in_runtime: unavailable_operations(&e, runtime),
                 entry: e,
                 freshness: if fresh {
                     Freshness::Fresh
@@ -489,10 +609,162 @@ fn attach_freshness(
                     Freshness::Stale
                 },
                 stale_for_days: stale_for.max(0),
+                runtime,
             }
         })
         .collect();
     (entries, any_stale)
+}
+
+fn external_backend_requirements(
+    entry: &CapabilityEntry,
+    runtime: Runtime,
+) -> Vec<RequiresExternalBackend> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for profile in &entry.profiles {
+        append_requirement_for(
+            &mut out,
+            &mut seen,
+            profile,
+            runtime,
+            "serialize",
+            profile.capabilities.serialize,
+        );
+        append_requirement_for(
+            &mut out,
+            &mut seen,
+            profile,
+            runtime,
+            "local_validate",
+            profile.capabilities.local_validate,
+        );
+        append_requirement_for(
+            &mut out,
+            &mut seen,
+            profile,
+            runtime,
+            "reference_validate",
+            profile.capabilities.reference_validate,
+        );
+    }
+    out
+}
+
+fn append_requirement_for(
+    out: &mut Vec<RequiresExternalBackend>,
+    seen: &mut std::collections::BTreeSet<(String, String, String)>,
+    profile: &AcceptedProfile,
+    runtime: Runtime,
+    capability: &str,
+    level: CapabilityLevel,
+) {
+    if level != CapabilityLevel::RequiresExternalBackend {
+        return;
+    }
+    let mut backends: Vec<&str> = profile
+        .capabilities
+        .requires_service
+        .iter()
+        .map(String::as_str)
+        .collect();
+    backends.extend(profile.capabilities.requires_cli.iter().map(String::as_str));
+    if backends.is_empty() {
+        backends.push("external-validator");
+    }
+    for backend in backends {
+        let key = (
+            profile.id.clone(),
+            capability.to_owned(),
+            backend.to_owned(),
+        );
+        if !seen.insert(key) {
+            continue;
+        }
+        out.push(RequiresExternalBackend {
+            runtime,
+            profile_id: profile.id.clone(),
+            capability: capability.to_owned(),
+            backend: backend.to_owned(),
+            remediation: remediation(runtime, backend),
+        });
+    }
+}
+
+fn unavailable_operations(entry: &CapabilityEntry, runtime: Runtime) -> Vec<String> {
+    if runtime != Runtime::Wasm {
+        return Vec::new();
+    }
+    let mut unavailable = Vec::new();
+    for profile in &entry.profiles {
+        for capability in wasm_unavailable_operation_names(&profile.capabilities) {
+            let label = format!("{}:{capability}", profile.id);
+            if !unavailable.contains(&label) {
+                unavailable.push(label);
+            }
+        }
+    }
+    unavailable
+}
+
+fn requires_external_backend(capabilities: &ProfileRuntimeCapabilities) -> bool {
+    capabilities.serialize == CapabilityLevel::RequiresExternalBackend
+        || capabilities.local_validate == CapabilityLevel::RequiresExternalBackend
+        || capabilities.reference_validate == CapabilityLevel::RequiresExternalBackend
+}
+
+fn wasm_unavailable_operation_names(
+    capabilities: &ProfileRuntimeCapabilities,
+) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    if capabilities.serialize != CapabilityLevel::Available {
+        out.push("serialize");
+    }
+    if capabilities.local_validate != CapabilityLevel::Available {
+        out.push("local_validate");
+    }
+    if capabilities.reference_validate != CapabilityLevel::Available {
+        out.push("reference_validate");
+    }
+    out
+}
+
+fn normalized_wasm_unavailable_list(
+    profile: &AcceptedProfile,
+) -> Result<Vec<&'static str>, CapabilityError> {
+    let mut seen = std::collections::BTreeSet::new();
+    for operation in &profile.capabilities.unavailable_in_wasm {
+        let known = match operation.as_str() {
+            "serialize" => "serialize",
+            "local_validate" => "local_validate",
+            "reference_validate" => "reference_validate",
+            other => {
+                return Err(CapabilityError::MatrixParse(format!(
+                "profile {} capabilities.unavailable_in_wasm contains unknown operation {other:?}",
+                profile.id
+            )))
+            }
+        };
+        seen.insert(known);
+    }
+    let mut out = Vec::new();
+    for operation in ["serialize", "local_validate", "reference_validate"] {
+        if seen.contains(operation) {
+            out.push(operation);
+        }
+    }
+    Ok(out)
+}
+
+fn remediation(runtime: Runtime, backend: &str) -> String {
+    match runtime {
+        Runtime::Native => {
+            format!("start or configure `{backend}`; no local fallback is used for reference validation")
+        }
+        Runtime::Wasm => {
+            format!("route this operation to a server-assisted validator with `{backend}`; WebAssembly never silently downgrades to local validation")
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -507,6 +779,7 @@ struct CliArgs {
     to: Country,
     date: IsoDate,
     scenario: Scenario,
+    runtime: Runtime,
     format: OutputFormat,
     matrix_path: Option<PathBuf>,
     today: Option<String>,
@@ -517,49 +790,54 @@ fn parse_argv(argv: &[String]) -> Result<CliArgs, CapabilityError> {
     let mut to: Option<String> = None;
     let mut date: Option<String> = None;
     let mut scenario: Option<String> = None;
+    let mut runtime = Runtime::Native;
     let mut format = OutputFormat::Json;
     let mut matrix_path: Option<PathBuf> = None;
     let mut today: Option<String> = None;
 
-    let mut i = 0;
-    while i < argv.len() {
-        let a = &argv[i];
+    let mut iter = argv.iter();
+    while let Some(a) = iter.next() {
         if let Some(v) = a.strip_prefix("--from=") {
             from = Some(v.to_string());
         } else if a == "--from" {
-            i += 1;
             from = Some(
-                argv.get(i)
+                iter.next()
                     .cloned()
                     .ok_or(CapabilityError::MissingFlag("from"))?,
             );
         } else if let Some(v) = a.strip_prefix("--to=") {
             to = Some(v.to_string());
         } else if a == "--to" {
-            i += 1;
             to = Some(
-                argv.get(i)
+                iter.next()
                     .cloned()
                     .ok_or(CapabilityError::MissingFlag("to"))?,
             );
         } else if let Some(v) = a.strip_prefix("--date=") {
             date = Some(v.to_string());
         } else if a == "--date" {
-            i += 1;
             date = Some(
-                argv.get(i)
+                iter.next()
                     .cloned()
                     .ok_or(CapabilityError::MissingFlag("date"))?,
             );
         } else if let Some(v) = a.strip_prefix("--scenario=") {
             scenario = Some(v.to_string());
         } else if a == "--scenario" {
-            i += 1;
             scenario = Some(
-                argv.get(i)
+                iter.next()
                     .cloned()
                     .ok_or(CapabilityError::MissingFlag("scenario"))?,
             );
+        } else if let Some(v) = a.strip_prefix("--runtime=") {
+            runtime = Runtime::parse(v).ok_or_else(|| CapabilityError::BadRuntime(v.into()))?;
+        } else if a == "--runtime" {
+            let value = iter
+                .next()
+                .cloned()
+                .ok_or(CapabilityError::MissingFlag("runtime"))?;
+            runtime =
+                Runtime::parse(&value).ok_or_else(|| CapabilityError::BadRuntime(value.clone()))?;
         } else if let Some(v) = a.strip_prefix("--format=") {
             format = match v {
                 "json" => OutputFormat::Json,
@@ -573,7 +851,6 @@ fn parse_argv(argv: &[String]) -> Result<CliArgs, CapabilityError> {
         } else {
             return Err(CapabilityError::UnknownFlag(a.clone()));
         }
-        i += 1;
     }
 
     Ok(CliArgs {
@@ -582,6 +859,7 @@ fn parse_argv(argv: &[String]) -> Result<CliArgs, CapabilityError> {
         date: parse_iso_date(&date.ok_or(CapabilityError::MissingFlag("date"))?)?,
         scenario: Scenario::parse(&scenario.ok_or(CapabilityError::MissingFlag("scenario"))?)
             .ok_or_else(|| CapabilityError::BadScenario("(empty)".into()))?,
+        runtime,
         format,
         matrix_path,
         today,
@@ -589,7 +867,7 @@ fn parse_argv(argv: &[String]) -> Result<CliArgs, CapabilityError> {
 }
 
 fn usage() -> String {
-    "usage: invoicekit capabilities --from=CC --to=CC --date=YYYY-MM-DD --scenario=B2B|B2C|B2G \\\n                                  [--format=json|pretty] [--matrix=PATH] [--today=YYYY-MM-DD]\n\nResolves accepted e-invoice profiles/transports for a sender->receiver\nroute on a given date and commercial scenario, using the bundled\ncapability matrix (or a caller-supplied one via --matrix).\n\nExit codes:\n  0  resolution succeeded (status: ok | stale | downgraded | no_data)\n  2  invalid CLI usage (missing flag, bad country code, bad date)\n  3  matrix load or schema-version error\n"
+    "usage: invoicekit capabilities --from=CC --to=CC --date=YYYY-MM-DD --scenario=B2B|B2C|B2G \\\n                                  [--runtime=native|wasm] [--format=json|pretty] \\\n                                  [--matrix=PATH] [--today=YYYY-MM-DD]\n\nResolves accepted e-invoice profiles/transports for a sender->receiver\nroute on a given date and commercial scenario, using the bundled\ncapability matrix (or a caller-supplied one via --matrix). Runtime\nselection surfaces RequiresExternalBackend diagnostics instead of\nsilently downgrading browser/edge WebAssembly calls.\n\nExit codes:\n  0  resolution succeeded (status: ok | stale | downgraded | no_data)\n  2  invalid CLI usage (missing flag, bad country code, bad date)\n  3  matrix load or schema-version error\n"
         .to_string()
 }
 
@@ -648,6 +926,7 @@ pub fn run(argv: &[String]) -> ExitCode {
         to: parsed.to,
         scenario: parsed.scenario,
         date: parsed.date,
+        runtime: parsed.runtime,
     };
     let envelope = resolve(&matrix, &query, &today);
 
@@ -668,6 +947,7 @@ fn render_pretty(env: &ResolutionEnvelope) -> String {
     let _ = writeln!(out, "Route   : {} -> {}", env.query.from, env.query.to);
     let _ = writeln!(out, "Date    : {}", env.query.date);
     let _ = writeln!(out, "Scenario: {:?}", env.query.scenario);
+    let _ = writeln!(out, "Runtime : {:?}", env.query.runtime);
     let _ = writeln!(out, "Status  : {:?}", env.status);
     let _ = writeln!(
         out,
@@ -695,9 +975,26 @@ fn render_pretty(env: &ResolutionEnvelope) -> String {
             for p in &m.entry.profiles {
                 let _ = writeln!(
                     out,
-                    "      * {} ({}, transport={})",
-                    p.id, p.format, p.transport
+                    "      * {} ({}, transport={}, serialize={:?}, local_validate={:?}, reference_validate={:?})",
+                    p.id,
+                    p.format,
+                    p.transport,
+                    p.capabilities.serialize,
+                    p.capabilities.local_validate,
+                    p.capabilities.reference_validate
                 );
+            }
+            for req in &m.requires_external_backend {
+                let _ = writeln!(
+                    out,
+                    "        requires {backend} for {capability}: {remediation}",
+                    backend = req.backend,
+                    capability = req.capability,
+                    remediation = req.remediation
+                );
+            }
+            for unavailable in &m.unavailable_in_runtime {
+                let _ = writeln!(out, "        unavailable in runtime: {unavailable}");
             }
         }
     }
@@ -736,6 +1033,69 @@ mod tests {
     }
 
     #[test]
+    fn custom_matrix_must_include_schema_required_capability_fields() {
+        let raw = r#"{
+          "schema_version":"1.0",
+          "generated_at":"2026-01-01T00:00:00Z",
+          "stale_after_days":180,
+          "entries":[{
+            "route_from":"DE",
+            "route_to":"DE",
+            "scenario":"B2G",
+            "valid_from":"2026-01-01",
+            "valid_until":null,
+            "profiles":[{
+              "id":"xrechnung-3.0",
+              "format":"XRechnung",
+              "transport":"peppol",
+              "capabilities":{
+                "serialize":"available",
+                "local_validate":"available",
+                "reference_validate":"requires_external_backend"
+              }
+            }],
+            "source":{"name":"test","fetched_at":"2026-01-01T00:00:00Z","confidence":"high"}
+          }]
+        }"#;
+        let err = parse_matrix(raw).expect_err("missing schema-required arrays must fail");
+        assert!(err.to_string().contains("missing field `requires_service`"));
+    }
+
+    #[test]
+    fn custom_matrix_rejects_drifting_wasm_unavailable_list() {
+        let raw = r#"{
+          "schema_version":"1.0",
+          "generated_at":"2026-01-01T00:00:00Z",
+          "stale_after_days":180,
+          "entries":[{
+            "route_from":"DE",
+            "route_to":"DE",
+            "scenario":"B2G",
+            "valid_from":"2026-01-01",
+            "valid_until":null,
+            "profiles":[{
+              "id":"xrechnung-3.0",
+              "format":"XRechnung",
+              "transport":"peppol",
+              "capabilities":{
+                "serialize":"available",
+                "local_validate":"available",
+                "reference_validate":"requires_external_backend",
+                "requires_service":["jvm:kosit"],
+                "requires_cli":[],
+                "unavailable_in_wasm":[]
+              }
+            }],
+            "source":{"name":"test","fetched_at":"2026-01-01T00:00:00Z","confidence":"high"}
+          }]
+        }"#;
+        let err = parse_matrix(raw).expect_err("drifting unavailable list must fail");
+        assert!(err
+            .to_string()
+            .contains("must match non-available WASM operations"));
+    }
+
+    #[test]
     fn exact_match_returns_ok_when_source_is_fresh() {
         let m = fixture();
         let q = Query {
@@ -743,6 +1103,7 @@ mod tests {
             to: "FR".into(),
             scenario: Scenario::B2B,
             date: "2027-01-01".into(),
+            runtime: Runtime::Native,
         };
         let env = resolve(&m, &q, "2026-06-01");
         assert_eq!(env.status, Status::Ok);
@@ -762,6 +1123,7 @@ mod tests {
             scenario: Scenario::B2B,
             // Before 2026-09-01 valid_from.
             date: "2025-01-01".into(),
+            runtime: Runtime::Native,
         };
         let env = resolve(&m, &q, "2026-06-01");
         assert_eq!(env.status, Status::NoData);
@@ -781,6 +1143,7 @@ mod tests {
             to: "NL".into(),
             scenario: Scenario::B2B,
             date: "2027-01-01".into(),
+            runtime: Runtime::Native,
         };
         let env = resolve(&m, &q, "2026-06-01");
         assert_eq!(env.status, Status::Downgraded);
@@ -800,6 +1163,7 @@ mod tests {
             to: "NL".into(),
             scenario: Scenario::B2C,
             date: "2027-01-01".into(),
+            runtime: Runtime::Native,
         };
         let env = resolve(&m, &q, "2026-06-01");
         assert_eq!(env.status, Status::NoData);
@@ -814,6 +1178,7 @@ mod tests {
             to: "IT".into(),
             scenario: Scenario::B2B,
             date: "2027-01-01".into(),
+            runtime: Runtime::Native,
         };
         // IT source fetched 2025-09-15; with 180-day stale window it is
         // stale by 2026-06-01.
@@ -851,6 +1216,31 @@ mod tests {
         assert_eq!(a2.to, "FR");
         assert_eq!(a1.scenario, Scenario::B2B);
         assert_eq!(a2.scenario, Scenario::B2B);
+        assert_eq!(a1.runtime, Runtime::Native);
+        assert_eq!(a2.runtime, Runtime::Native);
+    }
+
+    #[test]
+    fn argv_accepts_wasm_runtime_aliases() {
+        let a1 = parse_argv(&[
+            "--from=DE".into(),
+            "--to=DE".into(),
+            "--date=2027-01-01".into(),
+            "--scenario=B2G".into(),
+            "--runtime=wasm".into(),
+        ])
+        .unwrap();
+        let a2 = parse_argv(&[
+            "--from=DE".into(),
+            "--to=DE".into(),
+            "--date=2027-01-01".into(),
+            "--scenario=B2G".into(),
+            "--runtime".into(),
+            "edge".into(),
+        ])
+        .unwrap();
+        assert_eq!(a1.runtime, Runtime::Wasm);
+        assert_eq!(a2.runtime, Runtime::Wasm);
     }
 
     #[test]
@@ -903,12 +1293,54 @@ mod tests {
             to: "DE".into(),
             scenario: Scenario::B2G,
             date: "2027-01-01".into(),
+            runtime: Runtime::Native,
         };
         let env = resolve(&m, &q, "2026-06-01");
         let out = render_pretty(&env);
         assert!(out.contains("Route   : DE -> DE"));
         assert!(out.contains("Status  : Ok"));
+        assert!(out.contains("Runtime : Native"));
         assert!(out.contains("xrechnung-3.0"));
+    }
+
+    #[test]
+    fn wasm_runtime_reports_external_reference_validator_requirements() {
+        let m = fixture();
+        let q = Query {
+            from: "DE".into(),
+            to: "DE".into(),
+            scenario: Scenario::B2G,
+            date: "2027-01-01".into(),
+            runtime: Runtime::Wasm,
+        };
+        let env = resolve(&m, &q, "2026-06-01");
+        assert_eq!(env.status, Status::Ok);
+        assert_eq!(env.matched[0].runtime, Runtime::Wasm);
+        assert!(env.matched[0]
+            .requires_external_backend
+            .iter()
+            .any(|req| req.backend == "jvm:kosit" && req.capability == "reference_validate"));
+        assert!(env.matched[0]
+            .unavailable_in_runtime
+            .iter()
+            .any(|item| item == "xrechnung-3.0:reference_validate"));
+    }
+
+    #[test]
+    fn requires_external_backend_display_is_operator_readable() {
+        let req = RequiresExternalBackend {
+            runtime: Runtime::Wasm,
+            profile_id: "xrechnung-3.0".into(),
+            capability: "reference_validate".into(),
+            backend: "jvm:kosit".into(),
+            remediation: remediation(Runtime::Wasm, "jvm:kosit"),
+        };
+        assert!(req
+            .to_string()
+            .contains("wasm xrechnung-3.0 requires external backend"));
+        assert!(req
+            .remediation
+            .contains("WebAssembly never silently downgrades"));
     }
 
     #[test]

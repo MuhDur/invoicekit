@@ -46,6 +46,21 @@ jobs:
           assert d['matched'][0]['route_from'] == 'DE'
           assert d['matched'][0]['route_to'] == 'FR'
           "
+      - name: Exercise capabilities subcommand (WASM external-backend diagnostics)
+        run: |
+          set -euo pipefail
+          OUT=$(./target/debug/invoicekit capabilities \
+            --from=DE --to=DE --date=2027-01-01 --scenario=B2G --runtime=wasm)
+          echo "$OUT"
+          echo "$OUT" | python3 -c "
+          import json, sys
+          d = json.loads(sys.stdin.read())
+          reqs = d['matched'][0]['requires_external_backend']
+          unavailable = d['matched'][0]['unavailable_in_runtime']
+          assert d['query']['runtime'] == 'wasm'
+          assert any(r['backend'] == 'jvm:kosit' and r['capability'] == 'reference_validate' for r in reqs)
+          assert 'xrechnung-3.0:reference_validate' in unavailable
+          "
       - name: Exercise capabilities subcommand (downgrade path)
         run: |
           set -euo pipefail

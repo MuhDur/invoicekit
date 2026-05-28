@@ -166,7 +166,7 @@ Human output prints `[PASS|WARN|FAIL] name — detail` with indented remediation
 
 Pre-existing subcommands; see their respective `--help` output. Briefly:
 
-- **`capabilities`** — resolve accepted e-invoice profiles for a given country / scenario / date.
+- **`capabilities`** — resolve accepted e-invoice profiles for a given country / scenario / date. Use `--runtime=wasm` to surface `requires_external_backend` diagnostics for browser or edge callers instead of silently treating reference validators as locally available.
 - **`codelist-update`** — refresh a code-list manifest from a locally-staged upstream payload.
 - **`migrate-archive`** — migrate a directory of invoice JSON archives between schema versions.
 

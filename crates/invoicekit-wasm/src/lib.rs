@@ -42,11 +42,158 @@
 
 /// Bead identifier carried on emitted log records.
 pub const WASM_ARTIFACT_BEAD_ID: &str = "invoices-t-025-wasm-artifact-nso";
+/// Bead identifier for the runtime capability matrix.
+pub const CAPABILITY_MATRIX_BEAD_ID: &str = "invoices-t-033-browser-edge-capability-matrix-pet";
+/// Engine ABI operation for local validation requests that cannot run in WASM.
+pub const COMMERCIAL_DOCUMENT_LOCAL_VALIDATE_OPERATION: &str = "commercial_document.local_validate";
+/// Engine ABI operation for reference validation requests that require a backend.
+pub const COMMERCIAL_DOCUMENT_REFERENCE_VALIDATE_OPERATION: &str =
+    "commercial_document.reference_validate";
 
-/// Process an Engine ABI JSON request through the WebAssembly
-/// delivery wrapper. Same byte contract as
-/// `invoicekit_engine::process_abi_json`; the wasm-bindgen export
-/// below is a thin wrapper that converts to/from `js_sys::Uint8Array`.
+/// Typed diagnostic used when WebAssembly callers ask for a validator path
+/// that requires a JVM sidecar, CLI verifier, partner service, or other
+/// non-WASM backend.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RequiresExternalBackend {
+    /// Stable machine-readable error code.
+    pub code: &'static str,
+    /// Profile that needs the backend.
+    pub profile_id: String,
+    /// Capability that cannot run in-process.
+    pub capability: String,
+    /// Required backend identifier, for example `jvm:kosit`.
+    pub backend: String,
+    /// User-facing remediation.
+    pub remediation: String,
+}
+
+impl RequiresExternalBackend {
+    /// Builds the canonical WASM external-backend diagnostic.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let err = invoicekit_wasm::RequiresExternalBackend::new(
+    ///     "xrechnung-3.0",
+    ///     "reference_validate",
+    ///     "jvm:kosit",
+    /// );
+    /// assert_eq!(err.code, "requires_external_backend");
+    /// assert!(err.remediation.contains("server-assisted validator"));
+    /// ```
+    #[must_use]
+    pub fn new(
+        profile_id: impl Into<String>,
+        capability: impl Into<String>,
+        backend: impl Into<String>,
+    ) -> Self {
+        let backend = backend.into();
+        Self {
+            code: "requires_external_backend",
+            profile_id: profile_id.into(),
+            capability: capability.into(),
+            remediation: format!(
+                "route this operation to a server-assisted validator with `{backend}`; WebAssembly never silently downgrades to local validation"
+            ),
+            backend,
+        }
+    }
+
+    /// Deterministic JSON representation for JavaScript callers.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let json = invoicekit_wasm::RequiresExternalBackend::new(
+    ///     "xrechnung-3.0",
+    ///     "reference_validate",
+    ///     "jvm:kosit",
+    /// )
+    /// .to_json();
+    /// assert!(json.contains(r#""code":"requires_external_backend""#));
+    /// ```
+    #[must_use]
+    pub fn to_json(&self) -> String {
+        format!(
+            "{{\"backend\":\"{}\",\"capability\":\"{}\",\"code\":\"{}\",\"profile_id\":\"{}\",\"remediation\":\"{}\"}}",
+            escape_json(&self.backend),
+            escape_json(&self.capability),
+            self.code,
+            escape_json(&self.profile_id),
+            escape_json(&self.remediation)
+        )
+    }
+
+    fn to_engine_abi_error_json(&self, operation: &str) -> String {
+        format!(
+            "{{\"abi_version\":1,\"error\":{{\"backend\":\"{}\",\"capability\":\"{}\",\"code\":\"{}\",\"message\":\"{}\",\"profile_id\":\"{}\",\"remediation\":\"{}\"}},\"operation\":\"{}\",\"status\":\"error\"}}",
+            escape_json(&self.backend),
+            escape_json(&self.capability),
+            self.code,
+            escape_json(&self.to_string()),
+            escape_json(&self.profile_id),
+            escape_json(&self.remediation),
+            escape_json(operation)
+        )
+    }
+}
+
+impl std::fmt::Display for RequiresExternalBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} {} requires external backend {} for {}",
+            self.code, self.profile_id, self.backend, self.capability
+        )
+    }
+}
+
+impl std::error::Error for RequiresExternalBackend {}
+
+/// Always returns a typed external-backend diagnostic for reference
+/// validators that cannot run inside the WASM artifact.
+///
+/// # Errors
+///
+/// Returns [`RequiresExternalBackend`] with the backend and remediation
+/// the browser/edge caller must surface.
+pub fn require_external_backend(
+    profile_id: impl Into<String>,
+    capability: impl Into<String>,
+    backend: impl Into<String>,
+) -> Result<(), RequiresExternalBackend> {
+    Err(RequiresExternalBackend::new(
+        profile_id, capability, backend,
+    ))
+}
+
+fn escape_json(value: &str) -> String {
+    let mut escaped = String::new();
+    for ch in value.chars() {
+        match ch {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            c if c.is_control() => {
+                use std::fmt::Write as _;
+                let _ = write!(escaped, "\\u{:04x}", c as u32);
+            }
+            c => escaped.push(c),
+        }
+    }
+    escaped
+}
+
+/// Process an Engine ABI JSON request through the WebAssembly delivery
+/// wrapper.
+///
+/// External validator operations that cannot run inside a browser/edge WASM
+/// artifact return a typed `requires_external_backend` error before the request
+/// reaches the native engine. All other operations use the same byte contract as
+/// `invoicekit_engine::process_abi_json`; the wasm-bindgen export below is a
+/// thin wrapper that converts to/from `js_sys::Uint8Array`.
 ///
 /// # Examples
 ///
@@ -58,7 +205,52 @@ pub const WASM_ARTIFACT_BEAD_ID: &str = "invoices-t-025-wasm-artifact-nso";
 /// ```
 #[must_use]
 pub fn process_engine_abi_json(request_bytes: &[u8]) -> Vec<u8> {
+    if let Some(response) = external_backend_abi_response(request_bytes) {
+        return response;
+    }
     invoicekit_engine::process_abi_json(request_bytes)
+}
+
+fn external_backend_abi_response(request_bytes: &[u8]) -> Option<Vec<u8>> {
+    let request_text = std::str::from_utf8(request_bytes).ok()?;
+    let request: serde_json::Value = serde_json::from_str(request_text).ok()?;
+    if request
+        .get("abi_version")
+        .and_then(serde_json::Value::as_u64)
+        != Some(1)
+    {
+        return None;
+    }
+    let operation = request
+        .get("operation")
+        .and_then(serde_json::Value::as_str)?;
+    let capability = match operation {
+        COMMERCIAL_DOCUMENT_LOCAL_VALIDATE_OPERATION => "local_validate",
+        COMMERCIAL_DOCUMENT_REFERENCE_VALIDATE_OPERATION => "reference_validate",
+        _ => return None,
+    };
+    let payload = request
+        .get("payload")
+        .and_then(serde_json::Value::as_object)?;
+    let profile_id = payload
+        .get("profile_id")
+        .and_then(serde_json::Value::as_str)?;
+    let backend = payload
+        .get("backend")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_else(|| default_external_backend(profile_id, capability));
+    let error = RequiresExternalBackend::new(profile_id, capability, backend);
+    Some(error.to_engine_abi_error_json(operation).into_bytes())
+}
+
+fn default_external_backend(profile_id: &str, capability: &str) -> &'static str {
+    match (profile_id, capability) {
+        (profile, "reference_validate") if profile.starts_with("xrechnung") => "jvm:kosit",
+        (profile, "reference_validate") if profile.starts_with("peppol") => "jvm:phive",
+        (profile, "reference_validate") if profile.starts_with("factur-x") => "verapdf",
+        (profile, "reference_validate") if profile.starts_with("fatturapa") => "partner:sdi",
+        _ => "external-validator",
+    }
 }
 
 /// List the feature-gated country bundles compiled into this
@@ -157,6 +349,7 @@ pub const fn crate_name() -> &'static str {
 // glue code.
 
 #[cfg(target_arch = "wasm32")]
+#[allow(unreachable_pub)]
 mod browser {
     use wasm_bindgen::prelude::*;
 
@@ -209,6 +402,17 @@ mod browser {
         out
     }
 
+    /// Return a typed external-backend diagnostic as stable JSON.
+    #[wasm_bindgen(js_name = requiresExternalBackendJson)]
+    #[must_use]
+    pub fn requires_external_backend_json(
+        profile_id: &str,
+        capability: &str,
+        backend: &str,
+    ) -> String {
+        super::RequiresExternalBackend::new(profile_id, capability, backend).to_json()
+    }
+
     /// Bead identifier; reachable from JS for diagnostic correlation.
     #[wasm_bindgen(js_name = beadId)]
     #[must_use]
@@ -221,6 +425,7 @@ mod browser {
 mod tests {
     use super::{
         compiled_country_bundles, compiled_format_bundles, crate_name, process_engine_abi_json,
+        require_external_backend, RequiresExternalBackend,
     };
     use serde::Deserialize;
 
@@ -240,6 +445,53 @@ mod tests {
     #[test]
     fn crate_name_is_cargo_package_name() {
         assert_eq!(crate_name(), "invoicekit-wasm");
+    }
+
+    #[test]
+    fn external_backend_error_is_typed_and_operator_readable() {
+        let err = require_external_backend("xrechnung-3.0", "reference_validate", "jvm:kosit")
+            .expect_err("wasm reference validation must require a backend");
+        assert_eq!(err.code, "requires_external_backend");
+        assert_eq!(err.profile_id, "xrechnung-3.0");
+        assert_eq!(err.capability, "reference_validate");
+        assert_eq!(err.backend, "jvm:kosit");
+        assert!(err
+            .remediation
+            .contains("WebAssembly never silently downgrades"));
+        assert!(err.to_string().contains("requires external backend"));
+    }
+
+    #[test]
+    fn external_backend_json_is_stable_and_escaped() {
+        let json = RequiresExternalBackend::new("profile\"id", "reference_validate", "jvm:kosit")
+            .to_json();
+        assert_eq!(
+            json,
+            "{\"backend\":\"jvm:kosit\",\"capability\":\"reference_validate\",\"code\":\"requires_external_backend\",\"profile_id\":\"profile\\\"id\",\"remediation\":\"route this operation to a server-assisted validator with `jvm:kosit`; WebAssembly never silently downgrades to local validation\"}"
+        );
+    }
+
+    #[test]
+    fn wasm_reference_validation_abi_returns_typed_backend_error() {
+        let response = process_engine_abi_json(
+            br#"{"abi_version":1,"operation":"commercial_document.reference_validate","payload":{"profile_id":"xrechnung-3.0","backend":"jvm:kosit"}}"#,
+        );
+        let text = std::str::from_utf8(&response).expect("response is UTF-8 JSON");
+        assert!(text.contains(r#""code":"requires_external_backend""#));
+        assert!(text.contains(r#""backend":"jvm:kosit""#));
+        assert!(text.contains(r#""profile_id":"xrechnung-3.0""#));
+        assert!(text.contains(r#""operation":"commercial_document.reference_validate""#));
+        assert!(!text.contains("unsupported_operation"));
+    }
+
+    #[test]
+    fn wasm_reference_validation_abi_defaults_known_profile_backend() {
+        let response = process_engine_abi_json(
+            br#"{"abi_version":1,"operation":"commercial_document.reference_validate","payload":{"profile_id":"peppol-bis-3.0"}}"#,
+        );
+        let text = std::str::from_utf8(&response).expect("response is UTF-8 JSON");
+        assert!(text.contains(r#""code":"requires_external_backend""#));
+        assert!(text.contains(r#""backend":"jvm:phive""#));
     }
 
     #[test]

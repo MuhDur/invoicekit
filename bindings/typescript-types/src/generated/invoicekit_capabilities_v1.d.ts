@@ -7,6 +7,12 @@
 // bindings/typescript-types/. Source of truth: schemas/.
 //
 /**
+ * This interface was referenced by `InvoiceKitCapabilityMatrix`'s JSON-Schema
+ * via the `definition` "CapabilityLevel".
+ */
+export type CapabilityLevel = ("available" | "requires_external_backend" | "unavailable_in_wasm")
+
+/**
  * Per-route, per-scenario, per-date capability advertisements for sending compliant electronic invoices. Each entry describes which profiles/transports are accepted, sourced from named jurisdictional manifests, with an explicit confidence rating and a validity window. Consumers must honor `stale_after_days` and downgrade results when a query date falls inside a stale window.
  */
 export interface InvoiceKitCapabilityMatrix {
@@ -60,6 +66,28 @@ export interface AcceptedProfile {
 id: string
 format: ("UBL" | "CII" | "Factur-X" | "XRechnung" | "Peppol BIS" | "Peppol PINT" | "FatturaPA" | "Chorus Pro")
 transport: ("peppol" | "email" | "portal" | "as4-direct" | "manual")
+capabilities: ProfileRuntimeCapabilities
+}
+/**
+ * This interface was referenced by `InvoiceKitCapabilityMatrix`'s JSON-Schema
+ * via the `definition` "ProfileRuntimeCapabilities".
+ */
+export interface ProfileRuntimeCapabilities {
+serialize: CapabilityLevel
+local_validate: CapabilityLevel
+reference_validate: CapabilityLevel
+/**
+ * Service backends required for reference validation, for example 'jvm:kosit'.
+ */
+requires_service: string[]
+/**
+ * CLI backends required for reference validation, for example 'verapdf'.
+ */
+requires_cli: string[]
+/**
+ * Operations that browser/edge WebAssembly callers cannot run in-process. This list must match every non-'available' operation level on the same profile.
+ */
+unavailable_in_wasm: ("serialize" | "local_validate" | "reference_validate")[]
 }
 /**
  * This interface was referenced by `InvoiceKitCapabilityMatrix`'s JSON-Schema

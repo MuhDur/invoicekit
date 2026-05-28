@@ -78,9 +78,47 @@
         "transport": {
           "type": "string",
           "enum": ["peppol", "email", "portal", "as4-direct", "manual"]
+        },
+        "capabilities": {
+          "$ref": "#/$defs/ProfileRuntimeCapabilities"
         }
       },
-      "required": ["id", "format", "transport"]
+      "required": ["id", "format", "transport", "capabilities"]
+    },
+    "ProfileRuntimeCapabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "serialize": { "$ref": "#/$defs/CapabilityLevel" },
+        "local_validate": { "$ref": "#/$defs/CapabilityLevel" },
+        "reference_validate": { "$ref": "#/$defs/CapabilityLevel" },
+        "requires_service": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "description": "Service backends required for reference validation, for example 'jvm:kosit'."
+        },
+        "requires_cli": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "description": "CLI backends required for reference validation, for example 'verapdf'."
+        },
+        "unavailable_in_wasm": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["serialize", "local_validate", "reference_validate"]
+          },
+          "uniqueItems": true,
+          "description": "Operations that browser/edge WebAssembly callers cannot run in-process. This list must match every non-'available' operation level on the same profile."
+        }
+      },
+      "required": ["serialize", "local_validate", "reference_validate", "requires_service", "requires_cli", "unavailable_in_wasm"]
+    },
+    "CapabilityLevel": {
+      "type": "string",
+      "enum": ["available", "requires_external_backend", "unavailable_in_wasm"]
     },
     "SourceProvenance": {
       "type": "object",

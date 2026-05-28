@@ -13,12 +13,28 @@
         {
           "id": "xrechnung-3.0",
           "format": "XRechnung",
-          "transport": "peppol"
+          "transport": "peppol",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["jvm:kosit"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
         },
         {
           "id": "xrechnung-3.0",
           "format": "XRechnung",
-          "transport": "email"
+          "transport": "email",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["jvm:kosit"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
         }
       ],
       "source": {
@@ -38,12 +54,28 @@
         {
           "id": "xrechnung-3.0",
           "format": "XRechnung",
-          "transport": "email"
+          "transport": "email",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["jvm:kosit"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
         },
         {
           "id": "factur-x-1.0.07",
           "format": "Factur-X",
-          "transport": "email"
+          "transport": "email",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": [],
+            "requires_cli": ["verapdf"],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
         }
       ],
       "source": {
@@ -63,17 +95,41 @@
         {
           "id": "factur-x-1.0.07",
           "format": "Factur-X",
-          "transport": "portal"
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["jvm:saxon"],
+            "requires_cli": ["verapdf"],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
         },
         {
           "id": "ubl-2.1",
           "format": "UBL",
-          "transport": "portal"
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["jvm:saxon"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
         },
         {
           "id": "cii-d16b",
           "format": "CII",
-          "transport": "portal"
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["jvm:saxon"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
         }
       ],
       "source": {
@@ -93,12 +149,28 @@
         {
           "id": "factur-x-1.0.06",
           "format": "Chorus Pro",
-          "transport": "portal"
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:chorus-pro"],
+            "requires_cli": ["verapdf"],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
         },
         {
           "id": "factur-x-1.0.07",
           "format": "Factur-X",
-          "transport": "portal"
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": [],
+            "requires_cli": ["verapdf"],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
         }
       ],
       "source": {
@@ -118,7 +190,15 @@
         {
           "id": "peppol-bis-3.0",
           "format": "Peppol BIS",
-          "transport": "peppol"
+          "transport": "peppol",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["jvm:phive"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
         }
       ],
       "source": {
@@ -138,7 +218,15 @@
         {
           "id": "fatturapa-1.2.2",
           "format": "FatturaPA",
-          "transport": "portal"
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "unavailable_in_wasm",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:sdi"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["local_validate", "reference_validate"]
+          }
         }
       ],
       "source": {
@@ -158,7 +246,15 @@
         {
           "id": "peppol-bis-3.0",
           "format": "Peppol BIS",
-          "transport": "peppol"
+          "transport": "peppol",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["jvm:phive"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
         }
       ],
       "source": {
