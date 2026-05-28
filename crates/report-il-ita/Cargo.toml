@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
 [package]
 name = "invoicekit-report-il-ita"
 version.workspace = true
@@ -7,12 +10,17 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit workspace member: invoicekit-report-il-ita"
+description = "Israel ITA (Israel Tax Authority) e-Invoicing clearance adapter. Live ITA integration lands in a follow-up report-il-ita-http crate."
 publish = false
 
 [lib]
 name = "invoicekit_report_il_ita"
 path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
 
 [lints]
 workspace = true
