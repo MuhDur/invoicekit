@@ -133,9 +133,9 @@ fn hex_decode_32(hex: &str) -> Result<[u8; 32], String> {
         return Err(format!("expected 64 hex chars, got {}", hex.len()));
     }
     let mut out = [0_u8; 32];
-    for (i, chunk) in hex.as_bytes().chunks_exact(2).enumerate() {
+    for (slot, chunk) in out.iter_mut().zip(hex.as_bytes().chunks_exact(2)) {
         let s = std::str::from_utf8(chunk).map_err(|e| e.to_string())?;
-        out[i] = u8::from_str_radix(s, 16).map_err(|e| e.to_string())?;
+        *slot = u8::from_str_radix(s, 16).map_err(|e| e.to_string())?;
     }
     Ok(out)
 }
@@ -153,7 +153,9 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut nonce: Option<u64> = None;
     let mut i = 0;
     while i < argv.len() {
-        let arg = &argv[i];
+        let Some(arg) = argv.get(i) else {
+            break;
+        };
         match arg.as_str() {
             "--help" | "-h" => return Err(usage_help()),
             "--out" => {

@@ -1,6 +1,6 @@
 # `invoicekit` CLI — the trust-toolkit walkthrough
 
-This doc walks through the operator loop the `invoicekit` binary ships today: **pack → show → verify → replay → unpack → diff**. Plus the environment-diagnostic command `doctor`, the migration tool `migrate-archive`, the capability resolver `capabilities`, and the code-list updater `codelist-update`.
+This doc walks through the operator loop the `invoicekit` binary ships today: **pack → show → verify → replay → unpack → diff**, plus `timestamp` for RFC 3161 manifest stamping. Plus the environment-diagnostic command `doctor`, the migration tool `migrate-archive`, the capability resolver `capabilities`, and the code-list updater `codelist-update`.
 
 Every subcommand:
 
@@ -115,6 +115,18 @@ invoicekit replay <bundle.ikb>
 Today the identity replayer always replays byte-equal — this is the baseline. The moment a real pipeline replayer is wired in, this same subcommand will start surfacing engine drift without any flag changes.
 
 Exit `0` if every selected artefact replays byte-equal, `1` on any drift, `2` on usage error.
+
+### `timestamp`
+
+Request an RFC 3161 timestamp for a bundle's manifest. Today the only backend wired into the CLI is the deterministic mock TSA from `invoicekit-timestamping` (pinned `genTime` so cassette-replay tests stay byte-identical). The moment the FreeTSA HTTP client lands (T-082 follow-up) the same subcommand starts emitting real tokens with no flag changes.
+
+```
+invoicekit timestamp <bundle.ikb> [--out <token.json>] [--nonce <u64>]
+```
+
+The bundle is not modified. The typed `RfcTimestamp` is written as JSON to stdout, or to `<token.json>` with `--out`. Algorithm is BLAKE3 (matches what `invoicekit-evidence` uses for its own content-address ledger) so verify-side TSA checks recompute the same imprint without re-hashing.
+
+Exit `0` on success, `1` on TSA refusal / write failure, `2` on usage error.
 
 ### `unpack`
 
