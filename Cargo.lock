@@ -2225,6 +2225,7 @@ name = "invoicekit-evidence-dsse"
 version = "0.0.0"
 dependencies = [
  "base64",
+ "invoicekit-evidence",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2905,6 +2906,7 @@ version = "0.0.0"
 dependencies = [
  "blake3",
  "invoicekit-evidence",
+ "invoicekit-evidence-dsse",
  "invoicekit-signer",
  "invoicekit-timestamping",
  "serde",

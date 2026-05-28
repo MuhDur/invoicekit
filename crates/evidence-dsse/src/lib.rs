@@ -34,10 +34,12 @@
 //!
 //! Public surface:
 //! [`DsseEnvelope`], [`DsseSignature`], [`pae`], [`wrap`],
+//! [`wrap_manifest`], [`attach_manifest_dsse`],
 //! [`verify_envelope`], [`ManifestSigner`], [`MockSigner`],
 //! [`MANIFEST_PAYLOAD_TYPE`], [`MANIFEST_SIGNATURE_ARTEFACT_ID`].
 
 use base64::Engine;
+use invoicekit_evidence::EvidenceBundle;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -51,7 +53,7 @@ pub const MANIFEST_PAYLOAD_TYPE: &str = "application/vnd.invoicekit.manifest+jso
 /// Reserved artefact id for the DSSE envelope inside the
 /// evidence bundle. `invoicekit verify` looks for this id when
 /// the operator opts into the signature check.
-pub const MANIFEST_SIGNATURE_ARTEFACT_ID: &str = "signatures/manifest.dsse";
+pub use invoicekit_evidence::MANIFEST_SIGNATURE_ARTEFACT_ID;
 
 /// One signature in a DSSE envelope.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -99,6 +101,10 @@ pub enum DsseError {
     /// A base64 field could not be decoded.
     #[error("base64 decode failure: {0}")]
     BadBase64(String),
+    /// The bundle manifest could not be serialised to
+    /// canonical JSON bytes for signing.
+    #[error("manifest serialise failure: {0}")]
+    ManifestSerialize(String),
     /// The envelope carried zero signatures (the spec allows
     /// it but every verifier treats it as a failure).
     #[error("envelope carries no signatures")]
@@ -216,6 +222,55 @@ pub fn wrap(
             sig: base64::engine::general_purpose::STANDARD.encode(sig_bytes),
         }],
     })
+}
+
+/// Wrap a bundle's canonical `manifest.json` bytes in a DSSE
+/// envelope.
+///
+/// The manifest bytes are exactly the bytes that
+/// `invoicekit-evidence` writes at [`invoicekit_evidence::MANIFEST_ARTEFACT_ID`]:
+/// compact JSON serialisation of [`invoicekit_evidence::Manifest`].
+///
+/// # Errors
+///
+/// Returns [`DsseError`] when the manifest fails to serialise
+/// or the signer fails.
+pub fn wrap_manifest(
+    bundle: &EvidenceBundle,
+    signer: &dyn ManifestSigner,
+) -> Result<DsseEnvelope, DsseError> {
+    let payload = manifest_payload_bytes(bundle)?;
+    wrap(signer, MANIFEST_PAYLOAD_TYPE, &payload)
+}
+
+/// Add or replace the reserved `signatures/manifest.dsse`
+/// sidecar artefact on a bundle.
+///
+/// The manifest is intentionally left unchanged. The DSSE
+/// envelope signs the manifest, so listing the envelope inside
+/// that manifest would make the signed payload self-referential.
+/// The evidence codec allows this single reserved sidecar, and
+/// `invoicekit-verify` validates it explicitly.
+///
+/// # Errors
+///
+/// Returns [`DsseError`] when the manifest fails to serialise,
+/// the signer fails, or the envelope cannot be encoded as JSON.
+pub fn attach_manifest_dsse(
+    bundle: &EvidenceBundle,
+    signer: &dyn ManifestSigner,
+) -> Result<EvidenceBundle, DsseError> {
+    let envelope = wrap_manifest(bundle, signer)?;
+    let bytes =
+        serde_json::to_vec(&envelope).map_err(|e| DsseError::ManifestSerialize(e.to_string()))?;
+    let mut next = bundle.clone();
+    next.artefacts
+        .insert(MANIFEST_SIGNATURE_ARTEFACT_ID.to_owned(), bytes);
+    Ok(next)
+}
+
+fn manifest_payload_bytes(bundle: &EvidenceBundle) -> Result<Vec<u8>, DsseError> {
+    serde_json::to_vec(&bundle.manifest).map_err(|e| DsseError::ManifestSerialize(e.to_string()))
 }
 
 /// Verify a DSSE envelope against the expected payload bytes
@@ -364,6 +419,27 @@ pub const fn crate_name() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use invoicekit_evidence::{manifest_for, pack, unpack};
+    use std::collections::BTreeMap;
+
+    fn sample_bundle() -> EvidenceBundle {
+        let mut artefacts = BTreeMap::new();
+        artefacts.insert(
+            "canonical.json".to_owned(),
+            br#"{"id":"INV-DSSE-1"}"#.to_vec(),
+        );
+        artefacts.insert("formats/ubl.xml".to_owned(), b"<Invoice/>".to_vec());
+        let manifest = manifest_for(
+            &artefacts,
+            "tenant-dsse",
+            "trace-dsse",
+            "2026-05-28T00:00:00Z",
+        );
+        EvidenceBundle {
+            manifest,
+            artefacts,
+        }
+    }
 
     #[test]
     fn pae_matches_dsse_v1_spec_example() {
@@ -401,6 +477,37 @@ mod tests {
         assert_eq!(env.signatures.len(), 1);
         assert_eq!(env.signatures[0].keyid, "mock-dsse-key");
         verify_envelope(&env, MANIFEST_PAYLOAD_TYPE, payload, &signer).unwrap();
+    }
+
+    #[test]
+    fn attach_manifest_dsse_adds_reserved_sidecar_without_changing_manifest() {
+        let bundle = sample_bundle();
+        let signer = MockSigner::default();
+        let attached = attach_manifest_dsse(&bundle, &signer).unwrap();
+
+        assert_eq!(attached.manifest, bundle.manifest);
+        assert!(attached
+            .artefacts
+            .contains_key(MANIFEST_SIGNATURE_ARTEFACT_ID));
+        assert!(!attached
+            .manifest
+            .artefacts
+            .iter()
+            .any(|a| a.id == MANIFEST_SIGNATURE_ARTEFACT_ID));
+
+        let packed = pack(&attached).unwrap();
+        let unpacked = unpack(&packed).unwrap();
+        assert_eq!(unpacked, attached);
+    }
+
+    #[test]
+    fn wrap_manifest_binds_to_manifest_json_bytes() {
+        let bundle = sample_bundle();
+        let signer = MockSigner::default();
+        let envelope = wrap_manifest(&bundle, &signer).unwrap();
+        let expected_payload = serde_json::to_vec(&bundle.manifest).unwrap();
+
+        verify_envelope(&envelope, MANIFEST_PAYLOAD_TYPE, &expected_payload, &signer).unwrap();
     }
 
     #[test]
