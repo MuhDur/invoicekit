@@ -60,8 +60,8 @@ pub struct EisSubmitRequest {
     /// Document class.
     pub kind: EisDocumentKind,
     /// Issuer TIN (Tax Identification Number, 9 base digits
-    /// + optional branch code, allowing
-    /// `NNNNNNNNN-BBB` shape).
+    /// with an optional branch suffix encoded as
+    /// `NNNNNNNNN-BBB`).
     pub issuer_tin: String,
     /// BIR-issued ATP (Authority To Print) reference for the
     /// issuer's accredited POS.
