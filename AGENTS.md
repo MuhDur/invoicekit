@@ -90,6 +90,16 @@ This project is built by one person plus AI agents in a single concentrated effo
 - Trade off speed against future flexibility in favor of speed within the architectural commitments above.
 - When in doubt about scope, prefer "ship it correctly" over "ship a placeholder."
 
+## Current collaboration model: single `main`
+
+The pull-request backlog was cleared on 2026-05-28. From this point forward, agents work on one shared branch:
+
+- Work directly on `main`. Do not create feature branches, PR stacks, or worktrees for normal agent work.
+- Use Agent Mail reservations before editing, especially for shared files such as `Cargo.toml`, `Cargo.lock`, `.beads/**`, and `AGENTS.md`.
+- Commit small, focused changes directly on `main` after local gates pass, then push.
+- GitHub Actions are allowed as the shared safety net. If they fail, fix the failure directly on `main`.
+- Historical branches and worktrees are read-only archaeology. Do not base new work on them, delete them, prune them, or "clean them up" unless the user gives the exact command and approval in the same message.
+
 ## Project layout (target)
 
 ```
@@ -250,7 +260,7 @@ When ending a work session you must complete all steps below. Work is NOT comple
    git push
    git status   # MUST show "up to date with origin"
    ```
-5. Clean up stashes, prune remote branches.
+5. Do not create, prune, delete, or clean branches/worktrees as routine cleanup. Historical branch/worktree cleanup requires the user's exact command and approval in the same message.
 6. Verify all changes are committed AND pushed.
 7. Hand off context for the next session.
 
