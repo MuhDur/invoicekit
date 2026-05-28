@@ -272,6 +272,148 @@ pub enum CitationError {
     /// Citation `extractor_id` is empty.
     #[error("citation extractor_id must be non-empty")]
     EmptyExtractorId,
+    /// [`FieldCitation::value`] is empty.
+    #[error("field citation value must be non-empty")]
+    EmptyValue,
+    /// [`CitationSource::OcrSpan::span_id`] is empty.
+    #[error("ocr span_id must be non-empty")]
+    EmptyOcrSpanId,
+    /// [`CitationSource::Model::model_id`] is empty.
+    #[error("model_id must be non-empty")]
+    EmptyModelId,
+}
+
+/// Discriminated taxonomy of source pointers the intake
+/// layers attach to an extracted value.
+///
+/// The audit UI walks one of these per [`FieldCitation`] to
+/// reconstruct *exactly* where the value came from:
+///
+/// * [`CitationSource::PdfObject`] — index into the source
+///   PDF's object table. Layer 1 (digital-PDF text) uses this
+///   when it lifts a string from a `/Contents` stream.
+/// * [`CitationSource::BoundingBox`] — page rectangle. Layers
+///   1, 2, 3 use this on top of (or instead of) the PDF object
+///   id; Layer 4 (VLM) uses it on its own.
+/// * [`CitationSource::OcrSpan`] — span id that points into a
+///   prior OCR run's structured output. Layer 3 emits this so
+///   a re-run can correlate audit edits with the OCR text.
+/// * [`CitationSource::Model`] — stable model id (e.g.
+///   `smol-docling-256m-int8`). Layer 4 emits this on every
+///   citation; lower layers can attach it as the *extractor*
+///   that produced a confidence score.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum CitationSource {
+    /// Source is a PDF object id in the original document.
+    PdfObject {
+        /// 0-indexed object number (PDF spec convention).
+        object_id: u32,
+        /// Optional bounding box co-emitted with the object.
+        bounding_box: Option<BoundingBox>,
+    },
+    /// Source is a page rectangle.
+    BoundingBox {
+        /// The rectangle.
+        bounding_box: BoundingBox,
+    },
+    /// Source is a span id in a prior OCR run.
+    OcrSpan {
+        /// Opaque span id from the OCR engine.
+        span_id: String,
+        /// Optional bounding box co-emitted with the span.
+        bounding_box: Option<BoundingBox>,
+    },
+    /// Source is a VLM model output; the model id is
+    /// authoritative when no spatial pointer is available.
+    Model {
+        /// Stable model id (e.g. `smol-docling-256m-int8`).
+        model_id: String,
+        /// Optional bounding box from the model's attention map.
+        bounding_box: Option<BoundingBox>,
+    },
+}
+
+impl CitationSource {
+    /// Returns the bounding box this source carries, if any.
+    /// Convenient for the audit UI's "click to highlight" path
+    /// which works against the rectangle regardless of which
+    /// taxonomy variant emitted it.
+    #[must_use]
+    pub fn bounding_box(&self) -> Option<BoundingBox> {
+        match self {
+            Self::BoundingBox { bounding_box } => Some(*bounding_box),
+            Self::PdfObject { bounding_box, .. }
+            | Self::OcrSpan { bounding_box, .. }
+            | Self::Model { bounding_box, .. } => *bounding_box,
+        }
+    }
+}
+
+/// One extracted field paired with its typed citation.
+///
+/// This is the shape T-066 names in the spec
+/// (`{value, source, confidence}`) and the carrier the engine
+/// hands to the evidence bundle so an auditor can reconstruct
+/// every extracted field's provenance.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FieldCitation {
+    /// JSON-pointer-style path of the extracted field.
+    pub path: String,
+    /// Verbatim extracted value (numeric values are stringified
+    /// to preserve the issuer's formatting).
+    pub value: String,
+    /// Typed source pointer.
+    pub source: CitationSource,
+    /// Confidence in `[0.0, 1.0]`.
+    pub confidence: Confidence,
+    /// Intake layer that emitted this citation.
+    pub layer: ExtractionLayer,
+}
+
+impl FieldCitation {
+    /// Build a validated field citation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CitationError::EmptyPath`] when `path` is
+    /// empty, [`CitationError::EmptyValue`] when `value` is
+    /// empty, [`CitationError::EmptyOcrSpanId`] when an
+    /// [`CitationSource::OcrSpan`] carries an empty span id,
+    /// or [`CitationError::EmptyModelId`] when a
+    /// [`CitationSource::Model`] carries an empty model id.
+    pub fn validated(
+        path: impl Into<String>,
+        value: impl Into<String>,
+        source: CitationSource,
+        confidence: Confidence,
+        layer: ExtractionLayer,
+    ) -> Result<Self, CitationError> {
+        let path = path.into();
+        if path.is_empty() {
+            return Err(CitationError::EmptyPath);
+        }
+        let value = value.into();
+        if value.is_empty() {
+            return Err(CitationError::EmptyValue);
+        }
+        match &source {
+            CitationSource::OcrSpan { span_id, .. } if span_id.is_empty() => {
+                return Err(CitationError::EmptyOcrSpanId);
+            }
+            CitationSource::Model { model_id, .. } if model_id.is_empty() => {
+                return Err(CitationError::EmptyModelId);
+            }
+            _ => {}
+        }
+        Ok(Self {
+            path,
+            value,
+            source,
+            confidence,
+            layer,
+        })
+    }
 }
 
 impl BoundingBox {
@@ -571,5 +713,186 @@ mod tests {
             assert!(cite.confidence.value() > 0.0);
             assert_eq!(cite.bounding_box.page, 1);
         }
+    }
+
+    #[test]
+    fn citation_source_round_trips_each_kebab_tag() {
+        for src in [
+            CitationSource::PdfObject {
+                object_id: 42,
+                bounding_box: Some(sample_box()),
+            },
+            CitationSource::BoundingBox {
+                bounding_box: sample_box(),
+            },
+            CitationSource::OcrSpan {
+                span_id: "ocr-span-7".to_owned(),
+                bounding_box: Some(sample_box()),
+            },
+            CitationSource::Model {
+                model_id: "smol-docling-256m-int8".to_owned(),
+                bounding_box: None,
+            },
+        ] {
+            let json = serde_json::to_string(&src).unwrap();
+            let back: CitationSource = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, src);
+        }
+    }
+
+    #[test]
+    fn citation_source_bounding_box_helper_returns_inner_box() {
+        let bb = sample_box();
+        assert_eq!(
+            CitationSource::BoundingBox { bounding_box: bb }.bounding_box(),
+            Some(bb)
+        );
+        assert_eq!(
+            CitationSource::PdfObject {
+                object_id: 1,
+                bounding_box: Some(bb),
+            }
+            .bounding_box(),
+            Some(bb)
+        );
+        assert_eq!(
+            CitationSource::Model {
+                model_id: "x".to_owned(),
+                bounding_box: None,
+            }
+            .bounding_box(),
+            None
+        );
+    }
+
+    #[test]
+    fn field_citation_validated_rejects_empty_inputs() {
+        let bb_src = CitationSource::BoundingBox {
+            bounding_box: sample_box(),
+        };
+        assert!(matches!(
+            FieldCitation::validated(
+                "",
+                "Acme",
+                bb_src.clone(),
+                Confidence::new(1.0),
+                ExtractionLayer::DigitalPdfText,
+            ),
+            Err(CitationError::EmptyPath)
+        ));
+        assert!(matches!(
+            FieldCitation::validated(
+                "/supplier/name",
+                "",
+                bb_src,
+                Confidence::new(1.0),
+                ExtractionLayer::DigitalPdfText,
+            ),
+            Err(CitationError::EmptyValue)
+        ));
+        assert!(matches!(
+            FieldCitation::validated(
+                "/x",
+                "v",
+                CitationSource::OcrSpan {
+                    span_id: String::new(),
+                    bounding_box: None,
+                },
+                Confidence::new(0.5),
+                ExtractionLayer::ServerOcr,
+            ),
+            Err(CitationError::EmptyOcrSpanId)
+        ));
+        assert!(matches!(
+            FieldCitation::validated(
+                "/x",
+                "v",
+                CitationSource::Model {
+                    model_id: String::new(),
+                    bounding_box: None,
+                },
+                Confidence::new(0.5),
+                ExtractionLayer::VisionLanguageModel,
+            ),
+            Err(CitationError::EmptyModelId)
+        ));
+    }
+
+    #[test]
+    fn five_field_citations_one_per_taxonomy_variant_round_trip() {
+        // Acceptance gate from T-066: at least 5 sample
+        // extractions verified to carry the right citation;
+        // this set exercises every CitationSource variant so
+        // the taxonomy is genuinely covered, not just the
+        // BoundingBoxCitation legacy shape.
+        let citations = vec![
+            FieldCitation::validated(
+                "/supplier/name",
+                "Acme GmbH",
+                CitationSource::PdfObject {
+                    object_id: 42,
+                    bounding_box: Some(sample_box()),
+                },
+                Confidence::new(1.0),
+                ExtractionLayer::DigitalPdfText,
+            )
+            .unwrap(),
+            FieldCitation::validated(
+                "/customer/name",
+                "Globex Corp",
+                CitationSource::BoundingBox {
+                    bounding_box: sample_box(),
+                },
+                Confidence::new(1.0),
+                ExtractionLayer::DigitalPdfXml,
+            )
+            .unwrap(),
+            FieldCitation::validated(
+                "/document_number",
+                "INV-2026-0001",
+                CitationSource::OcrSpan {
+                    span_id: "paddle-line-17".to_owned(),
+                    bounding_box: Some(sample_box()),
+                },
+                Confidence::new(0.91),
+                ExtractionLayer::ServerOcr,
+            )
+            .unwrap(),
+            FieldCitation::validated(
+                "/issue_date",
+                "2026-05-28",
+                CitationSource::OcrSpan {
+                    span_id: "paddle-line-18".to_owned(),
+                    bounding_box: None,
+                },
+                Confidence::new(0.88),
+                ExtractionLayer::ServerOcr,
+            )
+            .unwrap(),
+            FieldCitation::validated(
+                "/lines/0/unit_price",
+                "120.00",
+                CitationSource::Model {
+                    model_id: "smol-docling-256m-int8".to_owned(),
+                    bounding_box: Some(sample_box()),
+                },
+                Confidence::new(0.62),
+                ExtractionLayer::VisionLanguageModel,
+            )
+            .unwrap(),
+        ];
+        assert_eq!(citations.len(), 5);
+        let json = serde_json::to_string(&citations).unwrap();
+        let back: Vec<FieldCitation> = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, citations);
+        // Each variant survived the round-trip.
+        assert!(matches!(
+            back[0].source,
+            CitationSource::PdfObject { object_id: 42, .. }
+        ));
+        assert!(matches!(back[1].source, CitationSource::BoundingBox { .. }));
+        assert!(matches!(back[2].source, CitationSource::OcrSpan { .. }));
+        assert!(matches!(back[3].source, CitationSource::OcrSpan { .. }));
+        assert!(matches!(back[4].source, CitationSource::Model { .. }));
     }
 }
