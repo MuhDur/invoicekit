@@ -64,6 +64,7 @@ services:
       INVOICEKIT_PHASE4_URL: http://validator-phase4:8090
       INVOICEKIT_SIGNER_SOCK: /run/invoicekit/signer.sock
       INVOICEKIT_ARCHIVE_S3_ENDPOINT: http://archive-minio:9000
+      INVOICEKIT_INTAKE_PADDLEOCR_URL: http://intake-paddleocr:7001
     ports:
       - "8080:8080"
     volumes:
@@ -128,6 +129,21 @@ services:
     secrets:
       - peppol_ap_cert_p12
       - peppol_ap_cert_pass
+
+  intake-paddleocr:
+    # Layer 3 OCR sidecar; bead T-062 / services/intake-paddleocr.
+    image: ghcr.io/muhdur/invoicekit/intake-paddleocr:scaffold
+    restart: unless-stopped
+    environment:
+      INVOICEKIT_PADDLEOCR_LANG: ch
+      INVOICEKIT_PADDLEOCR_USE_GPU: "false"
+    ports:
+      - "7001:7001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:7001/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
 
   archive-minio:
     # Object-Lock-capable S3-compatible storage; bead T-081.
