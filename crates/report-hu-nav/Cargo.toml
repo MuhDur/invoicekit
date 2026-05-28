@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
 [package]
 name = "invoicekit-report-hu-nav"
 version.workspace = true
@@ -7,12 +10,17 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit workspace member: invoicekit-report-hu-nav"
+description = "Hungary NAV (Nemzeti Adó- és Vámhivatal) Online Számla reporting adapter. Adds NavProvider trait + transaction-id + token-exchange envelope + adóazonosító validation helpers. The live NAV REST integration lands in a follow-up report-hu-nav-http crate."
 publish = false
 
 [lib]
 name = "invoicekit_report_hu_nav"
 path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
 
 [lints]
 workspace = true
