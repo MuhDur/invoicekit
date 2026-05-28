@@ -99,6 +99,7 @@ members = [
   "crates/intake-citation",
   "crates/signer",
   "crates/signer-eidas",
+  "crates/signer-zatca",
   "crates/timestamping",
   "crates/transmit-peppol-native-as4",
   "crates/transmit-peppol-native-as4-receive",
