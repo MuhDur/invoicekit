@@ -1,6 +1,6 @@
 # `invoicekit` CLI — the trust-toolkit walkthrough
 
-This doc walks through the operator loop the `invoicekit` binary ships today: **pack → show → verify → replay → unpack → diff**, plus `timestamp` for RFC 3161 manifest stamping. Plus the environment-diagnostic command `doctor`, the migration tool `migrate-archive`, the capability resolver `capabilities`, and the code-list updater `codelist-update`.
+This doc walks through the operator loop the `invoicekit` binary ships today: **pack → show → verify → replay → unpack → diff**, plus `timestamp` for RFC 3161 manifest stamping. Plus the interactive `repl`, the environment-diagnostic command `doctor`, the migration tool `migrate-archive`, the capability resolver `capabilities`, and the code-list updater `codelist-update`.
 
 Every subcommand:
 
@@ -149,6 +149,28 @@ invoicekit diff <left.ikb> <right.ikb> [--json]
 Per-artefact verdicts: `byte-equal`, `changed`, `only-in-left`, `only-in-right`. Human output prints `[EQ|CHG|L  |  R]` tags per id; `--json` emits the full structured report.
 
 Exit `0` on byte-equal across all artefacts, `1` on any diff, `2` on usage error.
+
+### `repl`
+
+Open a `rustyline` shell around the same subcommand runners:
+
+```
+invoicekit repl
+```
+
+Inside the shell, omit the binary name:
+
+```
+invoicekit> tenant acme
+invoicekit> draft sample
+invoicekit> pack dist.ikb
+invoicekit> show dist.ikb
+invoicekit> verify dist.ikb
+invoicekit> state --json
+invoicekit> exit
+```
+
+State is scoped to the current session. `tenant ID` stores the current tenant and injects `--tenant ID` into `pack` unless the command already supplied a tenant. `draft PATH` stores the current invoice draft directory; `pack <output.ikb>` uses it as the input directory.
 
 ### `doctor`
 
