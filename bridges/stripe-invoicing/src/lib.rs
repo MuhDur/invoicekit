@@ -359,9 +359,6 @@ pub fn extract_invoice_summary(invoice: &StripeInvoice) -> Result<TranslationOut
         return Err(BridgeError::MissingCurrency);
     }
 
-    let mut preserved: Vec<LossinessEntry> = Vec::new();
-    let mut lost: Vec<LossinessEntry> = Vec::new();
-
     let currency = invoice.currency.to_uppercase();
     let exponent = currency_minor_unit_exponent(&currency);
     let subtotal_decimal = minor_units_to_decimal(invoice.subtotal, exponent);
@@ -377,60 +374,6 @@ pub fn extract_invoice_summary(invoice: &StripeInvoice) -> Result<TranslationOut
         .clone()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| invoice.id.clone());
-
-    preserved.push(LossinessEntry {
-        path: "/id".to_owned(),
-        reason: "Stripe invoice id preserved as document_number fallback".to_owned(),
-    });
-    preserved.push(LossinessEntry {
-        path: "/currency".to_owned(),
-        reason: "currency lifted to InvoiceKit currency".to_owned(),
-    });
-    preserved.push(LossinessEntry {
-        path: "/total".to_owned(),
-        reason: "total lifted to monetary_total.payable_amount".to_owned(),
-    });
-    preserved.push(LossinessEntry {
-        path: "/subtotal".to_owned(),
-        reason: "subtotal lifted to monetary_total.tax_exclusive_amount".to_owned(),
-    });
-    preserved.push(LossinessEntry {
-        path: "/lines".to_owned(),
-        reason: format!(
-            "{} line item(s) lifted to commercial_document.lines",
-            invoice.lines.data.len()
-        ),
-    });
-
-    if invoice.lines.has_more {
-        lost.push(LossinessEntry {
-            path: "/lines/has_more".to_owned(),
-            reason: "Stripe truncated the line list; operator must paginate the Stripe API \
-                     to fetch the remaining lines before treating the bundle as complete"
-                .to_owned(),
-        });
-    }
-
-    if invoice.hosted_invoice_url.is_some() {
-        lost.push(LossinessEntry {
-            path: "/hosted_invoice_url".to_owned(),
-            reason: "Stripe's hosted-invoice URL is not part of the InvoiceKit IR".to_owned(),
-        });
-    }
-    if invoice.invoice_pdf.is_some() {
-        lost.push(LossinessEntry {
-            path: "/invoice_pdf".to_owned(),
-            reason: "Stripe-rendered PDF is replaced by the InvoiceKit-rendered PDF".to_owned(),
-        });
-    }
-    for key in invoice.metadata.keys() {
-        lost.push(LossinessEntry {
-            path: format!("/metadata/{key}"),
-            reason:
-                "Stripe metadata key not part of the IR (operator may map it via tenant config)"
-                    .to_owned(),
-        });
-    }
 
     let lines: Vec<StripeLineSummary> = invoice
         .lines
@@ -461,11 +404,75 @@ pub fn extract_invoice_summary(invoice: &StripeInvoice) -> Result<TranslationOut
             lines,
         },
         lossiness: LossinessLedger {
-            preserved,
-            lost,
+            preserved: preserved_lossiness_entries(invoice),
+            lost: lost_lossiness_entries(invoice),
             ..Default::default()
         },
     })
+}
+
+fn preserved_lossiness_entries(invoice: &StripeInvoice) -> Vec<LossinessEntry> {
+    vec![
+        LossinessEntry {
+            path: "/id".to_owned(),
+            reason: "Stripe invoice id preserved as document_number fallback".to_owned(),
+        },
+        LossinessEntry {
+            path: "/currency".to_owned(),
+            reason: "currency lifted to InvoiceKit currency".to_owned(),
+        },
+        LossinessEntry {
+            path: "/total".to_owned(),
+            reason: "total lifted to monetary_total.payable_amount".to_owned(),
+        },
+        LossinessEntry {
+            path: "/subtotal".to_owned(),
+            reason: "subtotal lifted to monetary_total.tax_exclusive_amount".to_owned(),
+        },
+        LossinessEntry {
+            path: "/lines".to_owned(),
+            reason: format!(
+                "{} line item(s) lifted to commercial_document.lines",
+                invoice.lines.data.len()
+            ),
+        },
+    ]
+}
+
+fn lost_lossiness_entries(invoice: &StripeInvoice) -> Vec<LossinessEntry> {
+    let mut lost = Vec::new();
+
+    if invoice.lines.has_more {
+        lost.push(LossinessEntry {
+            path: "/lines/has_more".to_owned(),
+            reason: "Stripe truncated the line list; operator must paginate the Stripe API \
+                     to fetch the remaining lines before treating the bundle as complete"
+                .to_owned(),
+        });
+    }
+
+    if invoice.hosted_invoice_url.is_some() {
+        lost.push(LossinessEntry {
+            path: "/hosted_invoice_url".to_owned(),
+            reason: "Stripe's hosted-invoice URL is not part of the InvoiceKit IR".to_owned(),
+        });
+    }
+    if invoice.invoice_pdf.is_some() {
+        lost.push(LossinessEntry {
+            path: "/invoice_pdf".to_owned(),
+            reason: "Stripe-rendered PDF is replaced by the InvoiceKit-rendered PDF".to_owned(),
+        });
+    }
+    lost.extend(invoice.metadata.keys().map(|key| {
+        LossinessEntry {
+            path: format!("/metadata/{key}"),
+            reason:
+                "Stripe metadata key not part of the IR (operator may map it via tenant config)"
+                    .to_owned(),
+        }
+    }));
+
+    lost
 }
 
 fn extract_line(line: &StripeInvoiceLine, exponent: u32) -> StripeLineSummary {
@@ -735,15 +742,15 @@ mod tests {
     fn extract_invoice_summary_records_lossiness() {
         let event = parse_event(webhook_body()).unwrap();
         let outcome = extract_invoice_summary(&event.data.object).unwrap();
-        let has_lost = |path: &str| outcome.lossiness.lost.iter().any(|e| e.path == path);
-        let has_preserved = |path: &str| outcome.lossiness.preserved.iter().any(|e| e.path == path);
-        assert!(has_lost("/hosted_invoice_url"));
-        assert!(has_lost("/invoice_pdf"));
-        assert!(has_lost("/metadata/order_id"));
-        assert!(!has_lost("/lines/has_more"));
-        assert!(has_preserved("/currency"));
-        assert!(has_preserved("/total"));
-        assert!(has_preserved("/lines"));
+        let lost_paths = lossiness_paths(&outcome.lossiness.lost);
+        let preserved_paths = lossiness_paths(&outcome.lossiness.preserved);
+        assert!(lost_paths.contains(&"/hosted_invoice_url"));
+        assert!(lost_paths.contains(&"/invoice_pdf"));
+        assert!(lost_paths.contains(&"/metadata/order_id"));
+        assert!(!lost_paths.contains(&"/lines/has_more"));
+        assert!(preserved_paths.contains(&"/currency"));
+        assert!(preserved_paths.contains(&"/total"));
+        assert!(preserved_paths.contains(&"/lines"));
     }
 
     #[test]
@@ -759,11 +766,8 @@ mod tests {
         let mut event = parse_event(webhook_body()).unwrap();
         event.data.object.lines.has_more = true;
         let outcome = extract_invoice_summary(&event.data.object).unwrap();
-        assert!(outcome
-            .lossiness
-            .lost
-            .iter()
-            .any(|e| e.path == "/lines/has_more"));
+        let lost_paths = lossiness_paths(&outcome.lossiness.lost);
+        assert!(lost_paths.contains(&"/lines/has_more"));
     }
 
     #[test]
@@ -814,5 +818,9 @@ mod tests {
         assert!(!is_leap_year(2023));
         assert!(!is_leap_year(1900));
         assert!(is_leap_year(2000));
+    }
+
+    fn lossiness_paths(entries: &[LossinessEntry]) -> Vec<&str> {
+        entries.iter().map(|entry| entry.path.as_str()).collect()
     }
 }
