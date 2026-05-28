@@ -8,21 +8,21 @@
 //
 /**
  * Canonical schema version carried by every serialized document.
- * 
+ *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "SchemaVersion".
  */
 export type SchemaVersion = "1.0"
 /**
  * Top-level document type.
- * 
+ *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "DocumentType".
  */
 export type DocumentType = ("invoice" | "credit_note" | "debit_note" | "pro_forma" | "self_billed")
 /**
  * Payment rail or instruction kind.
- * 
+ *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "PaymentInstructionKind".
  */
@@ -129,7 +129,7 @@ contact?: (Contact | null)
 }
 /**
  * Party tax identifier.
- * 
+ *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "PartyTaxId".
  */
@@ -170,7 +170,7 @@ country: string
 }
 /**
  * Contact details for a party.
- * 
+ *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "Contact".
  */
@@ -212,7 +212,7 @@ contact?: (Contact | null)
 }
 /**
  * Commercial party.
- * 
+ *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "Party".
  */
@@ -237,7 +237,7 @@ contact?: (Contact | null)
 }
 /**
  * Payment terms attached to the document.
- * 
+ *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "PaymentTerms".
  */
@@ -253,7 +253,7 @@ due_date?: (string | null)
 }
 /**
  * Payment instruction.
- * 
+ *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "PaymentInstruction".
  */
@@ -273,7 +273,7 @@ reference?: (string | null)
 }
 /**
  * Document line.
- * 
+ *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "DocumentLine".
  */
@@ -313,20 +313,20 @@ extensions?: JurisdictionExtension[]
 }
 /**
  * Polymorphic jurisdiction or profile extension payload.
- * 
+ *
  *  # URN scheme casing (ebaq)
- * 
+ *
  *  RFC 8141 declares the URN scheme name case-insensitive. Real producers
  *  in the wild (notably some legacy XML exporters) emit `URN:` or `Urn:`.
  *  Both [`JurisdictionExtension::new`] and the [`Deserialize`] implementation
  *  accept any casing of the scheme prefix and normalise it to the canonical
  *  lowercase `urn:` so equality checks remain stable.
- * 
+ *
  *  The namespace identifier and namespace-specific string are preserved
  *  verbatim. Rule-pack URN registries stay as shipped — Peppol's UNCL1001
  *  codes are lowercase by definition, ZUGFeRD profile URNs are mixed case,
  *  and changing those bytes would break canonical signing payloads.
- * 
+ *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "JurisdictionExtension".
  */
@@ -345,7 +345,7 @@ payload: {
 }
 /**
  * Tax category summary.
- * 
+ *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "TaxCategorySummary".
  */
@@ -402,7 +402,7 @@ payable_amount: string
 }
 /**
  * Content-addressed attachment reference.
- * 
+ *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "Attachment".
  */
@@ -422,7 +422,7 @@ media_type: string
 }
 /**
  * Reference to another commercial document.
- * 
+ *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "DocumentReference".
  */
@@ -442,7 +442,7 @@ issue_date?: (string | null)
 }
 /**
  * Localized human text.
- * 
+ *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "LocalizedString".
  */
@@ -475,7 +475,7 @@ source_system?: (string | null)
 }
 /**
  * Postal address for a supplier, customer, payee, or other party.
- * 
+ *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "PostalAddress".
  */
@@ -503,7 +503,7 @@ country: string
 }
 /**
  * Document monetary totals.
- * 
+ *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "MonetaryTotal".
  */
@@ -539,7 +539,7 @@ payable_amount: string
 }
 /**
  * Operational metadata for a document.
- * 
+ *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
  * via the `definition` "DocumentMeta".
  */

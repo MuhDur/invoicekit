@@ -8,14 +8,14 @@
 //
 /**
  * Severity assigned by the rule pack.
- * 
+ *
  * This interface was referenced by `ValidationResult`'s JSON-Schema
  * via the `definition` "Severity".
  */
 export type Severity = ("fatal" | "error" | "warning" | "info")
 /**
  * EN 16931 business term (BT) or business group (BG) reference.
- * 
+ *
  * This interface was referenced by `ValidationResult`'s JSON-Schema
  * via the `definition` "BusinessTerm".
  */
@@ -34,11 +34,11 @@ kind: "business_group"
 })
 /**
  * Source-document pointer.
- * 
+ *
  *  XML-backed documents use XPath; JSON-backed documents use RFC 6901 JSON
  *  Pointer. The two forms are distinct types so a backend cannot mix them
  *  up by accident.
- * 
+ *
  * This interface was referenced by `ValidationResult`'s JSON-Schema
  * via the `definition` "Location".
  */
@@ -112,11 +112,11 @@ trace?: (ValidationTrace | null)
 }
 /**
  * Concrete remediation hint.
- * 
+ *
  *  Backends populate this when they can deterministically infer a fix
  *  (e.g. set `currency` to `EUR`, drop the duplicate allowance line); UIs
  *  can then offer the user a one-click apply.
- * 
+ *
  * This interface was referenced by `ValidationResult`'s JSON-Schema
  * via the `definition` "SuggestedFix".
  */
@@ -151,12 +151,12 @@ url?: (string | null)
 }
 /**
  * Optional trace context owned by the T-032a extension.
- * 
+ *
  *  Carries the backend identifier (`rust-native`, `jvm:kosit`, …), the
  *  trace identifier the backend assigned, and any backend-specific
  *  debug fields. The schema deliberately leaves the inner shape opaque so
  *  new backends can ship without modifying this crate.
- * 
+ *
  * This interface was referenced by `ValidationResult`'s JSON-Schema
  * via the `definition` "ValidationTrace".
  */
@@ -182,7 +182,7 @@ details?: {
 }
 /**
  * Authoritative citation for the rule.
- * 
+ *
  * This interface was referenced by `ValidationResult`'s JSON-Schema
  * via the `definition` "Citation".
  */

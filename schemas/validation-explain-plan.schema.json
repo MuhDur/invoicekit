@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ValidationExplainPlan",
+  "description": "Complete ordered explanation of a validator run.\n\n The plan is intentionally backend-neutral: a pure Rust validator, JVM\n sidecar, or partner validator can all emit the same ordered rule steps.\n Each step records where the rule evaluated, the machine-readable inputs the\n backend considered safe to expose, its decision, and citations for audit.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "description": "Schema version for the explain-plan wire contract.",
+      "type": "string"
+    },
+    "backend": {
+      "description": "Backend identifier, e.g. `rust-native`, `jvm:kosit`, or `partner`.",
+      "type": "string"
+    },
+    "trace_id": {
+      "description": "Deterministic trace identifier assigned by the caller.",
+      "type": "string"
+    },
+    "steps": {
+      "description": "Ordered rule-evaluation steps.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RuleEvaluationStep"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "backend",
+    "trace_id",
+    "steps"
+  ],
+  "$defs": {
+    "RuleEvaluationStep": {
+      "description": "One rule evaluation inside a [`ValidationExplainPlan`].",
+      "type": "object",
+      "properties": {
+        "rule_id": {
+          "description": "Identifier of the evaluated rule.",
+          "type": "string"
+        },
+        "evaluated_at_path": {
+          "description": "Document path at which the rule evaluated.",
+          "type": "string"
+        },
+        "inputs": {
+          "description": "Machine-readable inputs the backend considered safe to expose.",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "decision": {
+          "description": "Decision produced by the rule.",
+          "$ref": "#/$defs/RuleEvaluationDecision"
+        },
+        "citations": {
+          "description": "Citations that justify the rule.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExplainPlanCitation"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "rule_id",
+        "evaluated_at_path",
+        "inputs",
+        "decision",
+        "citations"
+      ]
+    },
+    "RuleEvaluationDecision": {
+      "description": "Decision emitted for one rule evaluation.",
+      "oneOf": [
+        {
+          "description": "The rule evaluated and produced no finding.",
+          "type": "string",
+          "const": "pass"
+        },
+        {
+          "description": "The rule produced an informational finding.",
+          "type": "string",
+          "const": "info"
+        },
+        {
+          "description": "The rule produced a warning finding.",
+          "type": "string",
+          "const": "warning"
+        },
+        {
+          "description": "The rule produced an error or fatal finding.",
+          "type": "string",
+          "const": "fail"
+        }
+      ]
+    },
+    "ExplainPlanCitation": {
+      "description": "Citation form embedded in explain-plan steps.\n\n This intentionally has a distinct type name from [`Citation`] so generated\n TypeScript bindings can re-export validation-result and explain-plan types\n from one flat package without duplicate `Citation` symbols.",
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "Source document (e.g. `EN 16931`, `Peppol BIS 3.0`, `XRechnung 3.0`).",
+          "type": "string"
+        },
+        "section": {
+          "description": "Section identifier inside the source (e.g. `BR-01`, `§5.2`).",
+          "type": "string"
+        },
+        "url": {
+          "description": "Optional URL that resolves to the cited section online.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "source",
+        "section"
+      ]
+    }
+  }
+}

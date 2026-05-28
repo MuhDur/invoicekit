@@ -1,6 +1,6 @@
 # `invoicekit` CLI — the trust-toolkit walkthrough
 
-This doc walks through the operator loop the `invoicekit` binary ships today: **pack → show → verify → replay → unpack → diff**, plus `timestamp` for RFC 3161 manifest stamping. Plus the interactive `repl`, the environment-diagnostic command `doctor`, the migration tool `migrate-archive`, the capability resolver `capabilities`, and the code-list updater `codelist-update`.
+This doc walks through the operator loop the `invoicekit` binary ships today: **validate → pack → show → verify → replay → unpack → diff**, plus `timestamp` for RFC 3161 manifest stamping. Plus the interactive `repl`, the environment-diagnostic command `doctor`, the migration tool `migrate-archive`, the capability resolver `capabilities`, and the code-list updater `codelist-update`.
 
 Every subcommand:
 
@@ -29,27 +29,30 @@ echo '{"id":"INV-DEMO-1"}' > sample/canonical.json
 echo '<Invoice/>'           > sample/formats/ubl.xml
 echo '<CrossIndustryInvoice/>' > sample/formats/cii.xml
 
-# 2. Pack a deterministic evidence bundle.
+# 2. Validate the XML before it enters a bundle.
+invoicekit validate sample/formats/ubl.xml --explain
+
+# 3. Pack a deterministic evidence bundle.
 invoicekit pack sample dist.ikb \
   --tenant acme \
   --trace trace-2026-05-28-001 \
   --created-at 2026-05-28T05:00:00Z
 
-# 3. Inspect what's inside without writing anything to disk.
+# 4. Inspect what's inside without writing anything to disk.
 invoicekit show dist.ikb
 
-# 4. Verify the content-address ledger.
+# 5. Verify the content-address ledger.
 invoicekit verify dist.ikb
 
-# 5. Replay through the identity replayer (deterministic
+# 6. Replay through the identity replayer (deterministic
 #    byte-equal baseline; once the engine wires in real
 #    replayers this will surface drift).
 invoicekit replay dist.ikb
 
-# 6. Extract for human inspection.
+# 7. Extract for human inspection.
 invoicekit unpack dist.ikb extracted/
 
-# 7. Diff two bundles artefact-by-artefact (useful for audit).
+# 8. Diff two bundles artefact-by-artefact (useful for audit).
 invoicekit pack sample dist-v2.ikb --created-at 2026-05-28T05:00:00Z
 invoicekit diff dist.ikb dist-v2.ikb     # → byte-equal, exit 0
 ```
@@ -103,6 +106,18 @@ invoicekit verify <bundle.ikb>
 ```
 
 Prints a structured JSON report; exit `0` on pass, `1` on any failed check, `2` on usage error.
+
+### `validate`
+
+Validate UBL 2.1 Invoice/CreditNote or UN/CEFACT CII XML with the native EN 16931 rule set:
+
+```
+invoicekit validate <file.xml> [--json] [--explain]
+```
+
+Default output is a compact human summary. `--json` emits machine-readable findings. `--explain` switches output to the T-032a explain-plan trace: every implemented rule in evaluation order with `rule_id`, `evaluated_at_path`, `inputs`, `decision`, and `citations`. Combine `--explain --json` for the schema-backed JSON form, or use `--explain` alone for Markdown.
+
+Exit `0` when the document parses and has no findings, `1` when validation findings exist, `2` on usage errors, unreadable files, unsupported XML roots, or malformed XML.
 
 ### `replay`
 

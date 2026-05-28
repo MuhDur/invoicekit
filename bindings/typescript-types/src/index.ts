@@ -21,4 +21,5 @@
 
 export type * from "./generated/invoicekit_capabilities_v1.js";
 export type * from "./generated/invoicekit_ir_v1.js";
+export type * from "./generated/validation_explain_plan.js";
 export type * from "./generated/validation_result.js";

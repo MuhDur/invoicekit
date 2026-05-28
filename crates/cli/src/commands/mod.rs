@@ -20,6 +20,7 @@ pub mod replay;
 pub mod show;
 pub mod timestamp;
 pub mod unpack;
+pub mod validate;
 pub mod verify;
 pub mod version;
 
@@ -41,6 +42,7 @@ pub fn dispatch(subcommand: &str, argv: &[String]) -> Option<ExitCode> {
         "show" => show::run(argv),
         "timestamp" => timestamp::run(argv),
         "unpack" => unpack::run(argv),
+        "validate" => validate::run(argv),
         "verify" => verify::run(argv),
         "version" | "--version" | "-V" => version::run(argv),
         _ => return None,

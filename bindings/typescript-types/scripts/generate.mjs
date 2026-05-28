@@ -20,7 +20,7 @@
 // JavaScript/TypeScript. Never use npm, yarn, or pnpm in our own
 // development scripts.").
 
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative, resolve } from "node:path";
@@ -76,7 +76,7 @@ async function generate({ check }) {
     const raw = await readFile(path, "utf8");
     const schema = JSON.parse(raw);
     const ts = await compile(schema, moduleNameFor(file), COMPILE_OPTS);
-    fresh.set(moduleFor(file), HEADER + ts);
+    fresh.set(moduleFor(file), HEADER + stripTrailingWhitespace(ts));
   }
   const indexContent = HEADER + buildIndex([...fresh.keys()]);
 
@@ -123,7 +123,6 @@ async function generate({ check }) {
     return;
   }
 
-  await rm(OUT_DIR, { recursive: true, force: true });
   await mkdir(OUT_DIR, { recursive: true });
   for (const [mod, contents] of fresh) {
     await writeFile(join(OUT_DIR, `${mod}.d.ts`), contents);
@@ -134,6 +133,10 @@ async function generate({ check }) {
 
 function moduleFor(schemaFile) {
   return moduleNameFor(schemaFile);
+}
+
+function stripTrailingWhitespace(contents) {
+  return contents.replace(/[ \t]+$/gm, "");
 }
 
 function buildIndex(modules) {
