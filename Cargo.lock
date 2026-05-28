@@ -2093,6 +2093,12 @@ dependencies = [
 [[package]]
 name = "invoicekit-bridge-maxio"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-ir",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-bridge-recurly"
