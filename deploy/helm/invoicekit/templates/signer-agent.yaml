@@ -1,0 +1,43 @@
+{{/*
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2026 The InvoiceKit Authors
+*/}}
+{{- if .Values.signerAgent.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "invoicekit.fullname" . }}-signer-agent
+  labels:
+    {{- include "invoicekit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: signer-agent
+spec:
+  selector:
+    matchLabels:
+      {{- include "invoicekit.selectorLabels" (merge (dict "component" "signer-agent") .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "invoicekit.selectorLabels" (merge (dict "component" "signer-agent") .) | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: signer-agent
+          image: {{ include "invoicekit.image" (merge (dict "image" .Values.signerAgent.image) .) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: INVOICEKIT_SIGNER_SOCK
+              value: /run/invoicekit/signer.sock
+          resources:
+            {{- toYaml .Values.signerAgent.resources | nindent 12 }}
+          volumeMounts:
+            - name: signer-socket
+              mountPath: /run/invoicekit
+      volumes:
+        - name: signer-socket
+          hostPath:
+            path: /run/invoicekit
+            type: DirectoryOrCreate
+{{- end }}

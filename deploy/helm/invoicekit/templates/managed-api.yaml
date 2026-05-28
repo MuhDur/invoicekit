@@ -1,0 +1,132 @@
+{{/*
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2026 The InvoiceKit Authors
+*/}}
+{{- if .Values.managedApi.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "invoicekit.fullname" . }}-managed-api
+  labels:
+    {{- include "invoicekit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: managed-api
+spec:
+  type: {{ .Values.managedApi.service.type }}
+  ports:
+    - port: {{ .Values.managedApi.service.port }}
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "invoicekit.selectorLabels" (merge (dict "component" "managed-api") .) | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "invoicekit.fullname" . }}-managed-api
+  labels:
+    {{- include "invoicekit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: managed-api
+spec:
+  replicas: {{ .Values.managedApi.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "invoicekit.selectorLabels" (merge (dict "component" "managed-api") .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "invoicekit.selectorLabels" (merge (dict "component" "managed-api") .) | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: managed-api
+          image: {{ include "invoicekit.image" (merge (dict "image" .Values.managedApi.image) .) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: INVOICEKIT_POSTGRES_URL
+              value: postgres://{{ .Values.postgres.auth.username }}@{{ include "invoicekit.fullname" . }}-postgres:5432/{{ .Values.postgres.auth.database }}
+            - name: INVOICEKIT_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.auth.existingSecret }}
+                  key: password
+            - name: INVOICEKIT_VALIDATOR_KOSIT_URL
+              value: http://{{ include "invoicekit.fullname" . }}-validator-kosit:{{ .Values.validators.kosit.port }}
+            - name: INVOICEKIT_VALIDATOR_PHIVE_URL
+              value: http://{{ include "invoicekit.fullname" . }}-validator-phive:{{ .Values.validators.phive.port }}
+            - name: INVOICEKIT_VALIDATOR_SAXON_URL
+              value: http://{{ include "invoicekit.fullname" . }}-validator-saxon:{{ .Values.validators.saxon.port }}
+            - name: INVOICEKIT_VALIDATOR_VERAPDF_URL
+              value: http://{{ include "invoicekit.fullname" . }}-validator-verapdf:{{ .Values.validators.verapdf.port }}
+            - name: INVOICEKIT_PHASE4_URL
+              value: http://{{ include "invoicekit.fullname" . }}-validator-phase4:{{ .Values.validators.phase4.port }}
+            - name: INVOICEKIT_SIGNER_SOCK
+              value: /run/invoicekit/signer.sock
+            - name: INVOICEKIT_ARCHIVE_S3_ENDPOINT
+              value: {{ default (printf "http://%s-archive:9000" (include "invoicekit.fullname" .)) .Values.archive.endpoint }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.managedApi.resources | nindent 12 }}
+          volumeMounts:
+            - name: signer-socket
+              mountPath: /run/invoicekit
+      volumes:
+        - name: signer-socket
+          hostPath:
+            path: /run/invoicekit
+            type: DirectoryOrCreate
+{{- if .Values.managedApi.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "invoicekit.fullname" . }}-managed-api
+  labels:
+    {{- include "invoicekit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: managed-api
+  {{- with .Values.managedApi.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.managedApi.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  rules:
+    {{- range .Values.managedApi.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "invoicekit.fullname" $ }}-managed-api
+                port:
+                  number: {{ $.Values.managedApi.service.port }}
+          {{- end }}
+    {{- end }}
+  {{- with .Values.managedApi.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}
