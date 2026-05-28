@@ -100,6 +100,7 @@ members = [
   "crates/signer",
   "crates/signer-cfdi",
   "crates/signer-eidas",
+  "crates/signer-ksef",
   "crates/signer-zatca",
   "crates/timestamping",
   "crates/transmit-peppol-native-as4",
