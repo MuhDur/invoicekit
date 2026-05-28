@@ -2,7 +2,7 @@
 // Copyright 2026 The InvoiceKit Authors
 
 //! `invoicekit-evidence` — signed evidence bundle format
-//! (`.invoicekit` directory tree / `.ikb` portable archive).
+//! (`.invoicekit` directory tree / `.ikb` tar.zst portable archive).
 //!
 //! The bundle is the deterministic record of every invoice
 //! operation: the canonical IR JSON, the format artefacts
@@ -27,14 +27,15 @@
 //!
 //! `pack(bundle) == pack(bundle)` on every run, on every
 //! platform, given a bundle whose [`Manifest::created_at`] is
-//! held constant. The container header carries no timestamps,
-//! no host metadata, and writes artefacts in lexicographic
-//! order by name. This is the bit-stability the
-//! `plans/PLAN.md` §2.10 contract requires for hash-stable
-//! audit replay.
+//! held constant. The `.ikb` form is a zstd-compressed tar
+//! archive whose entries carry normalized uid/gid/mtime/mode
+//! metadata and are written in lexicographic order by path.
+//! This is the bit-stability the `plans/PLAN.md` §2.10 and
+//! §4.7 contracts require for hash-stable audit replay.
 
 use std::collections::BTreeMap;
-use std::io::Read;
+use std::io::{Cursor, Read, Write};
+use std::path::{Component, Path};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -42,9 +43,6 @@ use thiserror::Error;
 /// Schema version embedded in every manifest. Bumped only on
 /// breaking changes to the container or the manifest shape.
 pub const SCHEMA_VERSION: &str = "1.0";
-
-/// Container magic bytes — `b"IKB1"` (InvoiceKit Bundle, v1).
-pub const MAGIC: [u8; 4] = *b"IKB1";
 
 /// Reserved artefact id for the bundle manifest. The manifest
 /// is itself an artefact so the signing substrate (T-083) can
@@ -102,21 +100,22 @@ pub struct EvidenceBundle {
 /// Errors returned by the evidence bundle codec.
 #[derive(Debug, Error)]
 pub enum BundleError {
-    /// Container header magic did not match [`MAGIC`].
-    #[error("bundle magic mismatch: got {0:?}")]
-    BadMagic([u8; 4]),
-    /// Container header advertises a schema version this build
-    /// does not understand.
+    /// The `manifest.json` advertises a schema version this
+    /// build does not understand.
     #[error("bundle schema version {0} unsupported by this build")]
     UnsupportedSchema(String),
-    /// Container ended before the declared payload length was
-    /// consumed.
-    #[error("bundle truncated: expected {expected} bytes, found {found}")]
-    Truncated {
-        /// Bytes the header promised.
-        expected: u64,
-        /// Bytes the reader actually saw.
-        found: u64,
+    /// A tar entry path was absolute, contained `..`, was empty,
+    /// used a Windows separator, or was not valid UTF-8.
+    #[error("bundle artefact path is invalid: {0}")]
+    InvalidArtefactPath(String),
+    /// The `.ikb` tar contained an entry type this reader does
+    /// not support.
+    #[error("bundle artefact {id} has unsupported tar entry type {entry_type}")]
+    UnsupportedTarEntry {
+        /// Artefact path.
+        id: String,
+        /// Tar entry type byte rendered for diagnostics.
+        entry_type: String,
     },
     /// A bundle entry's recorded hash did not match the
     /// re-computed BLAKE3 hash of its bytes.
@@ -143,7 +142,7 @@ pub enum BundleError {
     /// The manifest JSON did not parse.
     #[error("bundle manifest JSON parse failure: {0}")]
     BadManifestJson(String),
-    /// IO error during pack/unpack.
+    /// IO, tar, or zstd error during pack/unpack.
     #[error("bundle io error: {0}")]
     Io(String),
 }
@@ -182,20 +181,14 @@ pub fn manifest_for(
     }
 }
 
-/// Pack a bundle into bit-stable container bytes.
+/// Pack a bundle into bit-stable `.ikb` bytes.
 ///
-/// Container layout:
+/// The portable form is a zstd-compressed tar archive. Every
+/// entry is a regular file; entries are sorted by artefact id
+/// and carry normalized tar metadata:
 ///
 /// ```text
-///   [magic: 4 bytes]            // b"IKB1"
-///   [schema_version_len: u8]
-///   [schema_version: bytes]
-///   [entry_count: u32 LE]
-///   --- per entry, sorted by id ---
-///     [id_len: u16 LE]
-///     [id: bytes]
-///     [data_len: u64 LE]
-///     [data: bytes]
+/// uid=0, gid=0, mtime=0, mode=0644
 /// ```
 ///
 /// The manifest is serialised as `manifest.json` and inserted
@@ -223,30 +216,17 @@ pub fn pack(bundle: &EvidenceBundle) -> Result<Vec<u8>, BundleError> {
     entries.push((MANIFEST_ARTEFACT_ID.to_owned(), manifest_bytes.as_slice()));
     entries.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let mut out: Vec<u8> = Vec::with_capacity(
-        16 + entries
-            .iter()
-            .map(|(id, data)| id.len() + data.len() + 10)
-            .sum::<usize>(),
-    );
-    out.extend_from_slice(&MAGIC);
-    let schema_bytes = SCHEMA_VERSION.as_bytes();
-    let schema_len = u8::try_from(schema_bytes.len())
-        .map_err(|_| BundleError::Io("schema version too long".to_owned()))?;
-    out.push(schema_len);
-    out.extend_from_slice(schema_bytes);
-    let entry_count = u32::try_from(entries.len())
-        .map_err(|_| BundleError::Io("entry count overflows u32".to_owned()))?;
-    out.extend_from_slice(&entry_count.to_le_bytes());
-    for (id, data) in entries {
-        let id_len = u16::try_from(id.len())
-            .map_err(|_| BundleError::Io(format!("entry id `{id}` too long")))?;
-        out.extend_from_slice(&id_len.to_le_bytes());
-        out.extend_from_slice(id.as_bytes());
-        out.extend_from_slice(&(data.len() as u64).to_le_bytes());
-        out.extend_from_slice(data);
+    let mut tar_bytes = Vec::new();
+    {
+        let mut builder = tar::Builder::new(&mut tar_bytes);
+        for (id, data) in entries {
+            append_tar_entry(&mut builder, &id, data)?;
+        }
+        builder
+            .finish()
+            .map_err(|e| BundleError::Io(e.to_string()))?;
     }
-    Ok(out)
+    zstd::stream::encode_all(Cursor::new(tar_bytes), 0).map_err(|e| BundleError::Io(e.to_string()))
 }
 
 /// Unpack container bytes into an [`EvidenceBundle`].
@@ -260,61 +240,31 @@ pub fn pack(bundle: &EvidenceBundle) -> Result<Vec<u8>, BundleError> {
 /// Returns [`BundleError`] when the container is malformed,
 /// truncated, or carries hash drift.
 pub fn unpack(bytes: &[u8]) -> Result<EvidenceBundle, BundleError> {
-    let mut reader = Cursor::new(bytes);
-    let mut magic = [0_u8; 4];
-    reader
-        .read_exact(&mut magic)
-        .map_err(|e| BundleError::Io(e.to_string()))?;
-    if magic != MAGIC {
-        return Err(BundleError::BadMagic(magic));
-    }
-    let mut schema_len = [0_u8; 1];
-    reader
-        .read_exact(&mut schema_len)
-        .map_err(|e| BundleError::Io(e.to_string()))?;
-    let mut schema_bytes = vec![0_u8; schema_len[0] as usize];
-    reader
-        .read_exact(&mut schema_bytes)
-        .map_err(|e| BundleError::Io(e.to_string()))?;
-    let schema = String::from_utf8(schema_bytes)
-        .map_err(|e| BundleError::Io(format!("schema version is not UTF-8: {e}")))?;
-    if schema != SCHEMA_VERSION {
-        return Err(BundleError::UnsupportedSchema(schema));
-    }
-    let mut entry_count_bytes = [0_u8; 4];
-    reader
-        .read_exact(&mut entry_count_bytes)
-        .map_err(|e| BundleError::Io(e.to_string()))?;
-    let entry_count = u32::from_le_bytes(entry_count_bytes);
-
+    let decoded =
+        zstd::stream::decode_all(Cursor::new(bytes)).map_err(|e| BundleError::Io(e.to_string()))?;
+    let mut archive = tar::Archive::new(Cursor::new(decoded));
     let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-    for _ in 0..entry_count {
-        let mut id_len_bytes = [0_u8; 2];
-        reader
-            .read_exact(&mut id_len_bytes)
+    for entry in archive
+        .entries()
+        .map_err(|e| BundleError::Io(e.to_string()))?
+    {
+        let mut entry = entry.map_err(|e| BundleError::Io(e.to_string()))?;
+        let entry_type = entry.header().entry_type();
+        if entry_type.is_dir() {
+            continue;
+        }
+        let path = entry.path().map_err(|e| BundleError::Io(e.to_string()))?;
+        let id = artefact_id_from_path(&path)?;
+        if !entry_type.is_file() {
+            return Err(BundleError::UnsupportedTarEntry {
+                id,
+                entry_type: format!("{entry_type:?}"),
+            });
+        }
+        let mut data = Vec::new();
+        entry
+            .read_to_end(&mut data)
             .map_err(|e| BundleError::Io(e.to_string()))?;
-        let id_len = u16::from_le_bytes(id_len_bytes);
-        let mut id_bytes = vec![0_u8; id_len as usize];
-        reader
-            .read_exact(&mut id_bytes)
-            .map_err(|e| BundleError::Io(e.to_string()))?;
-        let id = String::from_utf8(id_bytes)
-            .map_err(|e| BundleError::Io(format!("entry id is not UTF-8: {e}")))?;
-        let mut data_len_bytes = [0_u8; 8];
-        reader
-            .read_exact(&mut data_len_bytes)
-            .map_err(|e| BundleError::Io(e.to_string()))?;
-        let data_len = u64::from_le_bytes(data_len_bytes);
-        let data_len_usize = usize::try_from(data_len).map_err(|_| {
-            BundleError::Io(format!("entry data length {data_len} overflows usize"))
-        })?;
-        let mut data = vec![0_u8; data_len_usize];
-        reader
-            .read_exact(&mut data)
-            .map_err(|_| BundleError::Truncated {
-                expected: data_len,
-                found: 0,
-            })?;
         if artefacts.insert(id.clone(), data).is_some() {
             return Err(BundleError::Io(format!("duplicate artefact id: {id}")));
         }
@@ -325,6 +275,9 @@ pub fn unpack(bytes: &[u8]) -> Result<EvidenceBundle, BundleError> {
         .ok_or(BundleError::MissingManifest)?;
     let manifest: Manifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|e| BundleError::BadManifestJson(e.to_string()))?;
+    if manifest.schema_version != SCHEMA_VERSION {
+        return Err(BundleError::UnsupportedSchema(manifest.schema_version));
+    }
     let bundle = EvidenceBundle {
         manifest,
         artefacts,
@@ -346,6 +299,12 @@ pub fn unpack(bytes: &[u8]) -> Result<EvidenceBundle, BundleError> {
 /// / [`BundleError::UnknownArtefact`] when the manifest and
 /// payload disagree.
 pub fn verify(bundle: &EvidenceBundle) -> Result<(), BundleError> {
+    if bundle.manifest.schema_version != SCHEMA_VERSION {
+        return Err(BundleError::UnsupportedSchema(
+            bundle.manifest.schema_version.clone(),
+        ));
+    }
+
     // Build a quick lookup of manifest entries by id.
     let mut manifest_map: BTreeMap<&str, &ArtefactEntry> = bundle
         .manifest
@@ -385,6 +344,70 @@ pub fn verify(bundle: &EvidenceBundle) -> Result<(), BundleError> {
     Ok(())
 }
 
+fn append_tar_entry<W: Write>(
+    builder: &mut tar::Builder<W>,
+    id: &str,
+    data: &[u8],
+) -> Result<(), BundleError> {
+    validate_artefact_id(id)?;
+    let mut header = tar::Header::new_gnu();
+    header.set_entry_type(tar::EntryType::Regular);
+    header.set_size(data.len() as u64);
+    header.set_mode(0o644);
+    header.set_mtime(0);
+    header.set_uid(0);
+    header.set_gid(0);
+    header.set_cksum();
+    builder
+        .append_data(&mut header, id, Cursor::new(data))
+        .map_err(|e| BundleError::Io(e.to_string()))
+}
+
+fn validate_artefact_id(id: &str) -> Result<(), BundleError> {
+    if id.is_empty() || id.contains('\\') {
+        return Err(BundleError::InvalidArtefactPath(id.to_owned()));
+    }
+    let normalized = artefact_id_from_path(Path::new(id))?;
+    if normalized == id {
+        Ok(())
+    } else {
+        Err(BundleError::InvalidArtefactPath(id.to_owned()))
+    }
+}
+
+fn artefact_id_from_path(path: &Path) -> Result<String, BundleError> {
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => {
+                let Some(part) = part.to_str() else {
+                    return Err(BundleError::InvalidArtefactPath(
+                        path.to_string_lossy().into_owned(),
+                    ));
+                };
+                if part.is_empty() || part == "." || part == ".." || part.contains('\\') {
+                    return Err(BundleError::InvalidArtefactPath(
+                        path.to_string_lossy().into_owned(),
+                    ));
+                }
+                parts.push(part.to_owned());
+            }
+            Component::CurDir => {}
+            _ => {
+                return Err(BundleError::InvalidArtefactPath(
+                    path.to_string_lossy().into_owned(),
+                ));
+            }
+        }
+    }
+    if parts.is_empty() {
+        return Err(BundleError::InvalidArtefactPath(
+            path.to_string_lossy().into_owned(),
+        ));
+    }
+    Ok(parts.join("/"))
+}
+
 /// Canonical Cargo package name of this crate.
 ///
 /// # Examples
@@ -397,34 +420,29 @@ pub const fn crate_name() -> &'static str {
     "invoicekit-evidence"
 }
 
-// Tiny `io::Cursor` wrapper used by `unpack`. The standard
-// `std::io::Cursor` would work too, but this lets us keep
-// the parser surface uniform with the bundle's bespoke layout
-// (`Read::read_exact` is the only thing we need).
-struct Cursor<'a> {
-    bytes: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> Cursor<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, pos: 0 }
-    }
-}
-
-impl Read for Cursor<'_> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let remaining = self.bytes.len().saturating_sub(self.pos);
-        let n = remaining.min(buf.len());
-        buf[..n].copy_from_slice(&self.bytes[self.pos..self.pos + n]);
-        self.pos += n;
-        Ok(n)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tar_entries(bytes: &[u8]) -> Vec<(String, Vec<u8>, u64, u64, u64, u32)> {
+        let decoded = zstd::stream::decode_all(Cursor::new(bytes)).unwrap();
+        let mut archive = tar::Archive::new(Cursor::new(decoded));
+        archive
+            .entries()
+            .unwrap()
+            .map(|entry| {
+                let mut entry = entry.unwrap();
+                let path = entry.path().unwrap().to_string_lossy().into_owned();
+                let uid = entry.header().uid().unwrap();
+                let gid = entry.header().gid().unwrap();
+                let mtime = entry.header().mtime().unwrap();
+                let mode = entry.header().mode().unwrap();
+                let mut data = Vec::new();
+                entry.read_to_end(&mut data).unwrap();
+                (path, data, uid, gid, mtime, mode)
+            })
+            .collect()
+    }
 
     fn sample_bundle(created_at: &str) -> EvidenceBundle {
         let mut artefacts = BTreeMap::new();
@@ -464,7 +482,29 @@ mod tests {
         let a = pack(&bundle).unwrap();
         let b = pack(&bundle).unwrap();
         assert_eq!(a, b);
-        assert!(a.starts_with(&MAGIC));
+        let entries = tar_entries(&a);
+        let ids: Vec<&str> = entries.iter().map(|(id, ..)| id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "canonical.json",
+                "formats/cii.xml",
+                "formats/ubl.xml",
+                "manifest.json",
+                "receipts/peppol.json"
+            ]
+        );
+    }
+
+    #[test]
+    fn pack_normalizes_tar_metadata() {
+        let bundle = sample_bundle("2026-05-27T00:00:00Z");
+        for (_, _, uid, gid, mtime, mode) in tar_entries(&pack(&bundle).unwrap()) {
+            assert_eq!(uid, 0);
+            assert_eq!(gid, 0);
+            assert_eq!(mtime, 0);
+            assert_eq!(mode, 0o644);
+        }
     }
 
     #[test]
@@ -489,26 +529,34 @@ mod tests {
     }
 
     #[test]
-    fn unpack_rejects_bad_magic() {
+    fn unpack_rejects_bad_zstd() {
         let mut bytes = pack(&sample_bundle("2026-05-27T00:00:00Z")).unwrap();
         bytes[0] = b'X';
         let err = unpack(&bytes).unwrap_err();
-        assert!(matches!(err, BundleError::BadMagic(_)));
+        assert!(matches!(err, BundleError::Io(_)));
     }
 
     #[test]
     fn unpack_rejects_unsupported_schema() {
-        // Forge bytes that carry schema "9.9".
-        let mut bytes: Vec<u8> = Vec::new();
-        bytes.extend_from_slice(&MAGIC);
-        bytes.push(3);
-        bytes.extend_from_slice(b"9.9");
-        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        let mut bundle = sample_bundle("2026-05-27T00:00:00Z");
+        bundle.manifest.schema_version = "9.9".to_owned();
+        let bytes = pack(&bundle).unwrap();
         let err = unpack(&bytes).unwrap_err();
-        match err {
-            BundleError::UnsupportedSchema(v) => assert_eq!(v, "9.9"),
-            other => panic!("unexpected: {other:?}"),
-        }
+        assert!(matches!(
+            err,
+            BundleError::UnsupportedSchema(ref v) if v == "9.9"
+        ));
+    }
+
+    #[test]
+    fn verify_rejects_unsupported_schema() {
+        let mut bundle = sample_bundle("2026-05-27T00:00:00Z");
+        bundle.manifest.schema_version = "9.9".to_owned();
+        let err = verify(&bundle).unwrap_err();
+        assert!(matches!(
+            err,
+            BundleError::UnsupportedSchema(ref v) if v == "9.9"
+        ));
     }
 
     #[test]
@@ -519,10 +567,10 @@ mod tests {
         let payload = bundle.artefacts.get_mut("canonical.json").unwrap();
         payload[1] = b'!';
         let err = verify(&bundle).unwrap_err();
-        match err {
-            BundleError::HashDrift { id, .. } => assert_eq!(id, "canonical.json"),
-            other => panic!("unexpected: {other:?}"),
-        }
+        assert!(matches!(
+            err,
+            BundleError::HashDrift { ref id, .. } if id == "canonical.json"
+        ));
     }
 
     #[test]
@@ -530,10 +578,10 @@ mod tests {
         let mut bundle = sample_bundle("2026-05-27T00:00:00Z");
         bundle.artefacts.remove("formats/cii.xml");
         let err = verify(&bundle).unwrap_err();
-        match err {
-            BundleError::MissingArtefact(id) => assert_eq!(id, "formats/cii.xml"),
-            other => panic!("unexpected: {other:?}"),
-        }
+        assert!(matches!(
+            err,
+            BundleError::MissingArtefact(ref id) if id == "formats/cii.xml"
+        ));
     }
 
     #[test]
@@ -543,10 +591,10 @@ mod tests {
             .artefacts
             .insert("formats/unlisted.xml".to_owned(), b"<x/>".to_vec());
         let err = verify(&bundle).unwrap_err();
-        match err {
-            BundleError::UnknownArtefact(id) => assert_eq!(id, "formats/unlisted.xml"),
-            other => panic!("unexpected: {other:?}"),
-        }
+        assert!(matches!(
+            err,
+            BundleError::UnknownArtefact(ref id) if id == "formats/unlisted.xml"
+        ));
     }
 
     #[test]
@@ -554,11 +602,17 @@ mod tests {
         let bytes = pack(&sample_bundle("2026-05-27T00:00:00Z")).unwrap();
         let truncated = &bytes[..bytes.len() - 4];
         let err = unpack(truncated).unwrap_err();
-        // Truncating the final payload causes Io or Truncated.
-        assert!(matches!(
-            err,
-            BundleError::Io(_) | BundleError::Truncated { .. }
-        ));
+        assert!(matches!(err, BundleError::Io(_)));
+    }
+
+    #[test]
+    fn pack_rejects_unsafe_paths() {
+        let mut bundle = sample_bundle("2026-05-27T00:00:00Z");
+        bundle
+            .artefacts
+            .insert("../escape".to_owned(), b"x".to_vec());
+        let err = pack(&bundle).unwrap_err();
+        assert!(matches!(err, BundleError::InvalidArtefactPath(_)));
     }
 
     #[test]
