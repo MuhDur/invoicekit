@@ -2218,6 +2218,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoicekit-inbound-peppol"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-format-cii",
+ "invoicekit-format-detect",
+ "invoicekit-format-ubl",
+ "invoicekit-ir",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "invoicekit-intake-ocr"
 version = "0.0.0"
 
