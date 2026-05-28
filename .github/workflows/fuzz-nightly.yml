@@ -14,10 +14,6 @@ on:
     - cron: "17 3 * * *"
   workflow_dispatch:
 
-concurrency:
-  group: fuzz-nightly-${{ github.workflow }}-${{ matrix.target }}
-  cancel-in-progress: false
-
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -28,6 +24,9 @@ jobs:
     name: cargo-fuzz nightly ${{ matrix.target }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    concurrency:
+      group: fuzz-nightly-${{ github.workflow }}-${{ matrix.target }}
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:

@@ -6,10 +6,6 @@ on:
   pull_request:
     branches: [main]
 
-concurrency:
-  group: fuzz-${{ github.workflow }}-${{ github.ref }}-${{ matrix.target }}
-  cancel-in-progress: true
-
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -19,6 +15,9 @@ jobs:
   fuzz:
     name: cargo-fuzz ${{ matrix.target }}
     runs-on: ubuntu-latest
+    concurrency:
+      group: fuzz-${{ github.workflow }}-${{ github.ref }}-${{ matrix.target }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
