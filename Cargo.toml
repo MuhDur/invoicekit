@@ -101,6 +101,8 @@ members = [
   "crates/signer-cfdi",
   "crates/signer-eidas",
   "crates/signer-ksef",
+  "crates/signer-nfe",
+  "crates/signer-sdi",
   "crates/signer-zatca",
   "crates/timestamping",
   "crates/transmit-peppol-native-as4",
