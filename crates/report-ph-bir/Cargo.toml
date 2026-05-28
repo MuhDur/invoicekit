@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
 [package]
 name = "invoicekit-report-ph-bir"
 version.workspace = true
@@ -7,12 +10,17 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit workspace member: invoicekit-report-ph-bir"
+description = "Philippines BIR EIS (Electronic Invoicing System) clearance adapter. Adds EisDocumentKind + TIN + EIS-issued ATP envelope. The live BIR REST integration lands in a follow-up report-ph-bir-http crate."
 publish = false
 
 [lib]
 name = "invoicekit_report_ph_bir"
 path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
 
 [lints]
 workspace = true
