@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>InvoiceKit benchmark dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 1100px; color: #111; padding: 0 1rem; }
+  h1 { margin-bottom: 0.25rem; }
+  .subtitle { color: #666; margin-top: 0; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+  th, td { border-bottom: 1px solid #eee; padding: 0.5rem; text-align: right; font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; }
+  tr.ok td { background: #f4fff4; }
+  tr.close td { background: #fff8e0; }
+  tr.over td { background: #ffe4e1; }
+  footer { color: #888; margin-top: 2rem; font-size: 0.85rem; }
+  code { background: #f0f0f0; padding: 0 4px; border-radius: 3px; }
+  details { margin-top: 1rem; }
+  summary { cursor: pointer; font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>InvoiceKit benchmark dashboard</h1>
+<p class="subtitle">
+  Criterion benchmark means per engine operation, compared against the per-op
+  ceiling in <code>tools/perf-budget/budget.toml</code>. Rows in green are well
+  inside budget; amber within 80% of ceiling; red over budget. Refreshed on
+  every push to <code>main</code> by the bench workflow.
+</p>
+
+<h3>Latest run</h3>
+<table>
+  <thead><tr><th>Operation</th><th>Mean</th><th>Max regression</th><th>Drift vs. previous run</th></tr></thead>
+  <tbody>
+<tr><td colspan="4">No data yet</td></tr>  </tbody>
+</table>
+
+<details>
+  <summary>Per-operation history (JSON)</summary>
+  <p>The dashboard reads <code>docs/bench/history.jsonl</code>; download the
+     file to plot in your favourite tool.</p>
+</details>
+
+<footer>
+  Latest run <code>—</code> at commit <code>—</code>; total runs in history: 0.
+  Source: <code>tools/perf-budget/publish_dashboard.py</code>.
+</footer>
+
+<script>
+  // History data is kept inline so future dashboards can render
+  // a sparkline per op without an extra fetch.
+  window.__benchHistory = [];
+</script>
+</body>
+</html>

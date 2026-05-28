@@ -1,0 +1,73 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-124: public benchmark dashboard publisher.
+#
+# Runs the criterion bench harness, appends one summary row per
+# operation to docs/bench/history.jsonl, and rebuilds the static
+# docs/bench/index.html dashboard served from
+# benchmark.invoicekit.org (deploy topology in
+# docs/operators/BENCHMARK-DASHBOARD.md).
+
+name: bench-dashboard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "tools/perf-budget/**"
+      - ".github/workflows/bench-dashboard.yml"
+  schedule:
+    - cron: "37 6 * * *" # nightly 06:37 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install tomli
+        run: pip install tomli
+
+      - name: Run criterion bench harness
+        run: cargo bench -p invoicekit-bench-harness --bench '*' -- --warm-up-time 1 --measurement-time 3 || true
+
+      - name: Publish benchmark dashboard
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          python3 tools/perf-budget/publish_dashboard.py \
+            --criterion target/criterion \
+            --budget    tools/perf-budget/budget.toml \
+            --history   docs/bench/history.jsonl \
+            --html      docs/bench/index.html
+
+      - name: Commit dashboard artefacts
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "invoicekit-bench-bot"
+          git config user.email "bench-bot@invoicekit.org"
+          if ! git diff --quiet docs/bench/; then
+            git add docs/bench/history.jsonl docs/bench/index.html
+            git commit -m "bench-dashboard: refresh from ${GITHUB_SHA}"
+            git push
+          else
+            echo "no bench changes to commit"
+          fi
