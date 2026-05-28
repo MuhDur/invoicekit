@@ -1,0 +1,137 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# `verify-bundle` — composite GitHub Action that runs
+# `invoicekit verify` against a `.invoicekit` / `.ikb` evidence
+# bundle and fails the job if the bundle does not pass its
+# content-address check.
+#
+# Use it directly from any repo:
+#
+#   - uses: MuhDur/invoicekit/.github/actions/verify-bundle@main
+#     with:
+#       bundle: path/to/release.ikb
+#       show: 'true'        # optional, defaults to true
+#
+# Until we publish a tagged release with prebuilt binaries the
+# action builds the `invoicekit` CLI from source on the runner.
+# That keeps the contract simple (`uses:` works without
+# downloads or env tricks) at the cost of one Cargo build per
+# workflow run. Downstream operators with strict CI minutes
+# should cache the build with `actions/cache` or
+# `Swatinem/rust-cache` in their workflow.
+name: 'InvoiceKit — verify bundle'
+description: >
+  Verify an InvoiceKit `.invoicekit` / `.ikb` evidence bundle by
+  re-hashing every artefact in the bundle and reconciling
+  against the manifest. Fails the job if the bundle fails the
+  content-address check.
+
+inputs:
+  bundle:
+    description: 'Path to the evidence bundle (.invoicekit / .ikb).'
+    required: true
+  show:
+    description: >
+      When `true` (default), print a human-readable summary of
+      the bundle via `invoicekit show` before verifying. Useful
+      for CI logs.
+    required: false
+    default: 'true'
+  invoicekit-repo:
+    description: >
+      InvoiceKit repository to build the CLI from. Defaults to
+      `MuhDur/invoicekit`. Override only if you fork the engine.
+    required: false
+    default: 'MuhDur/invoicekit'
+  invoicekit-ref:
+    description: >
+      Git ref to check out from `invoicekit-repo`. Defaults to
+      `main`. Pin to a release tag once one exists.
+    required: false
+    default: 'main'
+
+outputs:
+  verdict:
+    description: >
+      `pass` when the bundle's content-address check passed,
+      `fail` otherwise. The action also exits non-zero on
+      `fail`, so most workflows can just rely on the step
+      failure.
+    value: ${{ steps.verify.outputs.verdict }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout caller repo (preserve user workspace)
+      uses: actions/checkout@v4
+      with:
+        path: caller-repo
+
+    - name: Checkout InvoiceKit engine
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.invoicekit-repo }}
+        ref: ${{ inputs.invoicekit-ref }}
+        path: invoicekit-engine
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache Cargo build
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: invoicekit-engine -> target
+
+    - name: Build invoicekit CLI
+      shell: bash
+      working-directory: invoicekit-engine
+      run: |
+        set -euo pipefail
+        cargo build --release -p invoicekit-cli --bin invoicekit --locked
+
+    - name: Resolve absolute bundle path
+      id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Resolve relative to the caller's repo so users can pass
+        # workspace-relative paths like `dist/release.ikb`.
+        cd "${{ github.workspace }}/caller-repo"
+        BUNDLE="${{ inputs.bundle }}"
+        if [[ ! -f "$BUNDLE" ]]; then
+          echo "verify-bundle: bundle not found: $BUNDLE" >&2
+          ls -la "$(dirname "$BUNDLE" 2>/dev/null || echo .)" >&2 || true
+          exit 2
+        fi
+        ABS=$(readlink -f "$BUNDLE")
+        echo "bundle=$ABS" >> "$GITHUB_OUTPUT"
+        echo "verify-bundle: resolved bundle to $ABS"
+
+    - name: Show bundle summary
+      if: inputs.show == 'true'
+      shell: bash
+      working-directory: invoicekit-engine
+      run: |
+        ./target/release/invoicekit show "${{ steps.resolve.outputs.bundle }}"
+
+    - name: Verify bundle
+      id: verify
+      shell: bash
+      working-directory: invoicekit-engine
+      run: |
+        set -uo pipefail
+        ./target/release/invoicekit verify "${{ steps.resolve.outputs.bundle }}"
+        RC=$?
+        if [[ $RC -eq 0 ]]; then
+          echo "verdict=pass" >> "$GITHUB_OUTPUT"
+          echo "verify-bundle: PASS"
+        else
+          echo "verdict=fail" >> "$GITHUB_OUTPUT"
+          echo "verify-bundle: FAIL (exit $RC)"
+          exit $RC
+        fi
+
+branding:
+  icon: 'check-circle'
+  color: 'green'

@@ -1,0 +1,86 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# Smoke-tests the `.github/actions/verify-bundle` composite
+# action by packing a tiny sample bundle on the fly and then
+# verifying it. If this workflow goes red the action contract
+# has drifted.
+
+name: verify-bundle action smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/actions/verify-bundle/**'
+      - '.github/workflows/verify-bundle-action.yml'
+      - 'crates/cli/**'
+      - 'crates/evidence/**'
+      - 'crates/verify/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/actions/verify-bundle/**'
+      - '.github/workflows/verify-bundle-action.yml'
+      - 'crates/cli/**'
+      - 'crates/evidence/**'
+      - 'crates/verify/**'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  smoke:
+    name: pack + verify-bundle action
+    runs-on: ubuntu-latest
+    concurrency:
+      group: verify-bundle-action-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build invoicekit CLI (for pack step)
+        run: cargo build --release -p invoicekit-cli --bin invoicekit --locked
+
+      - name: Stage a tiny sample directory
+        run: |
+          set -euo pipefail
+          mkdir -p sample/formats
+          printf '{"id":"SMOKE-1"}' > sample/canonical.json
+          printf '<Invoice/>' > sample/formats/ubl.xml
+          printf '<CrossIndustryInvoice/>' > sample/formats/cii.xml
+
+      - name: Pack a deterministic bundle
+        run: |
+          set -euo pipefail
+          ./target/release/invoicekit pack \
+            sample dist.ikb \
+            --tenant ci-smoke \
+            --trace ${{ github.run_id }} \
+            --created-at 1970-01-01T00:00:00Z
+
+      - name: Run verify-bundle composite action
+        id: verify
+        uses: ./.github/actions/verify-bundle
+        with:
+          bundle: dist.ikb
+          # Pin to this checkout so the action builds the same
+          # CLI we just packed with — otherwise it would fetch
+          # `MuhDur/invoicekit@main` again and double-compile.
+          invoicekit-repo: ${{ github.repository }}
+          invoicekit-ref: ${{ github.sha }}
+
+      - name: Assert verdict
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.verify.outputs.verdict }}" != "pass" ]]; then
+            echo "verify-bundle action did not emit verdict=pass"
+            exit 1
+          fi
+          echo "verify-bundle action passed"
