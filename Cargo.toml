@@ -96,6 +96,7 @@ members = [
   "bridges/chargebee",
   "bridges/recurly",
   "tools/pdf-visual-regression",
+  "tools/render-factur-x-acceptance",
 ]
 
 [workspace.package]

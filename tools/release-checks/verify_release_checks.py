@@ -91,19 +91,19 @@ ADVISORY_WAIVERS: tuple[AdvisoryWaiver, ...] = (
         "RUSTSEC-2024-0320",
         "yaml-rust",
         ("syntect", "typst-library"),
-        ("invoicekit-render-pdf",),
+        ("invoicekit-render-pdf", "invoicekit-render-factur-x-acceptance"),
     ),
     AdvisoryWaiver(
         "RUSTSEC-2024-0436",
         "paste",
         ("hayagriva", "typst-library"),
-        ("invoicekit-render-pdf",),
+        ("invoicekit-render-pdf", "invoicekit-render-factur-x-acceptance"),
     ),
     AdvisoryWaiver(
         "RUSTSEC-2025-0141",
         "bincode",
         ("syntect", "typst-library"),
-        ("invoicekit-render-pdf",),
+        ("invoicekit-render-pdf", "invoicekit-render-factur-x-acceptance"),
     ),
 )
 
