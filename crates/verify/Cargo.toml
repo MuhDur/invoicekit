@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
 [package]
 name = "invoicekit-verify"
 version.workspace = true
@@ -7,12 +10,21 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit workspace member: invoicekit-verify"
+description = "InvoiceKit evidence bundle verification library. Re-hashes every artefact, checks the optional T-083 signature over manifest.json, and re-validates the optional T-082 RFC 3161 timestamp. The CLI wrapper lands as an invoicekit subcommand under T-100."
 publish = false
 
 [lib]
 name = "invoicekit_verify"
 path = "src/lib.rs"
+
+[dependencies]
+blake3 = "1"
+invoicekit-evidence = { path = "../evidence", version = "0.0.0" }
+invoicekit-signer = { path = "../signer", version = "0.0.0" }
+invoicekit-timestamping = { path = "../timestamping", version = "0.0.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
 
 [lints]
 workspace = true

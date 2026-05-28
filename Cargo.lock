@@ -2690,6 +2690,15 @@ version = "0.0.0"
 [[package]]
 name = "invoicekit-verify"
 version = "0.0.0"
+dependencies = [
+ "blake3",
+ "invoicekit-evidence",
+ "invoicekit-signer",
+ "invoicekit-timestamping",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-wasm"
