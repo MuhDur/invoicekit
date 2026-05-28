@@ -2470,6 +2470,12 @@ dependencies = [
 [[package]]
 name = "invoicekit-replay"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-evidence",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-report-ar-afip"
