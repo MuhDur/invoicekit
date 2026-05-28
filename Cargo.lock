@@ -3092,6 +3092,8 @@ dependencies = [
 name = "invoicekit-validate-ubl-cii"
 version = "0.0.0"
 dependencies = [
+ "blake3",
+ "invoicekit-rulepack",
  "invoicekit-validate",
  "quick-xml 0.40.1",
  "rust_decimal",

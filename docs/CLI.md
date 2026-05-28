@@ -112,10 +112,10 @@ Prints a structured JSON report; exit `0` on pass, `1` on any failed check, `2` 
 Validate UBL 2.1 Invoice/CreditNote or UN/CEFACT CII XML with the native EN 16931 rule set:
 
 ```
-invoicekit validate <file.xml> [--json] [--explain]
+invoicekit validate <file.xml> [--date=YYYY-MM-DD] [--json] [--explain]
 ```
 
-Default output is a compact human summary. `--json` emits machine-readable findings. `--explain` switches output to the T-032a explain-plan trace: every implemented rule in evaluation order with `rule_id`, `evaluated_at_path`, `inputs`, `decision`, and `citations`. Combine `--explain --json` for the schema-backed JSON form, or use `--explain` alone for Markdown.
+Default output is a compact human summary. `--date=YYYY-MM-DD` selects the rule pack effective on that date and records the selected rulepack in human, JSON, and explain-plan output. Without `--date`, validation uses the latest effective EN 16931 rule pack. `--json` emits machine-readable findings. `--explain` switches output to the T-032a explain-plan trace: every implemented rule in evaluation order with `rule_id`, `evaluated_at_path`, `inputs`, `decision`, and `citations`. Combine `--explain --json` for the schema-backed JSON form, or use `--explain` alone for Markdown.
 
 Exit `0` when the document parses and has no findings, `1` when validation findings exist, `2` on usage errors, unreadable files, unsupported XML roots, or malformed XML.
 

@@ -51,6 +51,8 @@ const SEED_MANIFESTS: &[(&str, &str)] = &[
     ),
 ];
 
+const ZERO_BLAKE3_HEX: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
 /// Pointer to a parity-fixture set CI uses to grade a rule pack.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ParityFixtures {
@@ -172,8 +174,7 @@ impl Manifest {
         // upstream artifact ingestion bead lands; treat the all-zero signature
         // as a deliberate "no-tamper, no-real-signature-yet" sentinel that
         // verifies against an empty body and otherwise demands a real digest.
-        let placeholder = "0".repeat(64);
-        if self.signature == placeholder {
+        if constant_time_eq_str(&self.signature, ZERO_BLAKE3_HEX) {
             if self.body == serde_json::json!({"rules": []}) {
                 return Ok(());
             }
@@ -184,7 +185,7 @@ impl Manifest {
             });
         }
         let actual_hex = actual.to_hex().to_string();
-        if actual_hex == self.signature {
+        if constant_time_eq_str(&actual_hex, &self.signature) {
             Ok(())
         } else {
             Err(RulepackError::SignatureMismatch {
@@ -205,6 +206,19 @@ impl Manifest {
             .as_ref()
             .is_none_or(|end| on_date <= end.as_str())
     }
+}
+
+fn constant_time_eq_str(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    let max_len = left.len().max(right.len());
+    let mut diff = left.len() ^ right.len();
+    for index in 0..max_len {
+        let left_byte = left.get(index).copied().unwrap_or(0);
+        let right_byte = right.get(index).copied().unwrap_or(0);
+        diff |= usize::from(left_byte ^ right_byte);
+    }
+    diff == 0
 }
 
 /// Registry of loaded rule packs, queryable by (country, profile, date).
@@ -260,11 +274,20 @@ impl Registry {
     /// profile, or `on_date` outside every matching manifest's window).
     #[must_use]
     pub fn pack_for(&self, country: &str, profile: &str, on_date: &str) -> Option<&Manifest> {
-        self.manifests.iter().find(|m| {
-            m.profile == profile
-                && (m.country == country || m.country == "global")
-                && m.covers(on_date)
-        })
+        self.manifests
+            .iter()
+            .filter(|m| {
+                m.profile == profile
+                    && (m.country == country || m.country == "global")
+                    && m.covers(on_date)
+            })
+            .max_by(|left, right| {
+                let left_exact = left.country == country;
+                let right_exact = right.country == country;
+                left_exact
+                    .cmp(&right_exact)
+                    .then_with(|| left.effective_from.cmp(&right.effective_from))
+            })
     }
 
     /// Total number of registered manifests.
@@ -407,6 +430,69 @@ mod tests {
                 "2020-01-01"
             )
             .is_none());
+    }
+
+    #[test]
+    fn pack_for_selects_latest_matching_effective_window() {
+        let body = json!({"rules": []});
+        let mut registry = Registry::default();
+        let old = Manifest::from_json(&synthetic_manifest_json(
+            "urn:test:old",
+            "blake3:identity",
+            &"0".repeat(64),
+            &body,
+            "2024-01-01",
+            None,
+        ))
+        .unwrap();
+        let newer = Manifest::from_json(&synthetic_manifest_json(
+            "urn:test:newer",
+            "blake3:identity",
+            &"0".repeat(64),
+            &body,
+            "2024-06-01",
+            None,
+        ))
+        .unwrap();
+        registry.insert(old).unwrap();
+        registry.insert(newer).unwrap();
+
+        let selected = registry
+            .pack_for("global", "urn:test:profile", "2024-07-01")
+            .unwrap();
+        assert_eq!(selected.rulepack_id, "urn:test:newer");
+    }
+
+    #[test]
+    fn pack_for_prefers_exact_country_over_newer_global_fallback() {
+        let body = json!({"rules": []});
+        let mut registry = Registry::default();
+        let global = Manifest::from_json(&synthetic_manifest_json(
+            "urn:test:global",
+            "blake3:identity",
+            &"0".repeat(64),
+            &body,
+            "2024-06-01",
+            None,
+        ))
+        .unwrap();
+        let mut exact = Manifest::from_json(&synthetic_manifest_json(
+            "urn:test:exact",
+            "blake3:identity",
+            &"0".repeat(64),
+            &body,
+            "2024-01-01",
+            None,
+        ))
+        .unwrap();
+        exact.country = "DE".to_owned();
+        registry.insert(global).unwrap();
+        registry.insert(exact).unwrap();
+
+        let selected = registry
+            .pack_for("DE", "urn:test:profile", "2024-07-01")
+            .unwrap();
+        assert_eq!(selected.rulepack_id, "urn:test:exact");
     }
 
     fn synthetic_manifest_json(

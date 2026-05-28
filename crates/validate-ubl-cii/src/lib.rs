@@ -7,8 +7,10 @@
 //! typed [`invoicekit_validate::ValidationResult`] values instead of being
 //! rejected before the validator can name the violated BR/BR-CO rule.
 
+use std::collections::BTreeSet;
 use std::str;
 
+use invoicekit_rulepack::{Manifest, Registry, RulepackError};
 use invoicekit_validate::{
     BusinessTerm, Citation, Location, RuleId, Severity, SuggestedFix, ValidateError,
     ValidationResult,
@@ -65,6 +67,65 @@ const IMPLEMENTED_RULE_IDS: &[&str] = &[
 
 const DEFERRED_RULE_IDS: &[&str] = &[];
 
+/// EN 16931 profile URN used for the global rulepack lookup.
+pub const EN16931_PROFILE_URN: &str = "urn:cen.eu:en16931:2017";
+
+const DEFAULT_RULEPACK_COUNTRY: &str = "global";
+const LATEST_RULEPACK_LOOKUP_DATE: &str = "9999-12-31";
+
+/// Options controlling EN 16931 validation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValidationOptions {
+    /// Optional ISO `YYYY-MM-DD` date used to select an effective rulepack.
+    pub validation_date: Option<String>,
+    /// Rulepack country selector. Defaults to `global` for EN 16931.
+    pub country: String,
+    /// Rulepack profile selector. Defaults to [`EN16931_PROFILE_URN`].
+    pub profile: String,
+}
+
+impl ValidationOptions {
+    /// Use a specific effective date for rulepack selection.
+    #[must_use]
+    pub fn with_validation_date(mut self, validation_date: impl Into<String>) -> Self {
+        self.validation_date = Some(validation_date.into());
+        self
+    }
+}
+
+impl Default for ValidationOptions {
+    fn default() -> Self {
+        Self {
+            validation_date: None,
+            country: DEFAULT_RULEPACK_COUNTRY.to_owned(),
+            profile: EN16931_PROFILE_URN.to_owned(),
+        }
+    }
+}
+
+/// Rulepack selected for a validation run, persisted for audit.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RulepackAudit {
+    /// Rulepack identifier selected from the registry.
+    pub rulepack_id: String,
+    /// Upstream artifact version.
+    pub upstream_version: String,
+    /// Inclusive effective-window start.
+    pub effective_from: String,
+    /// Optional inclusive effective-window end.
+    pub effective_to: Option<String>,
+    /// Source URL carried by the rulepack manifest.
+    pub source_url: String,
+    /// Date the upstream artifact was retrieved.
+    pub retrieved_at: String,
+    /// Signature algorithm used by the manifest.
+    pub signature_alg: String,
+    /// Date selector used by the caller, or `latest` for default validation.
+    pub selected_for_date: String,
+    /// Rule ids disabled by the selected rulepack body policy.
+    pub disabled_rules: Vec<String>,
+}
+
 /// XML syntax family accepted by the validator.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DocumentSyntax {
@@ -106,6 +167,8 @@ pub struct En16931Report {
     pub findings: Vec<ValidationResult>,
     /// Rule inventory counts tied to the checked coverage matrix.
     pub coverage: En16931Coverage,
+    /// Rulepack selected for this validation run.
+    pub rulepack: RulepackAudit,
 }
 
 /// Rule deferred by the current Rust validator implementation.
@@ -143,6 +206,30 @@ pub enum En16931Error {
     /// A compile-time validation-result constant was invalid.
     #[error("validation result construction failed: {0}")]
     Validation(#[from] ValidateError),
+    /// Rulepack registry or manifest failed.
+    #[error("rulepack error: {0}")]
+    Rulepack(#[from] RulepackError),
+    /// Validation date did not use `YYYY-MM-DD`.
+    #[error("invalid validation date `{0}`; expected a valid YYYY-MM-DD calendar date")]
+    InvalidValidationDate(String),
+    /// No rulepack covers the requested selector.
+    #[error("no rulepack covers country `{country}`, profile `{profile}`, date `{date}`")]
+    RulepackNotFound {
+        /// Rulepack country selector.
+        country: String,
+        /// Rulepack profile selector.
+        profile: String,
+        /// Requested effective date.
+        date: String,
+    },
+    /// Rulepack body policy is malformed.
+    #[error("rulepack `{rulepack_id}` has invalid policy: {message}")]
+    RulepackPolicy {
+        /// Rulepack identifier.
+        rulepack_id: String,
+        /// Human-readable policy error.
+        message: String,
+    },
 }
 
 /// Return the implemented BR/BR-CO rule identifiers.
@@ -171,6 +258,71 @@ pub fn deferred_rules() -> Vec<DeferredRule> {
 /// Returns [`En16931Error`] when the XML cannot be parsed or the root syntax
 /// is not UBL `Invoice`, UBL `CreditNote`, or CII `CrossIndustryInvoice`.
 pub fn validate_xml(input: &str) -> Result<En16931Report, En16931Error> {
+    validate_xml_with_options(input, &ValidationOptions::default())
+}
+
+/// Validate XML against the EN 16931 rulepack effective on `validation_date`.
+///
+/// # Errors
+///
+/// Returns [`En16931Error`] when XML parsing, date validation, rulepack
+/// selection, or rule evaluation fails.
+pub fn validate_xml_on_date(
+    input: &str,
+    validation_date: impl Into<String>,
+) -> Result<En16931Report, En16931Error> {
+    validate_xml_with_options(
+        input,
+        &ValidationOptions::default().with_validation_date(validation_date),
+    )
+}
+
+/// Validate XML with explicit rulepack selection options.
+///
+/// # Errors
+///
+/// Returns [`En16931Error`] when XML parsing, date validation, rulepack
+/// selection, or rule evaluation fails.
+pub fn validate_xml_with_options(
+    input: &str,
+    options: &ValidationOptions,
+) -> Result<En16931Report, En16931Error> {
+    let registry = Registry::seeded()?;
+    validate_xml_with_registry(input, options, &registry)
+}
+
+/// Validate XML with a caller-supplied rulepack registry.
+///
+/// This is primarily used by tests and by future hot-reload integrations that
+/// need to validate against a freshly loaded registry snapshot.
+///
+/// # Errors
+///
+/// Returns [`En16931Error`] when XML parsing, date validation, rulepack
+/// selection, or rule evaluation fails.
+pub fn validate_xml_with_registry(
+    input: &str,
+    options: &ValidationOptions,
+    registry: &Registry,
+) -> Result<En16931Report, En16931Error> {
+    let lookup_date = options
+        .validation_date
+        .as_deref()
+        .unwrap_or(LATEST_RULEPACK_LOOKUP_DATE);
+    validate_iso_date(lookup_date)?;
+    let selected_for_date = options
+        .validation_date
+        .clone()
+        .unwrap_or_else(|| "latest".to_owned());
+    let manifest = registry
+        .pack_for(&options.country, &options.profile, lookup_date)
+        .ok_or_else(|| En16931Error::RulepackNotFound {
+            country: options.country.clone(),
+            profile: options.profile.clone(),
+            date: lookup_date.to_owned(),
+        })?;
+    let policy = RulepackPolicy::from_manifest(manifest)?;
+
     let root = parse_xml(input)?;
     let syntax = match (root.name.as_str(), root.namespace_uri.as_deref()) {
         ("Invoice", Some(UBL_INVOICE_NAMESPACE_URI))
@@ -197,12 +349,114 @@ pub fn validate_xml(input: &str) -> Result<En16931Report, En16931Error> {
     run_br_ae_rules(&ctx, &mut findings)?;
     run_br_cl_rules(&ctx, &mut findings)?;
     run_br_co_rules(&ctx, &mut findings)?;
+    policy.retain_enabled_findings(&mut findings);
 
     Ok(En16931Report {
         syntax,
         findings,
         coverage: En16931Coverage::current(),
+        rulepack: RulepackAudit::from_manifest(manifest, selected_for_date, &policy),
     })
+}
+
+#[derive(Debug)]
+struct RulepackPolicy {
+    disabled_all: bool,
+    disabled_rules: BTreeSet<String>,
+}
+
+impl RulepackPolicy {
+    fn from_manifest(manifest: &Manifest) -> Result<Self, En16931Error> {
+        let Some(disabled) = manifest.body.get("disabled_rules") else {
+            return Ok(Self {
+                disabled_all: false,
+                disabled_rules: BTreeSet::new(),
+            });
+        };
+        let rules = disabled
+            .as_array()
+            .ok_or_else(|| En16931Error::RulepackPolicy {
+                rulepack_id: manifest.rulepack_id.clone(),
+                message: "`disabled_rules` must be an array".to_owned(),
+            })?;
+        let mut disabled_all = false;
+        let mut disabled_rules = BTreeSet::new();
+        for rule in rules {
+            let rule = rule.as_str().ok_or_else(|| En16931Error::RulepackPolicy {
+                rulepack_id: manifest.rulepack_id.clone(),
+                message: "`disabled_rules` entries must be strings".to_owned(),
+            })?;
+            if rule == "*" {
+                disabled_all = true;
+            } else {
+                disabled_rules.insert(rule.to_owned());
+            }
+        }
+        Ok(Self {
+            disabled_all,
+            disabled_rules,
+        })
+    }
+
+    fn retain_enabled_findings(&self, findings: &mut Vec<ValidationResult>) {
+        if self.disabled_all {
+            findings.clear();
+            return;
+        }
+        findings.retain(|finding| !self.disabled_rules.contains(finding.rule_id.as_str()));
+    }
+
+    fn disabled_rules_for_audit(&self) -> Vec<String> {
+        if self.disabled_all {
+            vec!["*".to_owned()]
+        } else {
+            self.disabled_rules.iter().cloned().collect()
+        }
+    }
+}
+
+impl RulepackAudit {
+    fn from_manifest(
+        manifest: &Manifest,
+        selected_for_date: String,
+        policy: &RulepackPolicy,
+    ) -> Self {
+        Self {
+            rulepack_id: manifest.rulepack_id.clone(),
+            upstream_version: manifest.upstream_version.clone(),
+            effective_from: manifest.effective_from.clone(),
+            effective_to: manifest.effective_to.clone(),
+            source_url: manifest.source_url.clone(),
+            retrieved_at: manifest.retrieved_at.clone(),
+            signature_alg: manifest.signature_alg.clone(),
+            selected_for_date,
+            disabled_rules: policy.disabled_rules_for_audit(),
+        }
+    }
+}
+
+fn validate_iso_date(value: &str) -> Result<(), En16931Error> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10 || bytes.get(4) != Some(&b'-') || bytes.get(7) != Some(&b'-') {
+        return Err(En16931Error::InvalidValidationDate(value.to_owned()));
+    }
+    let year = bytes
+        .get(0..4)
+        .and_then(parse_ascii_digits)
+        .and_then(|year| i32::try_from(year).ok())
+        .ok_or_else(|| En16931Error::InvalidValidationDate(value.to_owned()))?;
+    let month = bytes
+        .get(5..7)
+        .and_then(parse_ascii_digits)
+        .ok_or_else(|| En16931Error::InvalidValidationDate(value.to_owned()))?;
+    let day = bytes
+        .get(8..10)
+        .and_then(parse_ascii_digits)
+        .ok_or_else(|| En16931Error::InvalidValidationDate(value.to_owned()))?;
+    if date_minutes(year, month, day, 0).is_none() {
+        return Err(En16931Error::InvalidValidationDate(value.to_owned()));
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -3618,10 +3872,11 @@ fn br_co_26(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::time::Instant;
 
-    use serde_json::Value;
+    use invoicekit_rulepack::{Manifest, Registry};
+    use serde_json::{json, Value};
 
     #[test]
     fn crate_name_is_cargo_package_name() {
@@ -3702,6 +3957,123 @@ mod tests {
         assert_eq!(report.syntax, DocumentSyntax::Ubl);
         assert!(report.findings.is_empty(), "{:?}", report.findings);
         assert_eq!(report.coverage, En16931Coverage::current());
+        assert_eq!(
+            report.rulepack.rulepack_id,
+            "urn:invoicekit:rulepack:en16931:cen:2024-01"
+        );
+        assert_eq!(report.rulepack.selected_for_date, "latest");
+    }
+
+    #[test]
+    fn date_pinned_rulepack_can_validate_against_historical_policy() {
+        let registry = transition_registry();
+
+        let pre_change = validate_xml_with_registry(
+            known_bad_ubl(),
+            &ValidationOptions::default().with_validation_date("2023-06-01"),
+            &registry,
+        )
+        .unwrap();
+        assert!(pre_change.findings.is_empty(), "{:?}", pre_change.findings);
+        assert_eq!(
+            pre_change.rulepack.rulepack_id,
+            "urn:test:en16931:pre-change"
+        );
+        assert_eq!(pre_change.rulepack.disabled_rules, vec!["*"]);
+        assert_eq!(pre_change.rulepack.selected_for_date, "2023-06-01");
+
+        let post_change = validate_xml_with_registry(
+            known_bad_ubl(),
+            &ValidationOptions::default().with_validation_date("2024-06-01"),
+            &registry,
+        )
+        .unwrap();
+        assert!(
+            post_change
+                .findings
+                .iter()
+                .any(|finding| finding.rule_id.as_str() == "BR-01"),
+            "{:?}",
+            post_change.findings
+        );
+        assert_eq!(
+            post_change.rulepack.rulepack_id,
+            "urn:test:en16931:post-change"
+        );
+        assert!(post_change.rulepack.disabled_rules.is_empty());
+    }
+
+    #[test]
+    fn invalid_validation_date_is_rejected() {
+        let err = validate_xml_on_date(valid_ubl(), "2024/01/01").unwrap_err();
+        assert!(matches!(err, En16931Error::InvalidValidationDate(_)));
+
+        let impossible = validate_xml_on_date(valid_ubl(), "2024-02-31").unwrap_err();
+        assert!(matches!(impossible, En16931Error::InvalidValidationDate(_)));
+    }
+
+    fn transition_registry() -> Registry {
+        let mut registry = Registry::default();
+        registry
+            .insert(test_manifest(
+                "urn:test:en16931:pre-change",
+                "2020-01-01",
+                Some("2023-12-31"),
+                json!({"disabled_rules": ["*"]}),
+            ))
+            .unwrap();
+        registry
+            .insert(test_manifest(
+                "urn:test:en16931:post-change",
+                "2024-01-01",
+                None,
+                json!({}),
+            ))
+            .unwrap();
+        registry
+    }
+
+    fn known_bad_ubl() -> &'static str {
+        r#"<ubl:Invoice xmlns:ubl="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"></ubl:Invoice>"#
+    }
+
+    fn test_manifest(
+        rulepack_id: &str,
+        effective_from: &str,
+        effective_to: Option<&str>,
+        body: Value,
+    ) -> Manifest {
+        let mut codelist_versions = BTreeMap::new();
+        codelist_versions.insert("en16931-vat-categories".to_owned(), "test".to_owned());
+        let signature = blake3::hash(&serde_json::to_vec(&body).unwrap())
+            .to_hex()
+            .to_string();
+        Manifest {
+            rulepack_id: rulepack_id.to_owned(),
+            country: "global".to_owned(),
+            profile: EN16931_PROFILE_URN.to_owned(),
+            upstream_version: "test".to_owned(),
+            effective_from: effective_from.to_owned(),
+            effective_to: effective_to.map(str::to_owned),
+            source_url: "https://example.invalid/rulepack".to_owned(),
+            retrieved_at: "2026-05-28".to_owned(),
+            codelist_versions,
+            upstream_checksum_blake3: "0".repeat(64),
+            generated_metadata: invoicekit_rulepack::GeneratedMetadata {
+                generator: "test".to_owned(),
+                generated_at: "2026-05-28".to_owned(),
+                notes: "synthetic transition fixture".to_owned(),
+            },
+            parity_fixtures: invoicekit_rulepack::ParityFixtures {
+                oracle: "jvm:phive".to_owned(),
+                fixture_set_id: "synthetic".to_owned(),
+                expected_parity_pct: 99.9,
+            },
+            known_gaps: Vec::new(),
+            signature_alg: "blake3:identity".to_owned(),
+            signature,
+            body,
+        }
     }
 
     #[test]

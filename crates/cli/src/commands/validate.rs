@@ -19,8 +19,8 @@ use std::process::ExitCode;
 
 use invoicekit_validate::{explain_plan_from_results, Citation, ValidationExplainPlan};
 use invoicekit_validate_ubl_cii::{
-    implemented_rule_ids, validate_xml, DocumentSyntax, En16931Coverage, En16931Error,
-    En16931Report,
+    implemented_rule_ids, validate_xml_with_options, DocumentSyntax, En16931Coverage, En16931Error,
+    En16931Report, RulepackAudit, ValidationOptions,
 };
 use serde::Serialize;
 
@@ -44,7 +44,8 @@ pub fn run(argv: &[String]) -> ExitCode {
     };
 
     let source = parsed.input.to_string_lossy();
-    let rendered = match render_validation(&xml, &source, parsed.json, parsed.explain) {
+    let options = parsed.validation_options();
+    let rendered = match render_validation(&xml, &source, parsed.json, parsed.explain, &options) {
         Ok(rendered) => rendered,
         Err(err) => {
             eprintln!("{err}");
@@ -65,12 +66,14 @@ struct Args {
     input: PathBuf,
     json: bool,
     explain: bool,
+    date: Option<String>,
 }
 
 fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut input: Option<PathBuf> = None;
     let mut json = false;
     let mut explain = false;
+    let mut date: Option<String> = None;
     let mut i = 0;
     while let Some(arg) = argv.get(i) {
         match arg.as_str() {
@@ -81,6 +84,17 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             }
             "--explain" => {
                 explain = true;
+                i += 1;
+            }
+            "--date" => {
+                let value = argv.get(i + 1).ok_or_else(|| {
+                    format!("validate: --date requires YYYY-MM-DD\n\n{}", usage_help())
+                })?;
+                date = Some(value.clone());
+                i += 2;
+            }
+            flag if flag.starts_with("--date=") => {
+                date = Some(flag.trim_start_matches("--date=").to_owned());
                 i += 1;
             }
             flag if flag.starts_with('-') => {
@@ -107,11 +121,22 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         input,
         json,
         explain,
+        date,
     })
 }
 
+impl Args {
+    fn validation_options(&self) -> ValidationOptions {
+        let mut options = ValidationOptions::default();
+        if let Some(date) = &self.date {
+            options = options.with_validation_date(date.clone());
+        }
+        options
+    }
+}
+
 fn usage_help() -> String {
-    "usage: invoicekit validate <file.xml> [--json] [--explain]\n\nValidate UBL/CII XML with the native EN 16931 rule set. Default output is human-readable; --json prints machine-readable findings, and --explain switches to the ordered rule explain plan.".to_owned()
+    "usage: invoicekit validate <file.xml> [--date=YYYY-MM-DD] [--json] [--explain]\n\nValidate UBL/CII XML with the native EN 16931 rule set. Default output is human-readable; --date selects the effective rule pack, --json prints machine-readable findings, and --explain switches to the ordered rule explain plan.".to_owned()
 }
 
 #[derive(Debug)]
@@ -125,8 +150,10 @@ fn render_validation(
     source: &str,
     json: bool,
     explain: bool,
+    options: &ValidationOptions,
 ) -> Result<RenderedValidation, String> {
-    let report = validate_xml(xml).map_err(|err| format_validate_error(&err))?;
+    let report =
+        validate_xml_with_options(xml, options).map_err(|err| format_validate_error(&err))?;
     let ok = report.findings.is_empty();
     let output = if explain {
         let plan = build_explain_plan(&report, xml, source).map_err(|err| err.to_string())?;
@@ -172,6 +199,18 @@ fn build_explain_plan(
             .insert("document_syntax".to_owned(), serde_json::json!(syntax));
         step.inputs
             .insert("source".to_owned(), serde_json::json!(source));
+        step.inputs.insert(
+            "rulepack_id".to_owned(),
+            serde_json::json!(report.rulepack.rulepack_id),
+        );
+        step.inputs.insert(
+            "rulepack_selected_for_date".to_owned(),
+            serde_json::json!(report.rulepack.selected_for_date),
+        );
+        step.inputs.insert(
+            "rulepack_upstream_version".to_owned(),
+            serde_json::json!(report.rulepack.upstream_version),
+        );
     }
     Ok(plan)
 }
@@ -191,6 +230,7 @@ struct ValidationSummary<'a> {
     syntax: &'static str,
     finding_count: usize,
     coverage: CoverageSummary,
+    rulepack: RulepackSummary<'a>,
     findings: &'a [invoicekit_validate::ValidationResult],
 }
 
@@ -202,6 +242,7 @@ impl<'a> ValidationSummary<'a> {
             syntax: syntax_label(report.syntax),
             finding_count: report.findings.len(),
             coverage: CoverageSummary::from(report.coverage),
+            rulepack: RulepackSummary::from(&report.rulepack),
             findings: &report.findings,
         }
     }
@@ -224,6 +265,35 @@ impl From<En16931Coverage> for CoverageSummary {
     }
 }
 
+#[derive(Debug, Serialize)]
+struct RulepackSummary<'a> {
+    rulepack_id: &'a str,
+    upstream_version: &'a str,
+    selected_for_date: &'a str,
+    effective_from: &'a str,
+    effective_to: Option<&'a str>,
+    source_url: &'a str,
+    retrieved_at: &'a str,
+    signature_alg: &'a str,
+    disabled_rules: &'a [String],
+}
+
+impl<'a> From<&'a RulepackAudit> for RulepackSummary<'a> {
+    fn from(value: &'a RulepackAudit) -> Self {
+        Self {
+            rulepack_id: &value.rulepack_id,
+            upstream_version: &value.upstream_version,
+            selected_for_date: &value.selected_for_date,
+            effective_from: &value.effective_from,
+            effective_to: value.effective_to.as_deref(),
+            source_url: &value.source_url,
+            retrieved_at: &value.retrieved_at,
+            signature_alg: &value.signature_alg,
+            disabled_rules: &value.disabled_rules,
+        }
+    }
+}
+
 fn render_human_summary(report: &En16931Report, source: &str) -> String {
     let mut out = String::new();
     let _ = writeln!(
@@ -241,6 +311,13 @@ fn render_human_summary(report: &En16931Report, source: &str) -> String {
         report.coverage.total
     );
     let _ = writeln!(out, "syntax: {}", syntax_label(report.syntax));
+    let _ = writeln!(
+        out,
+        "rulepack: {} ({}, selected_for_date={})",
+        report.rulepack.rulepack_id,
+        report.rulepack.upstream_version,
+        report.rulepack.selected_for_date
+    );
     for finding in &report.findings {
         let _ = writeln!(
             out,
@@ -274,6 +351,7 @@ fn location_path(location: &invoicekit_validate::Location) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use invoicekit_validate_ubl_cii::validate_xml;
 
     const UBL_NS: &str = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2";
     const CAC_NS: &str = "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2";
@@ -298,6 +376,26 @@ mod tests {
     }
 
     #[test]
+    fn parse_args_accepts_date_eq_and_split_forms() {
+        let eq = parse_args(&["sample.xml".to_owned(), "--date=2024-01-01".to_owned()]).unwrap();
+        assert_eq!(eq.date.as_deref(), Some("2024-01-01"));
+
+        let split = parse_args(&[
+            "sample.xml".to_owned(),
+            "--date".to_owned(),
+            "2025-02-03".to_owned(),
+        ])
+        .unwrap();
+        assert_eq!(split.date.as_deref(), Some("2025-02-03"));
+    }
+
+    #[test]
+    fn parse_args_rejects_date_without_value() {
+        let err = parse_args(&["sample.xml".to_owned(), "--date".to_owned()]).unwrap_err();
+        assert!(err.contains("--date requires"));
+    }
+
+    #[test]
     fn parse_args_rejects_extra_positional() {
         let err = parse_args(&["a.xml".to_owned(), "b.xml".to_owned()]).unwrap_err();
         assert!(err.contains("extra positional"));
@@ -305,23 +403,42 @@ mod tests {
 
     #[test]
     fn explain_markdown_contains_ordered_rule_trace() {
-        let rendered = render_validation(minimal_ubl(), "minimal.xml", false, true).unwrap();
+        let rendered = render_validation(
+            minimal_ubl(),
+            "minimal.xml",
+            false,
+            true,
+            &ValidationOptions::default(),
+        )
+        .unwrap();
 
         assert!(!rendered.ok);
         assert!(rendered.output.contains("# Validation Explain Plan"));
         assert!(rendered.output.contains("| BR-01 | fail |"));
         assert!(rendered.output.contains("document_syntax"));
         assert!(rendered.output.contains("minimal.xml"));
+        assert!(rendered.output.contains("rulepack_id"));
     }
 
     #[test]
     fn explain_json_is_machine_readable() {
-        let rendered = render_validation(minimal_ubl(), "minimal.xml", true, true).unwrap();
+        let rendered = render_validation(
+            minimal_ubl(),
+            "minimal.xml",
+            true,
+            true,
+            &ValidationOptions::default().with_validation_date("2024-06-01"),
+        )
+        .unwrap();
         let value: serde_json::Value = serde_json::from_str(&rendered.output).unwrap();
 
         assert_eq!(value["schema_version"], "1.0");
         assert_eq!(value["backend"], "rust-native:en16931");
         assert!(value["steps"].as_array().unwrap().len() >= 80);
+        assert_eq!(
+            value["steps"][0]["inputs"]["rulepack_selected_for_date"],
+            "2024-06-01"
+        );
     }
 
     #[test]
