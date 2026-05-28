@@ -7,9 +7,9 @@
 //! (Administración Tributaria Virtual) clearance regime
 //! through `api.comprobanteselectronicos.go.cr`. Issuers sign
 //! XML with a Banco Central CR (BCCR) certificate, compute a
-//! 50-character **Clave Numérica** (numeric key encoding
-//! country + date + cédula + tipo + situación + consecutivo
-//! + código de seguridad), and submit to Hacienda; the
+//! 50-character **Clave Numérica** (numeric key concatenating
+//! country, date, cédula, tipo, situación, consecutivo, and
+//! the código de seguridad), and submit to Hacienda; the
 //! authority returns an `aceptado` / `rechazado` envelope.
 //!
 //! Document codes mirror Hacienda's `tipoDocumento`
