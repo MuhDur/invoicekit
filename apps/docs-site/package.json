@@ -1,0 +1,29 @@
+{
+  "name": "@invoicekit/docs-site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "InvoiceKit documentation site — docs.invoicekit.org (T-113).",
+  "license": "Apache-2.0",
+  "scripts": {
+    "generate": "python3 ../../tools/docs-generate/generate.py",
+    "dev": "bun run generate && next dev --port 3001",
+    "build": "bun run generate && next build",
+    "start": "next start --port 3001",
+    "test": "bun test tests"
+  },
+  "dependencies": {
+    "next": "^15.0.0",
+    "nextra": "^3.0.0",
+    "nextra-theme-docs": "^3.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.6.3"
+  }
+}

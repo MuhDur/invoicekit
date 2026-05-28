@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# Pages under rules/, countries/, and operators/ (except index files
+# and _meta.json) are generated from tools/docs-generate/generate.py
+# on every build. We commit nothing per-page so a rule rename in the
+# rulepack doesn't churn the diff with stale MDX.
+
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+pages/rules/*.mdx
+!pages/rules/index.mdx
+pages/rules/_meta.json
+pages/countries/*.mdx
+!pages/countries/index.mdx
+pages/countries/_meta.json
+pages/operators/*.mdx
+!pages/operators/index.mdx
+pages/operators/_meta.json

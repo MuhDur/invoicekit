@@ -1,0 +1,33 @@
+# InvoiceKit documentation
+
+Welcome to the InvoiceKit documentation site (`docs.invoicekit.org`).
+
+InvoiceKit is the open-source **trust toolkit** for business-to-business
+e-invoicing: a Rust-core engine plus signed evidence bundles, a public
+conformance corpus, and a public differential parity dashboard against
+the JVM reference validators.
+
+## What's here
+
+- **[Rules](/rules)** — per-rule pages for every EN 16931 business
+  rule, generated from `crates/rulepack/data/en16931-br-co-coverage.json`.
+  Each page lists the rule's business terms, the XPath/Schematron
+  assertions, the source XSLT location, and the InvoiceKit
+  validator-testability status.
+- **[Countries](/countries)** — per-country guides for every
+  jurisdiction shipped under `crates/report-*`. Each page describes
+  the national report format, the transmit channel, and the cargo
+  crate that implements it.
+- **[Operators](/operators)** — deploy runbooks copied from
+  `docs/operators/` so the public site can link them.
+
+## Search
+
+The header search bar indexes every MDX page in this site via
+Nextra's built-in flexsearch integration. Try `BR-CO-10` or
+`Saudi Arabia` to see it in action.
+
+## License
+
+InvoiceKit ships under Apache 2.0. See the [repository](https://github.com/MuhDur/invoicekit)
+for source code and contribution guidance.

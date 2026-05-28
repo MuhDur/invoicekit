@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-113: docs site build + test gate.
+#
+# Runs the MDX generator + tests, then runs `next build` to verify
+# the site compiles. Uploads the static export for the operator
+# deploy step.
+
+name: docs-site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/docs-site/**"
+      - "tools/docs-generate/**"
+      - "crates/rulepack/data/**"
+      - "docs/operators/**"
+      - ".github/workflows/docs-site.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/docs-site/**"
+      - "tools/docs-generate/**"
+      - "crates/rulepack/data/**"
+      - "docs/operators/**"
+      - ".github/workflows/docs-site.yml"
+
+jobs:
+  generator-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pytest
+        run: pip install pytest
+      - name: Run generator unit tests
+        run: pytest tools/docs-generate/tests -q
+
+  build-site:
+    runs-on: ubuntu-24.04
+    needs: generator-tests
+    defaults:
+      run:
+        working-directory: apps/docs-site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.1.x
+      - name: Generate MDX
+        working-directory: .
+        run: python3 tools/docs-generate/generate.py
+      - name: Install
+        run: bun install --no-summary
+      - name: Build
+        run: bun run build
+      - name: Upload static export
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-site-out
+          path: apps/docs-site/out
