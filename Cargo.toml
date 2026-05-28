@@ -31,6 +31,7 @@ members = [
   "crates/intake-pdf",
   "crates/intake-ocr",
   "crates/intake-vlm",
+  "crates/intake-witness",
   "crates/transmit-peppol",
   "crates/transmit-mock",
   "crates/transmit-email",

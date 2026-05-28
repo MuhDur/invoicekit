@@ -2388,6 +2388,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoicekit-intake-witness"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-intake-citation",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "invoicekit-ir"
 version = "0.0.0"
 dependencies = [
