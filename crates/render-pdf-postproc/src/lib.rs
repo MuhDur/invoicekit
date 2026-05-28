@@ -229,9 +229,8 @@ fn catalog_metadata_xmp(doc: &Document, catalog_id: lopdf::ObjectId) -> Option<S
         _ => return None,
     };
     let metadata = doc.get_object(metadata_id).ok()?.as_stream().ok()?;
-    std::str::from_utf8(&metadata.content)
-        .ok()
-        .map(ToOwned::to_owned)
+    let content = metadata.get_plain_content().ok()?;
+    std::str::from_utf8(&content).ok().map(ToOwned::to_owned)
 }
 
 fn merged_names_id(
@@ -321,7 +320,21 @@ fn merged_af_value(
 fn render_xmp(existing_xmp: Option<&str>, profile: ZugferdProfile) -> String {
     let factur_x = render_factur_x_xmp_descriptions(profile);
     if let Some(existing) = existing_xmp {
+        let promoted = promote_pdfa_conformance_to_3u(existing);
+        let existing = promoted.as_str();
         if let Some(end) = existing.rfind("</rdf:RDF>") {
+            if let Some(with_schema) = insert_factur_x_schema_into_existing_bag(existing) {
+                let value_description = render_factur_x_value_description(profile);
+                let schema_rdf_end = with_schema
+                    .rfind("</rdf:RDF>")
+                    .expect("schema merge preserves RDF end marker");
+                let (before_rdf_end, after_rdf_start) = with_schema.split_at(schema_rdf_end);
+                let mut merged = String::with_capacity(with_schema.len() + value_description.len());
+                merged.push_str(before_rdf_end);
+                merged.push_str(&value_description);
+                merged.push_str(after_rdf_start);
+                return merged;
+            }
             let (before_rdf_end, after_rdf_start) = existing.split_at(end);
             let mut merged = String::with_capacity(existing.len() + factur_x.len());
             merged.push_str(before_rdf_end);
@@ -342,16 +355,48 @@ fn render_xmp(existing_xmp: Option<&str>, profile: ZugferdProfile) -> String {
     )
 }
 
+fn promote_pdfa_conformance_to_3u(existing: &str) -> String {
+    existing.replace(
+        "<pdfaid:conformance>B</pdfaid:conformance>",
+        "<pdfaid:conformance>U</pdfaid:conformance>",
+    )
+}
+
+fn insert_factur_x_schema_into_existing_bag(existing: &str) -> Option<String> {
+    if existing.contains("Factur-X PDF/A Extension Schema") {
+        return Some(existing.to_owned());
+    }
+    let schemas_start = existing.find("<pdfaExtension:schemas>")?;
+    let schemas = existing.get(schemas_start..)?;
+    let bag_relative_start = schemas.find("<rdf:Bag>")?;
+    let insert_at = schemas_start + bag_relative_start + "<rdf:Bag>".len();
+    let schema = render_factur_x_extension_schema();
+    let before_insert = existing.get(..insert_at)?;
+    let after_insert = existing.get(insert_at..)?;
+    let mut merged = String::with_capacity(existing.len() + schema.len());
+    merged.push_str(before_insert);
+    merged.push_str(&schema);
+    merged.push_str(after_insert);
+    Some(merged)
+}
+
 fn render_factur_x_xmp_descriptions(profile: ZugferdProfile) -> String {
-    let conformance = profile.xmp_conformance_level();
-    let filename = profile.attachment_filename();
+    let schema = render_factur_x_extension_schema();
+    let value_description = render_factur_x_value_description(profile);
     format!(
         "\n    <rdf:Description rdf:about=\"\" \
            xmlns:pdfaExtension=\"http://www.aiim.org/pdfa/ns/extension/\" \
            xmlns:pdfaSchema=\"http://www.aiim.org/pdfa/ns/schema#\" \
            xmlns:pdfaProperty=\"http://www.aiim.org/pdfa/ns/property#\">\n      \
          <pdfaExtension:schemas>\n        \
-         <rdf:Bag>\n          \
+         <rdf:Bag>{schema}</rdf:Bag>\n      \
+         </pdfaExtension:schemas>\n    \
+         </rdf:Description>{value_description}  "
+    )
+}
+
+fn render_factur_x_extension_schema() -> String {
+    "\n          \
          <rdf:li rdf:parseType=\"Resource\">\n            \
          <pdfaSchema:schema>Factur-X PDF/A Extension Schema</pdfaSchema:schema>\n            \
          <pdfaSchema:namespaceURI>urn:factur-x:pdfa:CrossIndustryDocument:invoice:1p0#</pdfaSchema:namespaceURI>\n            \
@@ -384,11 +429,15 @@ fn render_factur_x_xmp_descriptions(profile: ZugferdProfile) -> String {
          </rdf:li>\n              \
          </rdf:Seq>\n            \
          </pdfaSchema:property>\n          \
-         </rdf:li>\n        \
-         </rdf:Bag>\n      \
-         </pdfaExtension:schemas>\n    \
-         </rdf:Description>\n    \
-         <rdf:Description rdf:about=\"\" \
+         </rdf:li>"
+        .to_owned()
+}
+
+fn render_factur_x_value_description(profile: ZugferdProfile) -> String {
+    let conformance = profile.xmp_conformance_level();
+    let filename = profile.attachment_filename();
+    format!(
+        "\n    <rdf:Description rdf:about=\"\" \
            xmlns:fx=\"urn:factur-x:pdfa:CrossIndustryDocument:invoice:1p0#\">\n      \
          <fx:DocumentType>INVOICE</fx:DocumentType>\n      \
          <fx:DocumentFileName>{filename}</fx:DocumentFileName>\n      \
@@ -514,11 +563,53 @@ mod tests {
         bytes
     }
 
+    fn synthesize_pdf_with_compressed_catalog_metadata() -> Vec<u8> {
+        let mut doc = Document::load_mem(&synthesize_pdf_for_profile(100)).unwrap();
+        let catalog_id = super::catalog_id(&doc).unwrap();
+        let mut metadata = Stream::new(
+            dictionary! {
+                "Type" => "Metadata",
+                "Subtype" => Object::Name(b"XML".to_vec()),
+            },
+            existing_pdfa_xmp().as_bytes().to_vec(),
+        );
+        metadata.compress().unwrap();
+        let metadata_id = doc.add_object(metadata);
+
+        if let Ok(Object::Dictionary(catalog)) = doc.get_object_mut(catalog_id) {
+            catalog.set("Metadata", metadata_id);
+        }
+
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        bytes
+    }
+
     fn existing_pdfa_xmp() -> &'static str {
         "<?xpacket begin=\"\u{feff}\" id=\"existing\"?>\n\
          <x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n\
          <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n\
          <rdf:Description rdf:about=\"\" xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\">\n\
+         <pdfaid:part>3</pdfaid:part>\n\
+         <pdfaid:conformance>B</pdfaid:conformance>\n\
+         </rdf:Description>\n\
+         </rdf:RDF>\n\
+         </x:xmpmeta>\n\
+         <?xpacket end=\"w\"?>\n"
+    }
+
+    fn existing_pdfa_xmp_with_extension_schema() -> &'static str {
+        "<?xpacket begin=\"\u{feff}\" id=\"existing\"?>\n\
+         <x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n\
+         <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n\
+         <rdf:Description rdf:about=\"\" \
+           xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\" \
+           xmlns:pdfaExtension=\"http://www.aiim.org/pdfa/ns/extension/\" \
+           xmlns:pdfaSchema=\"http://www.aiim.org/pdfa/ns/schema#\" \
+           xmlns:pdfaProperty=\"http://www.aiim.org/pdfa/ns/property#\">\n\
+         <pdfaExtension:schemas><rdf:Bag>\
+         <rdf:li rdf:parseType=\"Resource\"><pdfaSchema:schema>Existing schema</pdfaSchema:schema></rdf:li>\
+         </rdf:Bag></pdfaExtension:schemas>\n\
          <pdfaid:part>3</pdfaid:part>\n\
          <pdfaid:conformance>B</pdfaid:conformance>\n\
          </rdf:Description>\n\
@@ -636,6 +727,21 @@ mod tests {
     }
 
     #[test]
+    fn xmp_merge_appends_factur_x_schema_to_existing_extension_bag() {
+        let xmp = render_xmp(
+            Some(existing_pdfa_xmp_with_extension_schema()),
+            super::ZugferdProfile::Basic,
+        );
+        assert_well_formed_xml(&xmp);
+        assert_eq!(xmp.matches("<pdfaExtension:schemas>").count(), 1);
+        assert!(xmp.contains("<pdfaSchema:schema>Existing schema</pdfaSchema:schema>"));
+        assert!(xmp.contains("Factur-X PDF/A Extension Schema"));
+        assert!(xmp.contains("<pdfaid:part>3</pdfaid:part>"));
+        assert!(xmp.contains("<pdfaid:conformance>U</pdfaid:conformance>"));
+        assert!(xmp.contains("<fx:ConformanceLevel>BASIC</fx:ConformanceLevel>"));
+    }
+
+    #[test]
     fn xrechnung_profile_uses_xrechnung_filename() {
         assert_eq!(
             super::ZugferdProfile::Xrechnung.attachment_filename(),
@@ -739,6 +845,22 @@ mod tests {
 
         let af_entries = catalog.get(b"AF").unwrap().as_array().unwrap();
         assert_eq!(af_entries.len(), 2);
+    }
+
+    #[test]
+    fn embed_factur_x_preserves_compressed_existing_pdfa_xmp() {
+        let pdf = synthesize_pdf_with_compressed_catalog_metadata();
+        let xml = xml_for_profile(super::ZugferdProfile::En16931, 4);
+        let patched = embed_factur_x(&pdf, &xml, super::ZugferdProfile::En16931).unwrap();
+        let doc = Document::load_mem(&patched).unwrap();
+        let catalog = doc.catalog().unwrap();
+        let metadata_id = catalog.get(b"Metadata").unwrap().as_reference().unwrap();
+        let metadata = doc.get_object(metadata_id).unwrap().as_stream().unwrap();
+        let xmp = String::from_utf8(metadata.get_plain_content().unwrap()).unwrap();
+        assert_well_formed_xml(&xmp);
+        assert!(xmp.contains("<pdfaid:part>3</pdfaid:part>"));
+        assert!(xmp.contains("<pdfaid:conformance>U</pdfaid:conformance>"));
+        assert!(xmp.contains("<fx:ConformanceLevel>EN 16931</fx:ConformanceLevel>"));
     }
 
     fn is_string(object: &Object, expected: &[u8]) -> bool {
