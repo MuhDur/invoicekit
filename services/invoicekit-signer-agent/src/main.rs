@@ -59,18 +59,33 @@ fn main() {
         match stream {
             Ok(mut stream) => {
                 let signer = Arc::clone(&signer);
-                std::thread::spawn(move || {
-                    let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
-                    let mut line = String::new();
-                    if reader.read_line(&mut line).is_err() {
-                        return;
-                    }
-                    let response = dispatch(&signer, &line);
-                    let body = serde_json::to_string(&response).unwrap_or_else(|err| {
-                        format!(r#"{{"error":"response serialise failure: {err}"}}"#)
+                let spawn_result = std::thread::Builder::new()
+                    .name("invoicekit-signer-agent-client".to_owned())
+                    .spawn(move || {
+                        let reader_stream = match stream.try_clone() {
+                            Ok(reader_stream) => reader_stream,
+                            Err(err) => {
+                                let _ = writeln!(
+                                    stream,
+                                    r#"{{"error":"stream clone failure: {err}"}}"#
+                                );
+                                return;
+                            }
+                        };
+                        let mut reader = BufReader::new(reader_stream);
+                        let mut line = String::new();
+                        if reader.read_line(&mut line).is_err() {
+                            return;
+                        }
+                        let response = dispatch(&signer, &line);
+                        let body = serde_json::to_string(&response).unwrap_or_else(|err| {
+                            format!(r#"{{"error":"response serialise failure: {err}"}}"#)
+                        });
+                        let _ = writeln!(stream, "{body}");
                     });
-                    let _ = writeln!(stream, "{body}");
-                });
+                if let Err(err) = spawn_result {
+                    eprintln!("signer-agent: cannot spawn client handler: {err}");
+                }
             }
             Err(err) => {
                 eprintln!("signer-agent: accept error: {err}");
@@ -190,34 +205,50 @@ mod tests {
         Arc::new(SoftwareSigner::new().with_key("scaffold/default", [9_u8; 32]))
     }
 
+    fn assert_ok_response(response: RpcResponse) -> serde_json::Value {
+        assert!(
+            matches!(response, RpcResponse::Ok(_)),
+            "expected ok response"
+        );
+        let RpcResponse::Ok(value) = response else {
+            return serde_json::Value::Null;
+        };
+        value
+    }
+
+    fn assert_err_response(response: RpcResponse) -> String {
+        assert!(
+            matches!(response, RpcResponse::Err { .. }),
+            "expected error response"
+        );
+        let RpcResponse::Err { error } = response else {
+            return String::new();
+        };
+        error
+    }
+
     #[test]
     fn dispatch_ping_returns_version() {
         let signer = signer();
         let response = dispatch(&signer, r#"{"method":"ping"}"#);
-        match response {
-            RpcResponse::Ok(v) => assert_eq!(
-                v.get("version").and_then(|x| x.as_str()),
-                Some(DAEMON_VERSION)
-            ),
-            RpcResponse::Err { error } => panic!("unexpected error: {error}"),
-        }
+        let v = assert_ok_response(response);
+        assert_eq!(
+            v.get("version").and_then(|x| x.as_str()),
+            Some(DAEMON_VERSION)
+        );
     }
 
     #[test]
     fn dispatch_list_keys_returns_registered_keys() {
         let signer = signer();
         let response = dispatch(&signer, r#"{"method":"list_keys"}"#);
-        match response {
-            RpcResponse::Ok(v) => {
-                let keys = v
-                    .get("keys")
-                    .and_then(|k| k.as_array())
-                    .expect("keys array");
-                let names: Vec<&str> = keys.iter().filter_map(|s| s.as_str()).collect();
-                assert_eq!(names, vec!["scaffold/default"]);
-            }
-            RpcResponse::Err { error } => panic!("unexpected error: {error}"),
-        }
+        let v = assert_ok_response(response);
+        let keys = v
+            .get("keys")
+            .and_then(|k| k.as_array())
+            .expect("keys array");
+        let names: Vec<&str> = keys.iter().filter_map(|s| s.as_str()).collect();
+        assert_eq!(names, vec!["scaffold/default"]);
     }
 
     #[test]
@@ -228,20 +259,16 @@ mod tests {
             &signer,
             r#"{"method":"sign","params":{"key_ref":"scaffold/default","payload_b64":"aGVsbG8="}}"#,
         );
-        match response {
-            RpcResponse::Ok(v) => {
-                assert_eq!(
-                    v.get("algorithm").and_then(|s| s.as_str()),
-                    Some("blake3-keyed-256")
-                );
-                assert!(!v
-                    .get("signature_b64")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("")
-                    .is_empty());
-            }
-            RpcResponse::Err { error } => panic!("unexpected error: {error}"),
-        }
+        let v = assert_ok_response(response);
+        assert_eq!(
+            v.get("algorithm").and_then(|s| s.as_str()),
+            Some("blake3-keyed-256")
+        );
+        assert!(!v
+            .get("signature_b64")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .is_empty());
     }
 
     #[test]
@@ -251,30 +278,24 @@ mod tests {
             &signer,
             r#"{"method":"sign","params":{"key_ref":"nope","payload_b64":"aGVsbG8="}}"#,
         );
-        match response {
-            RpcResponse::Err { error } => assert!(error.contains("unknown key"), "got: {error}"),
-            RpcResponse::Ok(v) => panic!("unexpected Ok: {v:?}"),
-        }
+        let error = assert_err_response(response);
+        assert!(error.contains("unknown key"), "got: {error}");
     }
 
     #[test]
     fn dispatch_rejects_malformed_json() {
         let signer = signer();
         let response = dispatch(&signer, "not json");
-        match response {
-            RpcResponse::Err { error } => assert!(error.contains("malformed")),
-            RpcResponse::Ok(v) => panic!("unexpected Ok: {v:?}"),
-        }
+        let error = assert_err_response(response);
+        assert!(error.contains("malformed"));
     }
 
     #[test]
     fn dispatch_rejects_unknown_method() {
         let signer = signer();
         let response = dispatch(&signer, r#"{"method":"evict-cache"}"#);
-        match response {
-            RpcResponse::Err { error } => assert!(error.contains("unknown method")),
-            RpcResponse::Ok(v) => panic!("unexpected Ok: {v:?}"),
-        }
+        let error = assert_err_response(response);
+        assert!(error.contains("unknown method"));
     }
 
     #[test]

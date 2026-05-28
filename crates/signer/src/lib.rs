@@ -28,6 +28,13 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+#[cfg(unix)]
+use std::{
+    io::{BufRead, BufReader, Write},
+    os::unix::net::UnixStream,
+    path::{Path, PathBuf},
+};
+
 /// Opaque, operator-facing reference into the signer's keyring.
 /// The signer-agent resolves this to the underlying key
 /// material (file path, HSM slot, KMS key id, ...).
@@ -227,6 +234,120 @@ impl Signer for MockSigner {
     }
 }
 
+/// Signer implementation that calls `invoicekit-signer-agent`
+/// over a local Unix socket.
+///
+/// This is the engine-side half of the signer-agent boundary:
+/// production code can depend on the [`Signer`] trait and swap
+/// between in-process [`SoftwareSigner`] and this local proxy
+/// without changing call sites.
+#[cfg(unix)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UnixSocketSigner {
+    socket_path: PathBuf,
+}
+
+#[cfg(unix)]
+impl UnixSocketSigner {
+    /// Build a signer-agent client for `socket_path`.
+    #[must_use]
+    pub fn new(socket_path: impl Into<PathBuf>) -> Self {
+        Self {
+            socket_path: socket_path.into(),
+        }
+    }
+
+    /// Borrow the configured signer-agent socket path.
+    #[must_use]
+    pub fn socket_path(&self) -> &Path {
+        &self.socket_path
+    }
+
+    /// Fallible key listing for engine pre-flight checks.
+    ///
+    /// [`Signer::list_keys`] cannot return errors, so it maps
+    /// failures to an empty list. Engine setup code should use
+    /// this method when it needs to distinguish "empty
+    /// keyring" from "daemon unavailable".
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SigningError`] when the socket is unavailable,
+    /// the daemon refuses the request, or the response shape is
+    /// not the expected `{ "keys": [...] }`.
+    pub fn try_list_keys(&self) -> Result<Vec<KeyRef>, SigningError> {
+        Self::parse_list_keys_response(&self.rpc("list_keys", &serde_json::json!({}))?)
+    }
+
+    fn rpc(
+        &self,
+        method: &str,
+        params: &serde_json::Value,
+    ) -> Result<serde_json::Value, SigningError> {
+        let mut stream = UnixStream::connect(&self.socket_path).map_err(|err| {
+            SigningError::Unavailable(format!("{}: {err}", self.socket_path.display()))
+        })?;
+        let body = serde_json::json!({ "method": method, "params": params });
+        let body =
+            serde_json::to_string(&body).map_err(|err| SigningError::Refused(err.to_string()))?;
+        writeln!(stream, "{body}").map_err(|err| SigningError::Unavailable(err.to_string()))?;
+
+        let mut reader = BufReader::new(stream);
+        let mut response = String::new();
+        reader
+            .read_line(&mut response)
+            .map_err(|err| SigningError::Unavailable(err.to_string()))?;
+        let value: serde_json::Value = serde_json::from_str(response.trim())
+            .map_err(|err| SigningError::Refused(format!("malformed daemon response: {err}")))?;
+        if let Some(error) = value.get("error").and_then(|v| v.as_str()) {
+            return Err(Self::map_daemon_error(error));
+        }
+        Ok(value)
+    }
+
+    fn sign_params(request: &SignRequest) -> serde_json::Value {
+        serde_json::json!({
+            "key_ref": request.key_ref.as_str(),
+            "payload_b64": base64_encode(&request.payload),
+        })
+    }
+
+    fn parse_list_keys_response(value: &serde_json::Value) -> Result<Vec<KeyRef>, SigningError> {
+        let keys = value
+            .get("keys")
+            .and_then(|keys| keys.as_array())
+            .ok_or_else(|| SigningError::Refused("list_keys response missing keys".to_owned()))?;
+        keys.iter()
+            .map(|key| {
+                key.as_str().map(KeyRef::new).ok_or_else(|| {
+                    SigningError::Refused("list_keys key is not a string".to_owned())
+                })
+            })
+            .collect()
+    }
+
+    fn map_daemon_error(error: &str) -> SigningError {
+        error.strip_prefix("unknown key reference: ").map_or_else(
+            || SigningError::Refused(error.to_owned()),
+            |key| SigningError::UnknownKey(key.to_owned()),
+        )
+    }
+}
+
+#[cfg(unix)]
+impl Signer for UnixSocketSigner {
+    fn sign(&self, request: &SignRequest) -> Result<Signature, SigningError> {
+        let params = Self::sign_params(request);
+        let value = self.rpc("sign", &params)?;
+        serde_json::from_value(value)
+            .map_err(|err| SigningError::Refused(format!("malformed signature response: {err}")))
+    }
+
+    fn list_keys(&self) -> Vec<KeyRef> {
+        self.try_list_keys().unwrap_or_default()
+    }
+}
+
 /// Canonical Cargo package name of this crate.
 ///
 /// # Examples
@@ -315,10 +436,7 @@ mod tests {
             key_ref: KeyRef::new("missing"),
         };
         let err = signer.sign(&req).unwrap_err();
-        match err {
-            SigningError::UnknownKey(k) => assert_eq!(k, "missing"),
-            other => panic!("unexpected: {other:?}"),
-        }
+        assert!(matches!(err, SigningError::UnknownKey(ref k) if k == "missing"));
     }
 
     #[test]
@@ -373,5 +491,33 @@ mod tests {
         assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
         assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
         assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_socket_signer_builds_agent_sign_request() {
+        let request = SignRequest {
+            payload: b"hello".to_vec(),
+            key_ref: KeyRef::new("tenant-a/seal"),
+        };
+        let params = UnixSocketSigner::sign_params(&request);
+        assert_eq!(
+            params.get("key_ref").and_then(|v| v.as_str()),
+            Some("tenant-a/seal")
+        );
+        assert_eq!(
+            params.get("payload_b64").and_then(|v| v.as_str()),
+            Some("aGVsbG8=")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_socket_signer_parses_list_keys_response() {
+        let response = serde_json::json!({
+            "keys": ["alpha", "omega"]
+        });
+        let keys = UnixSocketSigner::parse_list_keys_response(&response).unwrap();
+        assert_eq!(keys, vec![KeyRef::new("alpha"), KeyRef::new("omega")]);
     }
 }
