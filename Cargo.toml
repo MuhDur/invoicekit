@@ -96,6 +96,7 @@ members = [
   "bridges/chargebee",
   "bridges/recurly",
   "crates/inbound-peppol",
+  "crates/intake-citation",
   "crates/signer",
   "crates/timestamping",
   "crates/transmit-peppol-native-as4",
