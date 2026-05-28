@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+[package]
+name = "invoicekit-evidence-dsse"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "DSSE (Dead Simple Signing Envelope, dsse.dev/spec/v1.0) wrapper for InvoiceKit evidence-bundle manifests. Provides the typed envelope + PAE (Pre-Authentication Encoding) helpers + a ManifestSigner trait so the signer-agent (T-083) can mint a `signatures/manifest.dsse` artefact and `invoicekit verify` can re-bind it offline. Closes the bead-8h6g manifest-envelope gap noted in the T-080 review."
+publish = false
+
+[lib]
+name = "invoicekit_evidence_dsse"
+path = "src/lib.rs"
+
+[dependencies]
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
+
+[lints]
+workspace = true

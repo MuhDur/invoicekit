@@ -2221,6 +2221,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoicekit-evidence-dsse"
+version = "0.0.0"
+dependencies = [
+ "base64",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "invoicekit-ffi"
 version = "0.0.0"
 dependencies = [

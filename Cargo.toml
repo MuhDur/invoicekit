@@ -72,6 +72,7 @@ members = [
   "crates/reconcile",
   "crates/envelope-encryption",
   "crates/evidence",
+  "crates/evidence-dsse",
   "crates/archive",
   "crates/verify",
   "crates/replay",
