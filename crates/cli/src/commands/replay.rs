@@ -3,16 +3,21 @@
 //! `invoicekit replay` runner.
 //!
 //! Replays an evidence bundle through
-//! [`invoicekit_replay::replay`] using an
-//! [`invoicekit_replay::IdentityReplayer`].
+//! [`invoicekit_replay::replay`].
 //!
-//! Today the engine isn't yet hooked into the CLI, so we use
-//! the identity replayer. That produces a baseline byte-equal
-//! report against the bundle's own artefacts; the moment T-100
-//! wires in the real pipeline replayer the same subcommand will
-//! start surfacing actual drift without changing flags or exit
-//! codes. Plain English: this command answers "would a fresh
-//! engine pass produce the exact bytes this bundle claims?".
+//! By default the runner uses
+//! [`invoicekit_replay::IdentityReplayer`], which always
+//! replays byte-equal — that's the baseline. Once the real
+//! pipeline replayer is wired in (T-100 follow-up) the same
+//! subcommand will start surfacing actual engine drift without
+//! any flag changes.
+//!
+//! Operators can also pass `--mutate <id>` (repeatable) to
+//! deliberately drift one or more recorded artefacts via
+//! [`invoicekit_replay::MutatingReplayer`]. This is how a CI
+//! pipeline can verify its own drift-detection step is wired
+//! up correctly: pack a bundle, replay with `--mutate
+//! canonical.json`, and assert the command exits non-zero.
 //!
 //! Exit codes:
 //!
@@ -27,7 +32,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use invoicekit_evidence::unpack;
-use invoicekit_replay::{replay, IdentityReplayer, ReplayOptions};
+use invoicekit_replay::{
+    replay, IdentityReplayer, MutatingReplayer, PipelineReplayer, ReplayOptions,
+};
 
 /// Run `invoicekit replay`.
 #[must_use]
@@ -60,7 +67,16 @@ pub fn run(argv: &[String]) -> ExitCode {
     };
 
     let options = ReplayOptions::all();
-    let report = match replay(&bundle, &IdentityReplayer, &options) {
+    // Pick the replayer based on whether the operator requested
+    // mutation. Boxed as a trait object so the call site stays
+    // a single `replay(...)` line regardless of which backend
+    // is in play.
+    let replayer: Box<dyn PipelineReplayer> = if parsed.mutate.is_empty() {
+        Box::new(IdentityReplayer)
+    } else {
+        Box::new(MutatingReplayer::drifting(parsed.mutate.iter().cloned()))
+    };
+    let report = match replay(&bundle, replayer.as_ref(), &options) {
         Ok(r) => r,
         Err(err) => {
             eprintln!("replay: {err}");
@@ -100,15 +116,27 @@ pub fn run(argv: &[String]) -> ExitCode {
 #[derive(Debug)]
 struct Args {
     bundle: PathBuf,
+    /// Artefact ids to deliberately drift via
+    /// [`MutatingReplayer`]. Empty = identity replay.
+    mutate: Vec<String>,
 }
 
 fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut bundle: Option<PathBuf> = None;
+    let mut mutate: Vec<String> = Vec::new();
     let mut i = 0;
     while i < argv.len() {
         let arg = &argv[i];
         match arg.as_str() {
             "--help" | "-h" => return Err(usage_help()),
+            "--mutate" => {
+                let v = argv.get(i + 1).ok_or_else(|| {
+                    format!("replay: --mutate needs an artefact id\n\n{}", usage_help())
+                })?;
+                mutate.push(v.clone());
+                i += 2;
+                continue;
+            }
             flag if flag.starts_with('-') => {
                 return Err(format!("replay: unknown flag {flag:?}\n\n{}", usage_help()));
             }
@@ -126,11 +154,11 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
     }
     let bundle =
         bundle.ok_or_else(|| format!("replay: <bundle> argument required\n\n{}", usage_help()))?;
-    Ok(Args { bundle })
+    Ok(Args { bundle, mutate })
 }
 
 fn usage_help() -> String {
-    "usage: invoicekit replay <bundle.ikb>\n\nReplay an evidence bundle through the identity replayer and report per-artefact drift. Prints a JSON report to stdout; exit code is 0 on byte-equal, 1 on drift.".to_owned()
+    "usage: invoicekit replay <bundle.ikb> [--mutate <artefact-id>]...\n\nReplay an evidence bundle and report per-artefact drift. Without --mutate the identity replayer always replays byte-equal; --mutate <id> deliberately drifts the named artefact via MutatingReplayer (repeatable). Prints a JSON report to stdout; exit code is 0 on byte-equal, 1 on drift, 2 on usage error.".to_owned()
 }
 
 #[cfg(test)]
@@ -209,5 +237,52 @@ mod tests {
     fn parse_args_rejects_unknown_flag() {
         let err = parse_args(&["--xyzzy".to_owned()]).unwrap_err();
         assert!(err.contains("unknown flag"));
+    }
+
+    #[test]
+    fn parse_args_collects_repeated_mutate_flags() {
+        let parsed = parse_args(&[
+            "bundle.ikb".to_owned(),
+            "--mutate".to_owned(),
+            "canonical.json".to_owned(),
+            "--mutate".to_owned(),
+            "formats/ubl.xml".to_owned(),
+        ])
+        .unwrap();
+        assert_eq!(parsed.mutate, vec!["canonical.json", "formats/ubl.xml"]);
+    }
+
+    #[test]
+    fn parse_args_rejects_mutate_without_value() {
+        let err = parse_args(&["bundle.ikb".to_owned(), "--mutate".to_owned()]).unwrap_err();
+        assert!(err.contains("--mutate needs an artefact id"));
+    }
+
+    #[test]
+    fn run_with_mutate_flag_returns_failure() {
+        let packed = pack(&sample_bundle()).unwrap();
+        let (_dir, path) = write_bundle("sample.ikb", &packed);
+        let code = run(&[
+            path.to_string_lossy().into_owned(),
+            "--mutate".to_owned(),
+            "canonical.json".to_owned(),
+        ]);
+        // MutatingReplayer drifts canonical.json → exit 1.
+        assert_eq!(code, ExitCode::FAILURE);
+    }
+
+    #[test]
+    fn run_with_mutate_flag_for_unknown_id_still_succeeds() {
+        // MutatingReplayer only drifts artefacts that actually
+        // exist in the bundle. An unknown id passes through
+        // without effect, so the replay still byte-equals.
+        let packed = pack(&sample_bundle()).unwrap();
+        let (_dir, path) = write_bundle("sample.ikb", &packed);
+        let code = run(&[
+            path.to_string_lossy().into_owned(),
+            "--mutate".to_owned(),
+            "does/not/exist.bin".to_owned(),
+        ]);
+        assert_eq!(code, ExitCode::SUCCESS);
     }
 }
