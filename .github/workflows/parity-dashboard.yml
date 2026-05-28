@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-123: differential test harness — parity dashboard publisher.
+#
+# Runs the EN 16931 differential harness against the JVM sidecars on
+# every push to main and on a nightly schedule, appends a new row to
+# docs/parity/history.jsonl, and rebuilds the static
+# docs/parity/index.html dashboard. The dashboard is served from
+# parity.invoicekit.org (GitHub Pages / object-store mirror — see
+# docs/operators/PARITY-DASHBOARD.md).
+
+name: parity-dashboard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "tools/validator-parity/**"
+      - "conformance-corpus/**"
+      - ".github/workflows/parity-dashboard.yml"
+  schedule:
+    - cron: "17 5 * * *" # nightly 05:17 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    env:
+      INVOICEKIT_VALIDATOR_KOSIT_URL: http://validator-kosit:8080
+      INVOICEKIT_VALIDATOR_PHIVE_URL: http://validator-phive:8080
+    services:
+      validator-kosit:
+        image: ghcr.io/muhdur/invoicekit/validator-kosit:scaffold
+        ports:
+          - 8080:8080
+      validator-phive:
+        image: ghcr.io/muhdur/invoicekit/validator-phive:scaffold
+        ports:
+          - 8081:8080
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build pure-Rust validator
+        run: cargo build --release -p invoicekit-validate
+
+      - name: Publish dashboard
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          python3 tools/validator-parity/publish_dashboard.py \
+            --history docs/parity/history.jsonl \
+            --html    docs/parity/index.html
+
+      - name: Commit dashboard artefacts
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "invoicekit-parity-bot"
+          git config user.email "parity-bot@invoicekit.org"
+          if ! git diff --quiet docs/parity/; then
+            git add docs/parity/history.jsonl docs/parity/index.html
+            git commit -m "parity-dashboard: refresh from ${GITHUB_SHA}"
+            git push
+          else
+            echo "no parity changes to commit"
+          fi

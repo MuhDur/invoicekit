@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>InvoiceKit EN 16931 parity dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 960px; color: #111; padding: 0 1rem; }
+  h1 { margin-bottom: 0.25rem; }
+  .subtitle { color: #666; margin-top: 0; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin: 2rem 0; }
+  .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; background: #fafafa; }
+  .card h2 { font-size: 2rem; margin: 0; color: #2a4d9b; }
+  .card p { margin: 0; color: #555; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1.5rem; }
+  th, td { border-bottom: 1px solid #eee; padding: 0.5rem; text-align: right; font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; }
+  footer { color: #888; margin-top: 2rem; font-size: 0.85rem; }
+  code { background: #f0f0f0; padding: 0 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<h1>EN 16931 parity dashboard</h1>
+<p class="subtitle">
+  Pure-Rust validator vs. JVM reference sidecars (KOSIT validator, PHIVE) over the synthetic UBL 2.1 conformance corpus.
+  Updated automatically on each main-branch run.
+</p>
+
+<div class="cards">
+  <div class="card"><h2>0.00%</h2><p>Latest parity</p></div>
+  <div class="card"><h2>0</h2><p>Fixtures in agreement</p></div>
+  <div class="card"><h2>0</h2><p>Diverged</p></div>
+  <div class="card"><h2>0</h2><p>Oracle unavailable</p></div>
+  <div class="card"><h2>0</h2><p>Total fixtures</p></div>
+</div>
+
+<h3>Parity over time</h3>
+<table>
+  <thead><tr><th>Timestamp (UTC)</th><th>Parity %</th><th>Parity</th><th>Diverged</th><th>Unavailable</th><th>Commit</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+
+<footer>
+  Latest run <code>—</code> at commit <code>—</code>.
+  History JSONL: <code>docs/parity/history.jsonl</code>. Source:
+  <code>tools/validator-parity/publish_dashboard.py</code>.
+</footer>
+
+<script>
+  const rows = [];
+  const tbody = document.getElementById("rows");
+  for (const r of rows.slice().reverse()) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = ""
+      + "<td>" + r.timestamp + "</td>"
+      + "<td>" + (r.parity_ratio * 100).toFixed(2) + "%</td>"
+      + "<td>" + r.parity_count + "</td>"
+      + "<td>" + r.diverged_count + "</td>"
+      + "<td>" + r.unavailable_count + "</td>"
+      + "<td><code>" + (r.git_sha || "—").slice(0, 7) + "</code></td>";
+    tbody.appendChild(tr);
+  }
+</script>
+</body>
+</html>
