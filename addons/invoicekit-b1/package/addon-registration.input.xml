@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<InvoiceKitAddOnRegistration>
+  <AddOnId>invoicekit-b1</AddOnId>
+  <Name>InvoiceKit SAP Business One Add-on</Name>
+  <Publisher>The InvoiceKit Authors</Publisher>
+  <Version>0.1.0</Version>
+  <EntryPoint>InvoiceKit.B1Addon.exe</EntryPoint>
+  <MinimumSapBusinessOneVersion>10.0 FP2410</MinimumSapBusinessOneVersion>
+  <MenuUid>INVOICEKIT_SEND</MenuUid>
+  <MenuCaption>Send via InvoiceKit</MenuCaption>
+  <SidecarEndpoint>/v1/transmit</SidecarEndpoint>
+</InvoiceKitAddOnRegistration>

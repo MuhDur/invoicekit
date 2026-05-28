@@ -1,0 +1,29 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The InvoiceKit Authors -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>InvoiceKit.B1Addon</AssemblyName>
+    <RootNamespace>InvoiceKit.B1Addon</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <SapB1SdkRoot Condition="'$(SapB1SdkRoot)' == ''">$(SAP_B1_SDK_ROOT)</SapB1SdkRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="SAPbouiCOM">
+      <HintPath>$(SapB1SdkRoot)\SAPbouiCOM.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SAPbobsCOM">
+      <HintPath>$(SapB1SdkRoot)\SAPbobsCOM.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
