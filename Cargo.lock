@@ -2228,6 +2228,7 @@ dependencies = [
  "invoicekit-evidence",
  "serde",
  "serde_json",
+ "subtle",
  "thiserror 2.0.18",
 ]
 
@@ -2749,6 +2750,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoicekit-signer-france-ctc"
+version = "0.0.0"
+dependencies = [
+ "invoicekit-signer",
+ "invoicekit-signer-eidas",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "invoicekit-signer-ksef"
 version = "0.0.0"
 dependencies = [
@@ -2911,6 +2923,7 @@ dependencies = [
  "invoicekit-timestamping",
  "serde",
  "serde_json",
+ "subtle",
  "thiserror 2.0.18",
 ]
 

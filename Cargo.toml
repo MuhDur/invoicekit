@@ -101,6 +101,7 @@ members = [
   "crates/signer",
   "crates/signer-cfdi",
   "crates/signer-eidas",
+  "crates/signer-france-ctc",
   "crates/signer-ksef",
   "crates/signer-nfe",
   "crates/signer-sdi",
