@@ -97,6 +97,7 @@ members = [
   "bridges/recurly",
   "crates/inbound-peppol",
   "crates/signer",
+  "crates/timestamping",
   "crates/transmit-peppol-native-as4",
   "crates/transmit-peppol-partner",
   "crates/transmit-peppol-phase4",
