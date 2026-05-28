@@ -13,5 +13,6 @@ pub mod doctor;
 pub mod migrate_archive;
 pub mod pack;
 pub mod replay;
+pub mod show;
 pub mod unpack;
 pub mod verify;
