@@ -32,6 +32,13 @@ def test_oracle_unavailable_detects_configuration_failure() -> None:
         raise AssertionError("configuration failure was not detected")
 
 
+def test_kosit_report_summary_is_not_oracle_unavailable() -> None:
+    findings = [{"rule_id": "KOSIT-REPORT-SUMMARY", "message": "rep:report"}]
+
+    if en16931_parity.oracle_unavailable(findings) is not None:
+        raise AssertionError("KoSIT report summary is a validation result, not setup failure")
+
+
 def test_oracle_precondition_failure_detects_schema_error() -> None:
     finding = {"rule_id": "PHIVE-UNNAMED", "message": "[SAX] invalid content"}
 
@@ -180,3 +187,33 @@ def test_project_xml_sets_peppol_profile_ids() -> None:
     assert en16931_parity.PEPPOL_CUSTOMIZATION_ID in projected
     assert en16931_parity.PEPPOL_PROFILE_ID in projected
     assert "<cbc:ID>I-1</cbc:ID>" in projected
+
+
+def test_project_xml_sets_kosit_xrechnung_customization_id() -> None:
+    xml = (
+        '<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" '
+        'xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">'
+        "<cbc:CustomizationID>old</cbc:CustomizationID>"
+        "<cbc:ID>I-1</cbc:ID>"
+        "</Invoice>"
+    )
+
+    projected = en16931_parity.project_xml(xml, "xrechnung")
+
+    assert "urn:xeinkauf.de:kosit:xrechnung_3.0" in projected
+    assert "urn:xoev-de:kosit:standard:xrechnung_3.0" not in projected
+
+
+def test_project_xml_fills_missing_endpoint_scheme_id() -> None:
+    xml = (
+        '<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" '
+        'xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">'
+        "<cbc:EndpointID>seller</cbc:EndpointID>"
+        '<cbc:EndpointID schemeID="0088">buyer</cbc:EndpointID>'
+        "</Invoice>"
+    )
+
+    projected = en16931_parity.project_xml(xml, "peppol-bis")
+
+    assert '<cbc:EndpointID schemeID="0204">seller</cbc:EndpointID>' in projected
+    assert '<cbc:EndpointID schemeID="0088">buyer</cbc:EndpointID>' in projected

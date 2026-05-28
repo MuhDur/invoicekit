@@ -18,6 +18,7 @@ Copyright 2026 The InvoiceKit Authors
     <junit.jupiter.version>5.11.3</junit.jupiter.version>
     <kosit.validator.version>1.6.2</kosit.validator.version>
     <phive.rules.peppol.version>3.2.2</phive.rules.peppol.version>
+    <jaxb.runtime.version>4.0.5</jaxb.runtime.version>
     <saxon.he.version>12.9</saxon.he.version>
     <verapdf.library.version>1.27.1</verapdf.library.version>
     <maven.compiler.release>21</maven.compiler.release>
@@ -47,6 +48,12 @@ Copyright 2026 The InvoiceKit Authors
           <artifactId>validator</artifactId>
           <version>${kosit.validator.version}</version>
         </dependency>
+        <dependency>
+          <groupId>org.glassfish.jaxb</groupId>
+          <artifactId>jaxb-runtime</artifactId>
+          <version>${jaxb.runtime.version}</version>
+          <scope>runtime</scope>
+        </dependency>
       </dependencies>
     </profile>
     <profile>
@@ -68,7 +75,7 @@ Copyright 2026 The InvoiceKit Authors
         <dependency>
           <groupId>org.glassfish.jaxb</groupId>
           <artifactId>jaxb-runtime</artifactId>
-          <version>4.0.5</version>
+          <version>${jaxb.runtime.version}</version>
           <scope>runtime</scope>
         </dependency>
         <!-- slf4j-simple provides a logger so phive's slf4j calls

@@ -36,14 +36,13 @@ PEPPOL_CUSTOMIZATION_ID = (
 )
 PEPPOL_PROFILE_ID = "urn:fdc:peppol.eu:2017:poacc:billing:01:1.0"
 XRECHNUNG_CUSTOMIZATION_ID = (
-    "urn:cen.eu:en16931:2017#compliant#urn:xoev-de:kosit:standard:xrechnung_3.0"
+    "urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0"
 )
 XRECHNUNG_PROFILE_ID = "urn:fdc:peppol.eu:2017:poacc:billing:01:1.0"
 ORACLE_UNAVAILABLE_MARKERS = (
     "CONFIGURATION-MISSING",
     "LIBRARY-ERROR",
     "NO-MATCHING-SET",
-    "REPORT-SUMMARY",
 )
 ORACLE_PRECONDITION_RULE_IDS = {"PHIVE-UNNAMED", "KOSIT-XML-WELLFORMED"}
 
@@ -370,6 +369,7 @@ def set_ubl_profile(xml: str, customization_id: str, profile_id: str) -> str:
     root = ET.fromstring(xml)
     set_or_insert_child_text(root, f"{{{CBC_NS}}}CustomizationID", customization_id, 0)
     set_or_insert_child_text(root, f"{{{CBC_NS}}}ProfileID", profile_id, 1)
+    set_missing_endpoint_scheme_ids(root)
     return ET.tostring(root, encoding="unicode")
 
 
@@ -379,6 +379,12 @@ def set_or_insert_child_text(root: ET.Element, tag: str, text: str, index: int) 
         child = ET.Element(tag)
         root.insert(index, child)
     child.text = text
+
+
+def set_missing_endpoint_scheme_ids(root: ET.Element) -> None:
+    for endpoint in root.findall(f".//{{{CBC_NS}}}EndpointID"):
+        if not (endpoint.get("schemeID") or "").strip():
+            endpoint.set("schemeID", "0204")
 
 
 def rpc_validate(sidecar: dict[str, str], xml: str, request_id: str, timeout: float) -> dict:

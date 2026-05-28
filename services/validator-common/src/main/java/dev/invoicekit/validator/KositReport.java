@@ -89,18 +89,24 @@ final class KositReport {
         String traceId,
         ObjectMapper mapper
     ) throws Throwable {
-        // Configuration cfg = Configuration.load(scenarios.toURI()).build();
+        // Configuration cfg = Configuration.load(scenarios.toURI()).build(processor);
         Class<?> configurationClass = Class.forName("de.kosit.validationtool.api.Configuration");
         Object loaderBuilder = configurationClass
             .getMethod("load", java.net.URI.class)
             .invoke(null, scenarios.toUri());
-        Object config = loaderBuilder.getClass().getMethod("build").invoke(loaderBuilder);
+        Class<?> processorClass = Class.forName("net.sf.saxon.s9api.Processor");
+        Object processor = processorClass.getConstructor(boolean.class).newInstance(false);
+        Object config = loaderBuilder.getClass()
+            .getMethod("build", processorClass)
+            .invoke(loaderBuilder, processor);
 
         // Check check = new DefaultCheck(cfg);
-        Class<?> defaultCheckClass = Class.forName("de.kosit.validationtool.api.DefaultCheck");
+        Class<?> defaultCheckClass = Class.forName("de.kosit.validationtool.impl.DefaultCheck");
+        Object configArray = java.lang.reflect.Array.newInstance(configurationClass, 1);
+        java.lang.reflect.Array.set(configArray, 0, config);
         Object check = defaultCheckClass
-            .getConstructor(configurationClass)
-            .newInstance(config);
+            .getConstructor(processorClass, configArray.getClass())
+            .newInstance(processor, configArray);
 
         // Input input = InputFactory.read(bytes, name);
         Class<?> inputFactoryClass = Class.forName("de.kosit.validationtool.api.InputFactory");
@@ -119,30 +125,29 @@ final class KositReport {
         ArrayNode findings = mapper.createArrayNode();
         Object accepted = result.getClass().getMethod("isAcceptable").invoke(result);
         boolean valid = accepted instanceof Boolean ? (Boolean) accepted : true;
-        @SuppressWarnings("unchecked")
-        Iterable<Object> reports = (Iterable<Object>) result.getClass()
-            .getMethod("getReports").invoke(result);
-        if (reports != null) {
-            for (Object report : reports) {
-                walkReport(report, findings, profile, traceId, mapper, !valid);
-            }
-        }
+        Set<String> seen = new HashSet<>();
+        Object customFailedAsserts = result.getClass()
+            .getMethod("getCustomFailedAsserts")
+            .invoke(result);
+        appendCustomFailedAsserts(customFailedAsserts, findings, profile, traceId, mapper, seen);
+        Object failedAsserts = result.getClass().getMethod("getFailedAsserts").invoke(result);
+        appendFailedAsserts(failedAsserts, findings, profile, traceId, mapper, seen);
+        Object reportDocument = result.getClass().getMethod("getReportDocument").invoke(result);
+        walkReportDocument(reportDocument, findings, profile, traceId, mapper, !valid);
         String rootElement = parseRoot(xml);
         // Don't shadow the reflection-only outcome with a parse
         // failure — the parse here is best-effort metadata.
         return new Outcome(valid, rootElement, findings);
     }
 
-    private static void walkReport(
-        Object report,
+    private static void walkReportDocument(
+        Object resultDoc,
         ArrayNode findings,
         String profile,
         String traceId,
         ObjectMapper mapper,
         boolean summaryFallback
     ) throws Throwable {
-        Class<?> reportClass = report.getClass();
-        Object resultDoc = reportClass.getMethod("getReportDocument").invoke(report);
         if (resultDoc == null) {
             if (summaryFallback) {
                 findings.add(reportSummaryFinding(mapper, profile, traceId,
@@ -161,7 +166,7 @@ final class KositReport {
                 findings.add(reportSummaryFinding(mapper, profile, traceId,
                     document == null || document.getDocumentElement() == null
                         ? "kosit-report-document-unavailable"
-                        : document.getDocumentElement().getNodeName()));
+                        : reportSummary(document.getDocumentElement())));
             }
         } catch (Throwable ex) {
             if (summaryFallback) {
@@ -184,6 +189,89 @@ final class KositReport {
                 profile, traceId, mapper, new HashSet<>());
         }
         return findings;
+    }
+
+    private static void appendFailedAsserts(
+        Object failedAsserts,
+        ArrayNode findings,
+        String profile,
+        String traceId,
+        ObjectMapper mapper,
+        Set<String> seen
+    ) throws Throwable {
+        if (!(failedAsserts instanceof Iterable<?> iterable)) return;
+        for (Object failedAssert : iterable) {
+            appendFailedAssert(failedAssert, findings, profile, traceId, mapper, seen, null);
+        }
+    }
+
+    private static void appendCustomFailedAsserts(
+        Object customFailedAsserts,
+        ArrayNode findings,
+        String profile,
+        String traceId,
+        ObjectMapper mapper,
+        Set<String> seen
+    ) throws Throwable {
+        if (!(customFailedAsserts instanceof Iterable<?> iterable)) return;
+        for (Object customFailedAssert : iterable) {
+            if (customFailedAssert == null) continue;
+            Object failedAssert = customFailedAssert.getClass()
+                .getMethod("getFailedAssert")
+                .invoke(customFailedAssert);
+            String severity = normalizeSeverity(
+                invokeString(customFailedAssert, "getCustomLevelFlag"));
+            appendFailedAssert(failedAssert, findings, profile, traceId, mapper, seen, severity);
+        }
+    }
+
+    private static void appendFailedAssert(
+        Object failedAssert,
+        ArrayNode findings,
+        String profile,
+        String traceId,
+        ObjectMapper mapper,
+        Set<String> seen,
+        String severityOverride
+    ) throws Throwable {
+        if (failedAssert == null) return;
+        String message = failedAssertText(failedAssert);
+        String ruleId = firstRuleId(invokeString(failedAssert, "getId"));
+        if (ruleId == null) {
+            ruleId = firstRuleId(invokeString(failedAssert, "getTest"));
+        }
+        if (ruleId == null) {
+            ruleId = firstRuleId(message);
+        }
+        if (ruleId == null) return;
+        String location = invokeString(failedAssert, "getLocation");
+        String severity = severityOverride == null
+            ? normalizeSeverity(invokeString(failedAssert, "getFlag"))
+            : severityOverride;
+        String dedupe = ruleId + "\u0000" + nullToEmpty(location) + "\u0000" + message;
+        if (seen.add(dedupe)) {
+            findings.add(ruleFinding(mapper, profile, traceId, ruleId,
+                location, message, severity, "failed-assert"));
+        }
+    }
+
+    private static String failedAssertText(Object failedAssert) throws Throwable {
+        Object text = failedAssert.getClass().getMethod("getText").invoke(failedAssert);
+        if (text == null) return "";
+        Object content = text.getClass().getMethod("getContent").invoke(text);
+        if (!(content instanceof Iterable<?> iterable)) return normalizeWhitespace(text.toString());
+        StringBuilder message = new StringBuilder();
+        for (Object entry : iterable) {
+            if (entry == null) continue;
+            if (message.length() > 0) message.append(' ');
+            message.append(entry);
+        }
+        return normalizeWhitespace(message.toString());
+    }
+
+    private static String invokeString(Object target, String method) throws Throwable {
+        Object value = target.getClass().getMethod(method).invoke(target);
+        return value == null ? null : value.toString();
     }
 
     private static Document coerceReportDocument(Object resultDoc) throws Exception {
@@ -235,9 +323,7 @@ final class KositReport {
         }
         String ruleAttribute = firstAttribute(element, "id", "ruleId", "ruleID", "rule-id");
         if (name.contains("assertion") && firstRuleId(ruleAttribute) != null) return true;
-        String severity = firstAttribute(element, "flag", "severity", "level", "type");
-        if (severity == null) return false;
-        return looksLikeViolationSeverity(severity);
+        return false;
     }
 
     private static ObjectNode ruleFinding(
@@ -249,10 +335,30 @@ final class KositReport {
         String location,
         String message
     ) {
+        return ruleFinding(
+            mapper,
+            profile,
+            traceId,
+            ruleId,
+            location,
+            message,
+            normalizeSeverity(firstAttribute(element, "flag", "severity", "level")),
+            elementName(element));
+    }
+
+    private static ObjectNode ruleFinding(
+        ObjectMapper mapper,
+        String profile,
+        String traceId,
+        String ruleId,
+        String location,
+        String message,
+        String severity,
+        String reportElement
+    ) {
         ObjectNode finding = mapper.createObjectNode();
         finding.put("rule_id", ruleId);
-        finding.put("severity",
-            normalizeSeverity(firstAttribute(element, "flag", "severity", "level")));
+        finding.put("severity", severity);
         if (message != null && !message.isBlank()) {
             finding.put("message", message);
         }
@@ -277,11 +383,7 @@ final class KositReport {
         trace.put("trace_id", traceId == null ? UUID.randomUUID().toString() : traceId);
         ObjectNode details = trace.putObject("details");
         details.put("profile", profile);
-        details.put("report_element", elementName(element));
-        String flag = firstAttribute(element, "flag", "severity", "level");
-        if (flag != null && !flag.isBlank()) {
-            details.put("flag", flag);
-        }
+        details.put("report_element", reportElement);
         return finding;
     }
 
@@ -320,14 +422,6 @@ final class KositReport {
         return "violation";
     }
 
-    private static boolean looksLikeViolationSeverity(String severity) {
-        String normalized = severity.toLowerCase(Locale.ROOT);
-        return normalized.contains("fatal")
-            || normalized.contains("error")
-            || normalized.contains("warn")
-            || normalized.contains("violation");
-    }
-
     private static String elementName(Element element) {
         String local = element.getLocalName();
         return local == null || local.isBlank() ? element.getNodeName() : local;
@@ -336,6 +430,31 @@ final class KositReport {
     private static String normalizeWhitespace(String value) {
         if (value == null) return "";
         return value.replaceAll("\\s+", " ").trim();
+    }
+
+    private static String reportSummary(Element root) {
+        StringBuilder summary = new StringBuilder(elementName(root));
+        appendElementSummary(root, summary, 0, 12);
+        return summary.toString();
+    }
+
+    private static int appendElementSummary(
+        Element element,
+        StringBuilder summary,
+        int count,
+        int limit
+    ) {
+        if (count >= limit) return count;
+        NodeList children = element.getChildNodes();
+        for (int index = 0; index < children.getLength() && count < limit; index++) {
+            Node child = children.item(index);
+            if (child instanceof Element childElement) {
+                summary.append(" > ").append(elementName(childElement));
+                count++;
+                count = appendElementSummary(childElement, summary, count, limit);
+            }
+        }
+        return count;
     }
 
     private static String nullToEmpty(String value) {
@@ -446,13 +565,14 @@ final class KositReport {
         String traceId,
         Throwable ex
     ) {
+        Throwable root = rootCause(ex);
         ObjectNode finding = mapper.createObjectNode();
         finding.put("rule_id", "KOSIT-LIBRARY-ERROR");
         finding.put("severity", "fatal");
         finding.put("message",
-            "KoSIT raised " + ex.getClass().getName()
+            "KoSIT raised " + root.getClass().getName()
                 + " before producing a result: "
-                + (ex.getMessage() == null ? "" : ex.getMessage()));
+                + (root.getMessage() == null ? "" : root.getMessage()));
         ObjectNode term = finding.putObject("term");
         term.put("kind", "business_group");
         term.put("code", "BG-1");
@@ -470,8 +590,20 @@ final class KositReport {
         trace.put("trace_id", traceId == null ? UUID.randomUUID().toString() : traceId);
         ObjectNode details = trace.putObject("details");
         details.put("profile", profile);
-        details.put("exception", ex.getClass().getName());
+        details.put("exception", root.getClass().getName());
+        if (root != ex) {
+            details.put("wrapper_exception", ex.getClass().getName());
+        }
         return finding;
+    }
+
+    private static Throwable rootCause(Throwable ex) {
+        Throwable current = ex;
+        while (current instanceof java.lang.reflect.InvocationTargetException invocation
+            && invocation.getCause() != null) {
+            current = invocation.getCause();
+        }
+        return current;
     }
 
     /** Stable outcome record matching PhiveReport.Outcome for the
