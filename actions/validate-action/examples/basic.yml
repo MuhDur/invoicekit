@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# Minimal example consumer workflow for invoicekit/validate-action.
+
+name: invoices
+
+on:
+  pull_request:
+    paths:
+      - "invoices/**"
+  push:
+    branches: [main]
+    paths:
+      - "invoices/**"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: invoicekit/validate-action@v1
+        with:
+          path: "invoices/**/*.xml"
+          rule-pack: "en16931-2017+peppol-bis-3.0"
+          fail-on: error

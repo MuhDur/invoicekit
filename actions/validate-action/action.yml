@@ -1,0 +1,132 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-115: composite GitHub Action for invoice validation.
+#
+# Drop into any repo's CI:
+#
+#   - uses: invoicekit/validate-action@v1
+#     with:
+#       path: "invoices/**/*.xml"
+#       rule-pack: "en16931-2017+peppol-bis-3.0"
+#       fail-on: error
+#
+# Wraps the invoicekit CLI; reports findings as annotations on
+# the offending lines and as a JSON summary uploaded as an
+# artefact.
+
+name: "InvoiceKit validate"
+description: "Validate UBL/CII/Peppol invoices in your repo against EN 16931 + Peppol BIS rules."
+author: "The InvoiceKit Authors"
+branding:
+  icon: "check-circle"
+  color: "blue"
+
+inputs:
+  path:
+    description: "Glob of invoice files to validate (default: invoices/**/*.{xml,ubl,cii})."
+    required: false
+    default: "invoices/**/*.{xml,ubl,cii}"
+  rule-pack:
+    description: "Rule pack id (e.g. en16931-2017+peppol-bis-3.0, xrechnung-3.0, en16931-2017)."
+    required: false
+    default: "en16931-2017+peppol-bis-3.0"
+  fail-on:
+    description: "Highest severity that does NOT fail the job (one of: fatal, error, warning, info). Default 'error' fails on fatal+error."
+    required: false
+    default: "error"
+  invoicekit-version:
+    description: "InvoiceKit CLI version to install (default: latest stable)."
+    required: false
+    default: "latest"
+  summary-artifact:
+    description: "Name of the JSON summary artefact to upload (set empty to skip)."
+    required: false
+    default: "invoicekit-validate-summary"
+
+outputs:
+  fatal-count:
+    description: "Number of fatal findings across all files."
+    value: ${{ steps.validate.outputs.fatal-count }}
+  error-count:
+    description: "Number of error findings."
+    value: ${{ steps.validate.outputs.error-count }}
+  warning-count:
+    description: "Number of warning findings."
+    value: ${{ steps.validate.outputs.warning-count }}
+  files-validated:
+    description: "Number of files matched by the input glob."
+    value: ${{ steps.validate.outputs.files-validated }}
+  summary-path:
+    description: "Path to the JSON summary artefact (relative to GITHUB_WORKSPACE)."
+    value: ${{ steps.validate.outputs.summary-path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install InvoiceKit CLI
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="${{ inputs.invoicekit-version }}"
+        echo "::group::install invoicekit CLI ($version)"
+        if ! command -v invoicekit >/dev/null 2>&1; then
+          if [[ "$version" == "latest" ]]; then
+            curl -fsSL https://invoicekit.org/install.sh | bash -s -- --yes
+          else
+            curl -fsSL https://invoicekit.org/install.sh | bash -s -- --yes --version "$version"
+          fi
+        fi
+        invoicekit --version
+        echo "::endgroup::"
+
+    - name: Validate invoice files
+      id: validate
+      shell: bash
+      env:
+        IK_PATH: ${{ inputs.path }}
+        IK_RULE_PACK: ${{ inputs.rule-pack }}
+        IK_FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        set -euo pipefail
+        summary_path="${GITHUB_WORKSPACE}/invoicekit-validate-summary.json"
+        echo "summary-path=invoicekit-validate-summary.json" >> "$GITHUB_OUTPUT"
+        # Run the CLI; on non-zero exit we still want to upload the
+        # summary, so we capture rc and decide afterwards.
+        rc=0
+        invoicekit validate \
+          --glob "$IK_PATH" \
+          --rule-pack "$IK_RULE_PACK" \
+          --fail-on "$IK_FAIL_ON" \
+          --json "$summary_path" \
+          --annotations github || rc=$?
+        if [[ -f "$summary_path" ]]; then
+          fatal=$(jq '[.findings[] | select(.severity == "fatal")] | length' "$summary_path")
+          error=$(jq '[.findings[] | select(.severity == "error")] | length' "$summary_path")
+          warning=$(jq '[.findings[] | select(.severity == "warning")] | length' "$summary_path")
+          files=$(jq '.files_validated' "$summary_path")
+          echo "fatal-count=$fatal" >> "$GITHUB_OUTPUT"
+          echo "error-count=$error" >> "$GITHUB_OUTPUT"
+          echo "warning-count=$warning" >> "$GITHUB_OUTPUT"
+          echo "files-validated=$files" >> "$GITHUB_OUTPUT"
+          {
+            echo "## InvoiceKit validate"
+            echo ""
+            echo "| Severity | Count |"
+            echo "| --- | ---: |"
+            echo "| fatal | $fatal |"
+            echo "| error | $error |"
+            echo "| warning | $warning |"
+            echo ""
+            echo "Files validated: **$files**"
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+        exit "$rc"
+
+    - name: Upload JSON summary
+      if: always() && inputs.summary-artifact != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.summary-artifact }}
+        path: invoicekit-validate-summary.json
+        if-no-files-found: ignore
