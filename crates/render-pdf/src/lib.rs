@@ -14,6 +14,7 @@
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
+use std::sync::LazyLock;
 
 use invoicekit_ir::CommercialDocument;
 use thiserror::Error;
@@ -331,18 +332,6 @@ pub const fn crate_name() -> &'static str {
     "invoicekit-render-pdf"
 }
 
-struct InMemoryWorld {
-    main: FileId,
-    source: Source,
-    library: LazyHash<Library>,
-    book: LazyHash<FontBook>,
-    fonts: Vec<FontSlot>,
-    /// T-055 pinned fonts (`crates/render-pdf/fonts/**`). These
-    /// sit after `fonts` in the `FontBook` index order, so
-    /// `World::font(idx)` consults them when `idx >= fonts.len()`.
-    extra_fonts: Vec<Font>,
-}
-
 /// T-055 impl: every byte of every font we may load is shipped
 /// inside this binary. The macro expands to `(&'static [u8], &str)`
 /// pairs the loader consumes via `Font::iter(Bytes::new(*))`.
@@ -358,10 +347,29 @@ macro_rules! pinned_fonts {
     };
 }
 
-impl InMemoryWorld {
-    fn new(source: &str) -> Self {
-        let main = FileId::new(None, VirtualPath::new("invoice.typ"));
+/// Document-independent Typst rendering assets.
+///
+/// The standard library and the font catalogue (typst-kit's embedded faces plus
+/// the T-055 pinned fonts) do not depend on the invoice being rendered, yet
+/// building them is the dominant cost of a render. They are constructed exactly
+/// once into [`RENDER_ASSETS`] and shared by every [`InMemoryWorld`]; only the
+/// per-document `main`/`source` change between renders.
+///
+/// This is purely a hoist: the library, the `FontBook` contents, and the font
+/// index order are byte-for-byte identical to constructing them per call, so the
+/// rendered PDF bytes are unchanged (pinned by `tests/golden_render.rs`).
+struct RenderAssets {
+    library: LazyHash<Library>,
+    book: LazyHash<FontBook>,
+    fonts: Vec<FontSlot>,
+    /// T-055 pinned fonts (`crates/render-pdf/fonts/**`). These
+    /// sit after `fonts` in the `FontBook` index order, so
+    /// `World::font(idx)` consults them when `idx >= fonts.len()`.
+    extra_fonts: Vec<Font>,
+}
 
+impl RenderAssets {
+    fn build() -> Self {
         // Step 1: typst-kit's embed-fonts catalogue (Libertinus
         // Serif, NCM, IBM Plex Sans, DejaVu Sans Mono, etc.) —
         // system fonts stay off so the byte-stable cross-platform
@@ -394,8 +402,6 @@ impl InMemoryWorld {
         }
 
         Self {
-            main,
-            source: Source::new(main, source.to_owned()),
             library: LazyHash::new(Library::default()),
             book: LazyHash::new(book),
             fonts,
@@ -404,13 +410,37 @@ impl InMemoryWorld {
     }
 }
 
+/// Process-wide, lazily-built rendering assets shared by every render call.
+static RENDER_ASSETS: LazyLock<RenderAssets> = LazyLock::new(RenderAssets::build);
+
+struct InMemoryWorld {
+    main: FileId,
+    source: Source,
+    /// Shared, document-independent library + font catalogue.
+    assets: &'static RenderAssets,
+}
+
+impl InMemoryWorld {
+    fn new(source: &str) -> Self {
+        // The library and font catalogue are document-independent and built once
+        // into `RENDER_ASSETS`; only `main`/`source` vary per render. Step 1/2
+        // of the asset build live in `RenderAssets::build`.
+        let main = FileId::new(None, VirtualPath::new("invoice.typ"));
+        Self {
+            main,
+            source: Source::new(main, source.to_owned()),
+            assets: &RENDER_ASSETS,
+        }
+    }
+}
+
 impl World for InMemoryWorld {
     fn library(&self) -> &LazyHash<Library> {
-        &self.library
+        &self.assets.library
     }
 
     fn book(&self) -> &LazyHash<FontBook> {
-        &self.book
+        &self.assets.book
     }
 
     fn main(&self) -> FileId {
@@ -437,8 +467,9 @@ impl World for InMemoryWorld {
         // T-055 pinned-font tail: `book` is populated in the
         // same order — typst-kit's slots first, then every
         // pinned font — so the offset arithmetic is exact.
-        self.fonts.get(index).map_or_else(
-            || self.extra_fonts.get(index - self.fonts.len()).cloned(),
+        let assets = self.assets;
+        assets.fonts.get(index).map_or_else(
+            || assets.extra_fonts.get(index - assets.fonts.len()).cloned(),
             FontSlot::get,
         )
     }

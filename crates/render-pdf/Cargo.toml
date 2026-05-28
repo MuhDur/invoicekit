@@ -23,6 +23,7 @@ typst-pdf = "=0.13.1"
 
 [dev-dependencies]
 serde_json = "1"
+sha2 = "0.10"
 
 [lints]
 workspace = true
