@@ -23,9 +23,18 @@ criterion = { version = "0.5", default-features = false, features = ["cargo_benc
 # `version` is required alongside `path` so cargo-deny does not flag this as a
 # wildcard dependency in the workspace bans check.
 invoicekit-canonical = { path = "../canonical", version = "0.0.0" }
+invoicekit-codelists = { path = "../codelists", version = "0.0.0" }
+invoicekit-evidence = { path = "../evidence", version = "0.0.0" }
 invoicekit-format-cii = { path = "../format-cii", version = "0.0.0" }
+invoicekit-format-detect = { path = "../format-detect", version = "0.0.0" }
 invoicekit-format-ubl = { path = "../format-ubl", version = "0.0.0" }
+invoicekit-intake-pdf = { path = "../intake-pdf", version = "0.0.0" }
 invoicekit-ir = { path = "../ir", version = "0.0.0" }
+invoicekit-money = { path = "../money", version = "0.0.0" }
+invoicekit-render-pdf = { path = "../render-pdf", version = "0.0.0" }
+invoicekit-tax-calculation = { path = "../tax-calculation", version = "0.0.0" }
+invoicekit-validate-ubl-cii = { path = "../validate-ubl-cii", version = "0.0.0" }
+lopdf = { version = "0.36", default-features = false }
 rust_decimal = "1"
 serde_json = "1"
 
@@ -43,6 +52,30 @@ harness = false
 
 [[bench]]
 name = "cii_parse"
+harness = false
+
+[[bench]]
+name = "validate"
+harness = false
+
+[[bench]]
+name = "render_pdf"
+harness = false
+
+[[bench]]
+name = "tax_calc"
+harness = false
+
+[[bench]]
+name = "codelist_lookup"
+harness = false
+
+[[bench]]
+name = "evidence"
+harness = false
+
+[[bench]]
+name = "intake_pdf"
 harness = false
 
 [lints]

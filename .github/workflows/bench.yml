@@ -58,6 +58,14 @@ jobs:
           cargo bench -p invoicekit-bench-harness --bench xml_canonicalization -- --warm-up-time 1 --measurement-time 3 --sample-size 20
           cargo bench -p invoicekit-bench-harness --bench ubl_parse -- --warm-up-time 1 --measurement-time 3 --sample-size 20
           cargo bench -p invoicekit-bench-harness --bench cii_parse -- --warm-up-time 1 --measurement-time 3 --sample-size 20
+          cargo bench -p invoicekit-bench-harness --bench validate -- --warm-up-time 1 --measurement-time 3 --sample-size 20
+          cargo bench -p invoicekit-bench-harness --bench tax_calc -- --warm-up-time 1 --measurement-time 3 --sample-size 20
+          cargo bench -p invoicekit-bench-harness --bench codelist_lookup -- --warm-up-time 1 --measurement-time 3 --sample-size 20
+          cargo bench -p invoicekit-bench-harness --bench evidence -- --warm-up-time 1 --measurement-time 3 --sample-size 20
+          cargo bench -p invoicekit-bench-harness --bench intake_pdf -- --warm-up-time 1 --measurement-time 3 --sample-size 20
+          # Typst rendering is heavier; the bench file pins its own sample size,
+          # so pass only the warm-up / measurement window here.
+          cargo bench -p invoicekit-bench-harness --bench render_pdf -- --warm-up-time 1 --measurement-time 5
       - name: Evaluate budget vs. baseline
         id: budget
         run: |

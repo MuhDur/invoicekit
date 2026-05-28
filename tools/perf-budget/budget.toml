@@ -36,8 +36,75 @@ max_regression_pct = 10.0
 # Owned by `crates/bench-harness/benches/cii_parse.rs`.
 max_regression_pct = 10.0
 
+# --- Hot user verbs (campaign Phase A). Each name matches the criterion
+# --- bench_function id the harness writes under target/criterion/<name>/.
+
+[operations.validate-ubl-small]
+# EN 16931 BR/BR-CO engine on a single-line UBL invoice: the fixed,
+# document-independent floor of the validate verb.
+# Owned by `crates/bench-harness/benches/validate.rs`.
+max_regression_pct = 10.0
+
+[operations.validate-ubl]
+# EN 16931 BR/BR-CO engine on a 200-line UBL invoice: per-line scaling.
+# Owned by `crates/bench-harness/benches/validate.rs`.
+max_regression_pct = 10.0
+
+[operations.validate-cii]
+# EN 16931 BR/BR-CO engine on a 200-line UN/CEFACT CII invoice.
+# Owned by `crates/bench-harness/benches/validate.rs`.
+max_regression_pct = 10.0
+
+[operations.render-pdf]
+# Deterministic Typst PDF/A-3b render of one commercial document.
+# Owned by `crates/bench-harness/benches/render_pdf.rs`.
+max_regression_pct = 10.0
+
+[operations.tax-line-extensions]
+# Per-line Decimal line-extension arithmetic over a 200-line invoice.
+# Owned by `crates/bench-harness/benches/tax_calc.rs`.
+max_regression_pct = 10.0
+
+[operations.tax-payable-amount]
+# Tax subtotal + document payable rollup for one invoice.
+# Owned by `crates/bench-harness/benches/tax_calc.rs`.
+max_regression_pct = 10.0
+
+[operations.tax-trace-canonical-json]
+# Canonical JSON serialization of a full arithmetic trace (evidence path).
+# Owned by `crates/bench-harness/benches/tax_calc.rs`.
+max_regression_pct = 10.0
+
+[operations.codelist-lookup]
+# Code list membership lookups across a realistic per-invoice field mix.
+# Owned by `crates/bench-harness/benches/codelist_lookup.rs`.
+max_regression_pct = 10.0
+
+[operations.evidence-pack]
+# zstd pack of a realistic .ikb evidence bundle (XML + PDF + report).
+# Owned by `crates/bench-harness/benches/evidence.rs`.
+max_regression_pct = 10.0
+
+[operations.evidence-unpack]
+# Inflate + re-parse of a packed evidence bundle.
+# Owned by `crates/bench-harness/benches/evidence.rs`.
+max_regression_pct = 10.0
+
+[operations.evidence-verify]
+# BLAKE3 re-hash of every artefact in an evidence bundle.
+# Owned by `crates/bench-harness/benches/evidence.rs`.
+max_regression_pct = 10.0
+
+[operations.intake-factur-x-extract]
+# Factur-X / ZUGFeRD embedded-CII extraction from a PDF/A-3 container.
+# Owned by `crates/bench-harness/benches/intake_pdf.rs`.
+max_regression_pct = 10.0
+
+[operations.format-detect]
+# Byte-prefix format sniff (the cheap front of every intake).
+# Owned by `crates/bench-harness/benches/intake_pdf.rs`.
+max_regression_pct = 10.0
+
 # Future tracked operations land here as their owning beads add benches:
-#   [operations.validate]
-#   [operations.render]
 #   [operations.transmit-enqueue]
 #   [operations.fingerprint]

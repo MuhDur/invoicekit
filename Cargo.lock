@@ -2074,9 +2074,18 @@ version = "0.0.0"
 dependencies = [
  "criterion",
  "invoicekit-canonical",
+ "invoicekit-codelists",
+ "invoicekit-evidence",
  "invoicekit-format-cii",
+ "invoicekit-format-detect",
  "invoicekit-format-ubl",
+ "invoicekit-intake-pdf",
  "invoicekit-ir",
+ "invoicekit-money",
+ "invoicekit-render-pdf",
+ "invoicekit-tax-calculation",
+ "invoicekit-validate-ubl-cii",
+ "lopdf",
  "rust_decimal",
  "serde_json",
 ]
