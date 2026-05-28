@@ -56,9 +56,9 @@ const IMPLEMENTED_RULE_IDS: &[&str] = &[
     "BR-31", "BR-32", "BR-33", "BR-36", "BR-37", "BR-38", "BR-41", "BR-42", "BR-43", "BR-44",
     "BR-45", "BR-46", "BR-47", "BR-48", "BR-49", "BR-50", "BR-51", "BR-52", "BR-53", "BR-54",
     "BR-55", "BR-56", "BR-57", "BR-61", "BR-62", "BR-63", "BR-64", "BR-65", "BR-CO-03", "BR-CO-04",
-    "BR-CO-09", "BR-CO-10", "BR-CO-11", "BR-CO-12",
-    "BR-CO-13", "BR-CO-14", "BR-CO-15", "BR-CO-16", "BR-CO-17", "BR-CO-18", "BR-CO-19", "BR-CO-20",
-    "BR-CO-21", "BR-CO-22", "BR-CO-23", "BR-CO-24", "BR-CO-26",
+    "BR-CO-09", "BR-CO-10", "BR-CO-11", "BR-CO-12", "BR-CO-13", "BR-CO-14", "BR-CO-15", "BR-CO-16",
+    "BR-CO-17", "BR-CO-18", "BR-CO-19", "BR-CO-20", "BR-CO-21", "BR-CO-22", "BR-CO-23", "BR-CO-24",
+    "BR-CO-26",
 ];
 
 const DEFERRED_RULE_IDS: &[&str] = &["BR-CO-05", "BR-CO-06", "BR-CO-07", "BR-CO-08"];
@@ -3443,7 +3443,7 @@ mod tests {
         let report = validate_xml(valid_ubl()).unwrap();
         assert_eq!(report.syntax, DocumentSyntax::Ubl);
         assert!(report.findings.is_empty(), "{:?}", report.findings);
-        assert_eq!(report.coverage.implemented, 81);
+        assert_eq!(report.coverage, En16931Coverage::current());
     }
 
     #[test]
