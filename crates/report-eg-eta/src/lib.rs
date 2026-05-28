@@ -161,7 +161,7 @@ impl EtaProvider for MockEtaProvider {
         };
         let uuid = format!("EG-{serial:0>8x}-{:0>8x}", serial.wrapping_mul(7));
         Ok(EtaSubmitEnvelope {
-            uuid: uuid.clone(),
+            uuid,
             long_id: format!("ETA-LONG-{serial:012}"),
             content_hash_hex: "0".repeat(64),
             status: EtaStatus::Submitted,
