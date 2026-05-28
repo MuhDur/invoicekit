@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
 [package]
 name = "invoicekit-report-ke-etims"
 version.workspace = true
@@ -7,12 +10,17 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit workspace member: invoicekit-report-ke-etims"
+description = "Kenya KRA eTIMS (electronic Tax Invoice Management System) adapter. Live KRA integration lands in a follow-up report-ke-etims-http crate."
 publish = false
 
 [lib]
 name = "invoicekit_report_ke_etims"
 path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
 
 [lints]
 workspace = true
