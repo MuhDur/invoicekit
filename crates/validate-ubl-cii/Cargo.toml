@@ -14,6 +14,10 @@ publish = false
 name = "invoicekit_validate_ubl_cii"
 path = "src/lib.rs"
 
+[[bin]]
+name = "invoicekit-en16931-findings"
+path = "src/bin/en16931_findings.rs"
+
 [dependencies]
 invoicekit-validate = { path = "../validate", version = "0.0.0" }
 quick-xml = "0.40.1"
