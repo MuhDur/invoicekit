@@ -2018,13 +2018,6 @@ dependencies = [
 [[package]]
 name = "invoicekit-archive"
 version = "0.0.0"
-dependencies = [
- "invoicekit-evidence",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
-]
 
 [[package]]
 name = "invoicekit-bench-harness"
@@ -2079,52 +2072,22 @@ dependencies = [
 [[package]]
 name = "invoicekit-bridge-chargebee"
 version = "0.0.0"
-dependencies = [
- "invoicekit-ir",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
 
 [[package]]
 name = "invoicekit-bridge-lago"
 version = "0.0.0"
-dependencies = [
- "invoicekit-ir",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
 
 [[package]]
 name = "invoicekit-bridge-maxio"
 version = "0.0.0"
-dependencies = [
- "invoicekit-ir",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
 
 [[package]]
 name = "invoicekit-bridge-recurly"
 version = "0.0.0"
-dependencies = [
- "invoicekit-ir",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
 
 [[package]]
 name = "invoicekit-bridge-stripe-invoicing"
 version = "0.0.0"
-dependencies = [
- "invoicekit-ir",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
 
 [[package]]
 name = "invoicekit-canonical"
@@ -2194,12 +2157,6 @@ dependencies = [
 [[package]]
 name = "invoicekit-evidence"
 version = "0.0.0"
-dependencies = [
- "blake3",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
 
 [[package]]
 name = "invoicekit-ffi"
@@ -2450,15 +2407,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "invoicekit-render-factur-x-acceptance"
-version = "0.0.0"
-dependencies = [
- "invoicekit-render-pdf",
- "invoicekit-render-pdf-postproc",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "invoicekit-render-html"
 version = "0.0.0"
 dependencies = [
@@ -2500,12 +2448,6 @@ dependencies = [
 [[package]]
 name = "invoicekit-replay"
 version = "0.0.0"
-dependencies = [
- "invoicekit-evidence",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
 
 [[package]]
 name = "invoicekit-report-ar-afip"
@@ -2694,14 +2636,14 @@ name = "invoicekit-transmit-peppol"
 version = "0.0.0"
 
 [[package]]
-name = "invoicekit-transmit-peppol-partner"
+name = "invoicekit-transmit-peppol-native-as4"
 version = "0.0.0"
 dependencies = [
  "invoicekit-format-ubl",
  "invoicekit-ir",
  "invoicekit-reconcile",
+ "pollster",
  "serde",
- "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -3538,6 +3480,12 @@ dependencies = [
  "flate2",
  "miniz_oxide",
 ]
+
+[[package]]
+name = "pollster"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
 
 [[package]]
 name = "polyval"
