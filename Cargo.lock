@@ -2206,6 +2206,7 @@ dependencies = [
  "invoicekit-replay",
  "invoicekit-signer",
  "invoicekit-timestamping",
+ "invoicekit-transmit-peppol-byok",
  "invoicekit-validate",
  "invoicekit-validate-ubl-cii",
  "invoicekit-verify",
@@ -3076,12 +3077,23 @@ name = "invoicekit-transmit-peppol"
 version = "0.0.0"
 
 [[package]]
+name = "invoicekit-transmit-peppol-byok"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "invoicekit-transmit-peppol-native-as4"
 version = "0.0.0"
 dependencies = [
  "invoicekit-format-ubl",
  "invoicekit-ir",
  "invoicekit-reconcile",
+ "invoicekit-transmit-peppol-byok",
  "pollster",
  "serde",
  "thiserror 2.0.18",
@@ -3091,6 +3103,7 @@ dependencies = [
 name = "invoicekit-transmit-peppol-native-as4-receive"
 version = "0.0.0"
 dependencies = [
+ "invoicekit-transmit-peppol-byok",
  "invoicekit-transmit-peppol-native-as4",
  "pollster",
  "thiserror 2.0.18",
@@ -3103,6 +3116,7 @@ dependencies = [
  "invoicekit-format-ubl",
  "invoicekit-ir",
  "invoicekit-reconcile",
+ "invoicekit-transmit-peppol-byok",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3113,6 +3127,7 @@ name = "invoicekit-transmit-peppol-phase4"
 version = "0.0.0"
 dependencies = [
  "invoicekit-reconcile",
+ "invoicekit-transmit-peppol-byok",
  "pollster",
  "serde",
  "serde_json",

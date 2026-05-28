@@ -16,6 +16,8 @@
 use std::env;
 use std::sync::Mutex;
 
+pub mod byok;
+
 use invoicekit_reconcile::{
     CancelRequest, CorrectRequest, GatewayAdapter, GatewayContext, GatewayError, GatewayErrorKind,
     GatewayFuture, GatewayOperation, GatewayReceipt, GatewayStatus, GatewaySubmissionId,

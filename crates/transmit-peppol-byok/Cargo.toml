@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+[package]
+name = "invoicekit-transmit-peppol-byok"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "InvoiceKit Peppol BYOK substrate — bring-your-own-credentials configuration + doctor for the partner / phase4 / native-AS4 transports. Customers supply the X.509 cert, key, endpoint URL, and SML mode; InvoiceKit drives transmission without ever holding the Peppol identity."
+publish = false
+
+[lib]
+name = "invoicekit_transmit_peppol_byok"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

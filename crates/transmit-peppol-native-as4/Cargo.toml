@@ -17,10 +17,17 @@ publish = false
 name = "invoicekit_transmit_peppol_native_as4"
 path = "src/lib.rs"
 
+[features]
+# Compile-in the BYOK + Peppol Test Bed integration tests. Off by
+# default so a fork without a Test Bed cert builds cleanly; flip
+# on in CI when `PEPPOL_TEST_BED_CREDENTIALS` is set.
+peppol-test-bed = []
+
 [dependencies]
 invoicekit-format-ubl = { path = "../format-ubl", version = "0.0.0" }
 invoicekit-ir = { path = "../ir", version = "0.0.0" }
 invoicekit-reconcile = { path = "../reconcile", version = "0.0.0" }
+invoicekit-transmit-peppol-byok = { path = "../transmit-peppol-byok", version = "0.0.0" }
 serde = { version = "1", features = ["derive"] }
 thiserror.workspace = true
 

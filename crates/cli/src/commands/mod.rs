@@ -16,6 +16,7 @@ pub mod doctor;
 pub mod init;
 pub mod migrate_archive;
 pub mod pack;
+pub mod peppol;
 pub mod repl;
 pub mod replay;
 pub mod show;
@@ -39,6 +40,7 @@ pub fn dispatch(subcommand: &str, argv: &[String]) -> Option<ExitCode> {
         "init" => init::run(argv),
         "migrate-archive" => migrate_archive::run(argv),
         "pack" => pack::run(argv),
+        "peppol" => peppol::run(argv),
         "replay" => replay::run(argv),
         "repl" => repl::run(argv),
         "show" => show::run(argv),

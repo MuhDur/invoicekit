@@ -45,6 +45,8 @@ use invoicekit_reconcile::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod byok;
+
 /// One of the three partner vendors named in the T-091 runbook.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]

@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-091 / T-092 / T-093 / T-094 / T-095: Peppol Test Bed
+# conformance gate.
+#
+# Runs the BYOK substrate's doctor and (when test-bed credentials
+# are configured) the end-to-end Test Bed integration tests.
+# The peppol-test-bed cargo feature gates the integration tests
+# so the workflow is harmless on forks that don't have the secret.
+
+name: peppol-test-bed
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/transmit-peppol-byok/**"
+      - "crates/transmit-peppol-partner/**"
+      - "crates/transmit-peppol-phase4/**"
+      - "crates/transmit-peppol-native-as4/**"
+      - "crates/transmit-peppol-native-as4-receive/**"
+      - "crates/cli/src/commands/peppol.rs"
+      - ".github/workflows/peppol-test-bed.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/transmit-peppol-byok/**"
+      - "crates/transmit-peppol-partner/**"
+      - "crates/transmit-peppol-phase4/**"
+      - "crates/transmit-peppol-native-as4/**"
+      - "crates/transmit-peppol-native-as4-receive/**"
+      - "crates/cli/src/commands/peppol.rs"
+      - ".github/workflows/peppol-test-bed.yml"
+  schedule:
+    - cron: "23 4 * * *" # nightly 04:23 UTC
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  byok-unit-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test BYOK substrate + bridges
+        run: |
+          cargo test \
+            -p invoicekit-transmit-peppol-byok \
+            -p invoicekit-transmit-peppol-partner \
+            -p invoicekit-transmit-peppol-phase4 \
+            -p invoicekit-transmit-peppol-native-as4 \
+            -p invoicekit-transmit-peppol-native-as4-receive \
+            -p invoicekit-cli \
+            --lib
+      - name: Clippy
+        run: |
+          cargo clippy --all-targets \
+            -p invoicekit-transmit-peppol-byok \
+            -p invoicekit-transmit-peppol-partner \
+            -p invoicekit-transmit-peppol-phase4 \
+            -p invoicekit-transmit-peppol-native-as4 \
+            -p invoicekit-transmit-peppol-native-as4-receive \
+            -- -D warnings
+
+  test-bed-conformance:
+    runs-on: ubuntu-24.04
+    needs: byok-unit-tests
+    # Only runs when the operator has wired the Test Bed cert as
+    # a repo secret. Forks without the secret skip cleanly.
+    if: ${{ github.event_name == 'schedule' || (github.repository == 'MuhDur/invoicekit' && github.ref == 'refs/heads/main') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Restore Test Bed credentials
+        env:
+          CREDS_JSON: ${{ secrets.PEPPOL_TEST_BED_CREDENTIALS_JSON }}
+          CERT_PEM: ${{ secrets.PEPPOL_TEST_BED_CERT_PEM }}
+          KEY_PEM: ${{ secrets.PEPPOL_TEST_BED_KEY_PEM }}
+          KEY_PASS: ${{ secrets.PEPPOL_TEST_BED_KEY_PASS }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CREDS_JSON" ]]; then
+            echo "::warning::PEPPOL_TEST_BED_CREDENTIALS_JSON secret unset — skipping Test Bed conformance"
+            echo "TEST_BED_SKIP=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/peppol-test-bed"
+          printf '%s' "$CREDS_JSON" > "$RUNNER_TEMP/peppol-test-bed/creds.json"
+          printf '%s' "$CERT_PEM" > "$RUNNER_TEMP/peppol-test-bed/cert.pem"
+          printf '%s' "$KEY_PEM"  > "$RUNNER_TEMP/peppol-test-bed/key.pem"
+          {
+            echo "PEPPOL_TEST_BED_CREDENTIALS=$RUNNER_TEMP/peppol-test-bed/creds.json"
+            echo "PEPPOL_KEY_PASSPHRASE=$KEY_PASS"
+          } >> "$GITHUB_ENV"
+
+      - name: Doctor the Test Bed credentials
+        if: env.TEST_BED_SKIP != '1'
+        run: |
+          cargo run -p invoicekit-cli --bin invoicekit -- \
+            peppol doctor \
+            --credentials "$PEPPOL_TEST_BED_CREDENTIALS" \
+            --json
+
+      - name: Run Test Bed integration tests
+        if: env.TEST_BED_SKIP != '1'
+        run: |
+          cargo test --features peppol-test-bed \
+            -p invoicekit-transmit-peppol-native-as4 \
+            -p invoicekit-transmit-peppol-native-as4-receive \
+            -- --include-ignored

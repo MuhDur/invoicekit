@@ -33,6 +33,7 @@ members = [
   "crates/intake-vlm",
   "crates/intake-witness",
   "crates/transmit-peppol",
+  "crates/transmit-peppol-byok",
   "crates/transmit-mock",
   "crates/transmit-email",
   # crates/report-* — national clearance and reporting formats

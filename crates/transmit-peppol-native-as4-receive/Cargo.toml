@@ -17,8 +17,15 @@ publish = false
 name = "invoicekit_transmit_peppol_native_as4_receive"
 path = "src/lib.rs"
 
+[features]
+# Compile-in the BYOK + Peppol Test Bed integration tests. Off by
+# default so a fork without a Test Bed cert builds cleanly; flip
+# on in CI when `PEPPOL_TEST_BED_CREDENTIALS` is set.
+peppol-test-bed = []
+
 [dependencies]
 invoicekit-transmit-peppol-native-as4 = { path = "../transmit-peppol-native-as4", version = "0.0.0" }
+invoicekit-transmit-peppol-byok = { path = "../transmit-peppol-byok", version = "0.0.0" }
 thiserror.workspace = true
 
 [dev-dependencies]
