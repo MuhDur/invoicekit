@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+[package]
+name = "invoicekit-report-be-peppol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Belgium Peppol-overlay reporting adapter. Adds BePeppolMandate + BePeppolReceiver + Hermes routing + BTW (TVA) categorisation on top of Peppol BIS Billing 3. The live AS4 delivery is delegated to crates/transmit-peppol via the partner AP path (T-091) or phase4 (T-092)."
+publish = false
+
+[lib]
+name = "invoicekit_report_be_peppol"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
+
+[lints]
+workspace = true

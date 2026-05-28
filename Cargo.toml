@@ -35,6 +35,7 @@ members = [
   "crates/transmit-mock",
   "crates/transmit-email",
   # crates/report-* — national clearance and reporting formats
+  "crates/report-be-peppol",
   "crates/report-fr-ctc",
   "crates/report-it-sdi",
   "crates/report-es-verifactu",
