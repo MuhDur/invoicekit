@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+#
+# T-035: validator UI build + test gate.
+#
+# Runs bun install, tsc --noEmit, bun test, and a release vite
+# build for the SPA that ships to validate.invoicekit.org.
+
+name: validator-ui
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/validator-ui/**"
+      - ".github/workflows/validator-ui.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/validator-ui/**"
+      - ".github/workflows/validator-ui.yml"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/validator-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.1.x
+      - name: Install
+        run: bun install --no-summary
+      - name: Type-check
+        run: bun run check
+      - name: Test
+        run: bun test
+      - name: Build
+        env:
+          VITE_REFERENCE_VALIDATOR_URL: https://reference.validate.invoicekit.org
+        run: bun run build
+      - name: Upload dist artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: validator-ui-dist
+          path: apps/validator-ui/dist
