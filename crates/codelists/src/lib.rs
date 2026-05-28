@@ -17,7 +17,7 @@
 //! families required by T-015 and keeps the loading, validation, and lookup
 //! contract executable before the updater lands.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -340,9 +340,69 @@ impl Entry {
 /// let registry = invoicekit_codelists::Registry::seeded().unwrap();
 /// assert!(registry.lookup(invoicekit_codelists::ISO_3166_1_ALPHA2, "DE", "2024-06-01").is_some());
 /// ```
+/// A verified manifest paired with a `code -> entry index` map.
+///
+/// The index is built once when the registry is constructed so that
+/// [`Registry::lookup`] is an O(1) hash plus a single validity-window check,
+/// instead of a linear scan over every entry on each call. Codes are unique
+/// within a manifest (enforced by [`Manifest::verify`]'s duplicate check), so
+/// the map holds exactly one entry index per code and the looked-up entry is
+/// byte-for-byte the same one the previous linear `find` would have returned.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct IndexedManifest {
+    manifest: Manifest,
+    code_index: HashMap<String, usize>,
+}
+
+impl IndexedManifest {
+    fn new(manifest: Manifest) -> Self {
+        let mut code_index = HashMap::with_capacity(manifest.entries.len());
+        for (idx, entry) in manifest.entries.iter().enumerate() {
+            // Codes are unique per manifest (Manifest::verify rejects
+            // duplicates), so this never overwrites a smaller index; the map
+            // therefore points at the same entry the old linear scan found.
+            code_index.entry(entry.code.clone()).or_insert(idx);
+        }
+        Self {
+            manifest,
+            code_index,
+        }
+    }
+
+    /// Look up `code`, assuming `on_date` has already been validated by the
+    /// caller. Uses the unchecked window check so the date is not re-parsed.
+    fn lookup_validated(&self, code: &str, on_date: &str) -> Option<&Entry> {
+        let idx = *self.code_index.get(code)?;
+        let entry = &self.manifest.entries[idx];
+        is_within_window_unchecked(
+            on_date,
+            entry.valid_from.as_deref(),
+            entry.valid_to.as_deref(),
+        )
+        .then_some(entry)
+    }
+
+    /// True when this manifest's window covers an already-validated `on_date`.
+    fn covers_validated(&self, on_date: &str) -> bool {
+        is_within_window_unchecked(
+            on_date,
+            Some(&self.manifest.effective_from),
+            self.manifest.effective_to.as_deref(),
+        )
+    }
+}
+
+/// In-memory registry of signed code-list manifests.
+///
+/// # Examples
+///
+/// ```
+/// let registry = invoicekit_codelists::Registry::seeded().unwrap();
+/// assert!(registry.lookup(invoicekit_codelists::ISO_3166_1_ALPHA2, "DE", "2024-06-01").is_some());
+/// ```
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Registry {
-    manifests: BTreeMap<String, Vec<Manifest>>,
+    manifests: BTreeMap<String, Vec<IndexedManifest>>,
 }
 
 impl Registry {
@@ -391,10 +451,15 @@ impl Registry {
                 .or_default()
                 .push(manifest);
         }
-        for manifests in grouped.values_mut() {
+        let mut indexed: BTreeMap<String, Vec<IndexedManifest>> = BTreeMap::new();
+        for (list, mut manifests) in grouped {
             manifests.sort_by(|left, right| right.effective_from.cmp(&left.effective_from));
+            indexed.insert(
+                list,
+                manifests.into_iter().map(IndexedManifest::new).collect(),
+            );
         }
-        Ok(Self { manifests: grouped })
+        Ok(Self { manifests: indexed })
     }
 
     /// Look up a code in a list for an effective date.
@@ -413,10 +478,8 @@ impl Registry {
     #[must_use]
     pub fn lookup(&self, list: &str, code: &str, on_date: &str) -> Option<&Entry> {
         validate_date(on_date).ok()?;
-        self.manifest(list, on_date)?
-            .entries
-            .iter()
-            .find(|entry| entry.code == code && entry.is_effective_on(on_date))
+        self.indexed_manifest_validated(list, on_date)?
+            .lookup_validated(code, on_date)
     }
 
     /// Return the manifest that covers `list` on `on_date`.
@@ -431,10 +494,21 @@ impl Registry {
     #[must_use]
     pub fn manifest(&self, list: &str, on_date: &str) -> Option<&Manifest> {
         validate_date(on_date).ok()?;
+        Some(&self.indexed_manifest_validated(list, on_date)?.manifest)
+    }
+
+    /// Internal: find the indexed manifest covering `list` on an
+    /// already-validated `on_date`.
+    ///
+    /// Same selection as [`Self::manifest`] (first manifest whose window covers
+    /// the date, in the construction-time effective-from-descending order), but
+    /// returns the wrapper so callers can reach the per-manifest code index, and
+    /// uses the unchecked window test since the caller validated `on_date`.
+    fn indexed_manifest_validated(&self, list: &str, on_date: &str) -> Option<&IndexedManifest> {
         self.manifests
             .get(list)?
             .iter()
-            .find(|manifest| manifest.is_effective_on(on_date))
+            .find(|indexed| indexed.covers_validated(on_date))
     }
 
     /// Iterate over all list names in the registry.
@@ -461,6 +535,7 @@ impl Registry {
         self.manifests
             .values()
             .flat_map(|manifests| manifests.iter())
+            .map(|indexed| &indexed.manifest)
     }
 }
 
@@ -589,6 +664,16 @@ fn is_within_window(on_date: &str, from: Option<&str>, to: Option<&str>) -> bool
     if validate_date(on_date).is_err() {
         return false;
     }
+    is_within_window_unchecked(on_date, from, to)
+}
+
+/// Window check that assumes `on_date` is already a validated `YYYY-MM-DD`
+/// string. The bounds comparisons are lexicographic, which is order-equivalent
+/// to chronological for the fixed-width ISO format, so this returns exactly what
+/// [`is_within_window`] would for a valid date — it just skips the re-parse. The
+/// registry lookup path validates the query date once and then uses this for
+/// every per-manifest / per-entry window test.
+fn is_within_window_unchecked(on_date: &str, from: Option<&str>, to: Option<&str>) -> bool {
     if from.is_some_and(|from| on_date < from) {
         return false;
     }
