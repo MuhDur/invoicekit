@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The InvoiceKit Authors
+
+.git
+.claude
+.ntm
+.beads
+target
+**/target
+*.tmp
+*.log

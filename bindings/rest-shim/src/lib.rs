@@ -81,9 +81,11 @@ pub fn build_router_with_state(state: RestShimState) -> Router {
         .route("/bundles/{id}", get(get_bundle))
         .route("/bundles/verify", post(verify_bundle))
         .route("/capabilities", get(get_capabilities))
+        .route("/healthz", get(healthz))
         .route("/openapi.json", get(openapi_json));
 
     Router::new()
+        .route("/healthz", get(healthz))
         .route("/openapi.json", get(openapi_json))
         .nest("/v1", v1)
         .with_state(state)
@@ -198,6 +200,13 @@ struct CapabilitiesQuery {
     date: Option<String>,
     /// Scenario such as B2B or B2G.
     scenario: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+struct HealthResponse {
+    status: String,
+    service: String,
+    version: String,
 }
 
 /// JSON contract returned by `POST /v1/bundles/verify`.
@@ -442,6 +451,14 @@ async fn get_capabilities(Query(query): Query<CapabilitiesQuery>) -> Result<Json
     })))
 }
 
+async fn healthz() -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "ok".to_owned(),
+        service: crate_name().to_owned(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+    })
+}
+
 async fn openapi_json() -> Response {
     let body = openapi_document_bytes();
     let hash = openapi_sha256_hex_for_bytes(&body);
@@ -625,6 +642,7 @@ pub fn openapi_document() -> Value {
             "description": "Thin REST sidecar over the InvoiceKit engine ABI.",
             "x-invoicekit-generated-from": [
                 "EngineProcessResponse",
+                "HealthResponse",
                 "InvoiceResponse",
                 "TransmitResponse",
                 "TransmissionRecord",
@@ -733,6 +751,8 @@ pub fn openapi_document() -> Value {
                     "responses": ok_response("Capability matrix or filtered capability entries.", object_schema())
                 }
             },
+            "/v1/healthz": health_path_item("getVersionedHealth"),
+            "/healthz": health_path_item("getHealth"),
             "/v1/openapi.json": openapi_path_item("getVersionedOpenApiDocument"),
             "/openapi.json": openapi_path_item("getOpenApiDocument")
         },
@@ -773,6 +793,7 @@ fn openapi_components() -> Value {
     insert_schema::<ApiErrorBody>(&mut schemas, "ApiErrorBody");
     insert_schema::<CapabilitiesQuery>(&mut schemas, "CapabilitiesQuery");
     insert_schema::<EngineProcessResponse>(&mut schemas, "EngineProcessResponse");
+    insert_schema::<HealthResponse>(&mut schemas, "HealthResponse");
     insert_schema::<InvoiceResponse>(&mut schemas, "InvoiceResponse");
     insert_schema::<ReconcileRequest>(&mut schemas, "ReconcileRequest");
     insert_schema::<ReconcileResponse>(&mut schemas, "ReconcileResponse");
@@ -973,6 +994,17 @@ fn openapi_path_item(operation_id: &str) -> Value {
     })
 }
 
+fn health_path_item(operation_id: &str) -> Value {
+    json!({
+        "get": {
+            "operationId": operation_id,
+            "summary": "Return REST shim liveness status",
+            "tags": ["metadata"],
+            "responses": ok_response("REST shim is live.", schema_ref("HealthResponse"))
+        }
+    })
+}
+
 /// Standard REST-shim error envelope.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct ApiErrorBody {
@@ -1109,6 +1141,7 @@ mod tests {
 
     const GOLDEN_FIXTURE: &str =
         include_str!("../../../conformance-corpus/golden/engine-abi-v1-commercial-document.json");
+    const DOCKERFILE: &str = include_str!("../Dockerfile");
 
     #[derive(Debug, Deserialize)]
     struct GoldenFixture {
@@ -1312,6 +1345,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn health_routes_return_liveness_payload() {
+        for uri in ["/healthz", "/v1/healthz"] {
+            let response = build_router()
+                .oneshot(empty_request(Method::GET, uri))
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::OK);
+            let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
+            assert_eq!(body["status"], "ok");
+            assert_eq!(body["service"], "invoicekit-binding-rest-shim");
+        }
+    }
+
+    #[tokio::test]
     async fn openapi_lists_plan_section_5_5_routes() {
         let response = build_router()
             .oneshot(empty_request(Method::GET, "/openapi.json"))
@@ -1331,6 +1379,8 @@ mod tests {
             "/v1/bundles/{id}",
             "/v1/bundles/verify",
             "/v1/capabilities",
+            "/v1/healthz",
+            "/healthz",
         ] {
             assert!(paths.contains_key(path), "OpenAPI missing {path}");
         }
@@ -1348,6 +1398,7 @@ mod tests {
         for schema in [
             "ApiErrorBody",
             "EngineProcessResponse",
+            "HealthResponse",
             "InvoiceResponse",
             "ReconcileRequest",
             "ReconcileResponse",
@@ -1406,6 +1457,17 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
         assert_eq!(body["error"]["code"], "not_found");
+    }
+
+    #[test]
+    fn dockerfile_runs_rest_shim_sidecar_with_self_healthcheck() {
+        assert!(
+            DOCKERFILE.contains("cargo build --locked --release -p invoicekit-binding-rest-shim")
+        );
+        assert!(DOCKERFILE.contains("INVOICEKIT_REST_BIND=0.0.0.0:8081"));
+        assert!(DOCKERFILE.contains("HEALTHCHECK"));
+        assert!(DOCKERFILE.contains("[\"/usr/local/bin/invoicekit-rest-shim\", \"--healthcheck\"]"));
+        assert!(DOCKERFILE.contains("EXPOSE 8081"));
     }
 
     fn empty_request(method: Method, uri: &str) -> Request<Body> {
