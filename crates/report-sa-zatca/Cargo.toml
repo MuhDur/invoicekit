@@ -7,12 +7,31 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit workspace member: invoicekit-report-sa-zatca"
+description = "Saudi Arabia ZATCA Phase 2 (Fatoora) report adapter: deterministic IR->ZATCA UBL 2.1 serialization (UBL base + ZATCA UBLExtensions stamp envelope + ICV/PIH invoice-hash chain + TLV QR), 15-digit Saudi VAT validators, and an offline MockZatcaReportProvider composing invoicekit-signer-zatca for clearance (B2B) vs reporting (B2C). Live Fatoora transmission lands in a follow-up report-sa-zatca-http crate."
 publish = false
 
 [lib]
 name = "invoicekit_report_sa_zatca"
 path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
+rust_decimal = { version = "1", default-features = false, features = ["serde-with-str", "std"] }
+invoicekit-ir = { path = "../ir" }
+invoicekit-signer = { path = "../signer" }
+invoicekit-signer-zatca = { path = "../signer-zatca" }
+invoicekit-format-ubl = { path = "../format-ubl" }
+
+[dev-dependencies]
+invoicekit-ir = { path = "../ir" }
+invoicekit-signer = { path = "../signer" }
+invoicekit-canonical = { path = "../canonical" }
+invoicekit-evidence = { path = "../evidence" }
+invoicekit-verify = { path = "../verify" }
+rust_decimal = { version = "1", default-features = false, features = ["serde-with-str", "std"] }
+serde_json = "1"
 
 [lints]
 workspace = true

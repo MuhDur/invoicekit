@@ -92,7 +92,7 @@ is labelled as such — that is an honest ceiling, not a limitation to "fix".
 | L3 | Live Peppol delivery is BYOK; native AS4 research-track | **By design** (commitment #7) | Keep, label honestly |
 | L4 | Coverage maturity varies by country | **FIX** | Populate honest matrix for all |
 | L5 | Inbound RTL/CJK vertical-script intake gap | **INVESTIGATE** | Reduce or document precisely |
-| L6 | Flagship report adapters are stubs (G2) | **FIX** | Real adapters + E2E |
+| L6 | Flagship report adapters are stubs (G2) | **DONE (T2–T3)** | All 6 flagships (IT/FR/PL/MX/BR/SA) now real adapters + offline E2E |
 | L7 | No per-country E2E tests (G3) | **FIX** | E2E for every country |
 
 "By design" items are honest ceilings, not defects; they stay but must be labelled
@@ -220,3 +220,29 @@ where parallelism is safe (distinct crate dirs; no shared-file edits; central `c
 - **Next skills to iterate:** `dispatching-parallel-agents` / `Workflow` to fan out **P2 flagships**
   (FR/PL/MX/BR/SA — each has a signer crate to compose, mirroring Italy), pipeline
   `implement → cargo verify → adversarial review`. Then `repeatedly-apply-skill` over the per-country unit.
+
+### Turn 3 — 2026-05-29 — P2 flagship fan-out (FR/PL/MX/BR/SA DONE)
+- **Skills used:** `Workflow`/`dispatching-parallel-agents` (parallel implement→review→remediate),
+  `verification-before-completion` (independent re-verification of all self-reported results),
+  `multi-pass-bug-hunting` mindset (adversarial review stage), `ubs`.
+- **Workflow used:** `coverage-p2-flagship-fanout` (10 agents, 941k tokens, 246 tool uses) — a 3-stage
+  pipeline per country (implement+self-verify → adversarial anti-slop/correctness review → remediate).
+  Result: **5/5 green, all passed review without remediation.**
+- **Did:** Replaced the 5 remaining flagship 60-line stubs with real adapters, each composing its
+  existing signer crate and serializing to its real format family:
+  - **FR** report-fr-ctc (706 lib + 252 test) — EN16931 via Factur-X/CII; SIREN/SIRET/FR-VAT; composes
+    signer-france-ctc + signer-eidas.
+  - **PL** report-pl-ksef (835 + 229) — KSeF FA(3); NIP; KSeF ref + UPO; composes signer-ksef.
+  - **MX** report-mx-cfdi (1009 + 240) — CFDI 4.0 Comprobante; RFC; UUID + TFD sello; composes signer-cfdi.
+  - **BR** report-br-nfe (1013 + 243) — NF-e infNFe; CNPJ/CPF; 44-digit chave + protocolo; composes signer-nfe.
+  - **SA** report-sa-zatca (1090 + 254) — ZATCA Phase 2 UBL + QR + PIH hash chain; 15-digit VAT;
+    composes signer-zatca.
+- **Evidence (independently verified, not self-reported):** ~94 new tests green across the 5 crates;
+  `clippy -D warnings` clean on all 5; `cargo check --workspace --all-targets` clean; UBS critical=0 on
+  all 11 changed files; every E2E exercises `manifest_for`+`pack`+`verify`(.ok)+determinism+rejection-path.
+- **Decisions:** D7 — defer capability-matrix entries for new countries to a dedicated central step
+  (matrix.json is shared + CI-gated + interacts with existing CLI tests); per-country E2E does NOT assert
+  matrix presence (only the Italy reference does). Avoids parallel shared-file races.
+- **Next skills to iterate:** `Workflow` fan-out for **P3** — the ~28 Wave-2/3 built-out countries get
+  offline E2E tests wired (serialize→validate→mock→evidence→verify) the same way; then the central
+  **capability-matrix population** step (G1) for all newly-supported countries.

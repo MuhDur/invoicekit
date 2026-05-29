@@ -2679,6 +2679,18 @@ dependencies = [
 [[package]]
 name = "invoicekit-report-br-nfe"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-canonical",
+ "invoicekit-evidence",
+ "invoicekit-ir",
+ "invoicekit-signer",
+ "invoicekit-signer-nfe",
+ "invoicekit-verify",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-report-cl-dte"
@@ -2755,6 +2767,20 @@ dependencies = [
 [[package]]
 name = "invoicekit-report-fr-ctc"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-canonical",
+ "invoicekit-evidence",
+ "invoicekit-ir",
+ "invoicekit-profile-factur-x",
+ "invoicekit-signer",
+ "invoicekit-signer-eidas",
+ "invoicekit-signer-france-ctc",
+ "invoicekit-verify",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-report-gr-mydata"
@@ -2847,6 +2873,18 @@ dependencies = [
 [[package]]
 name = "invoicekit-report-mx-cfdi"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-canonical",
+ "invoicekit-evidence",
+ "invoicekit-ir",
+ "invoicekit-signer",
+ "invoicekit-signer-cfdi",
+ "invoicekit-verify",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-report-my-myinvois"
@@ -2887,6 +2925,18 @@ dependencies = [
 [[package]]
 name = "invoicekit-report-pl-ksef"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-canonical",
+ "invoicekit-evidence",
+ "invoicekit-ir",
+ "invoicekit-signer",
+ "invoicekit-signer-ksef",
+ "invoicekit-verify",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-report-ro-efactura"
@@ -2900,6 +2950,19 @@ dependencies = [
 [[package]]
 name = "invoicekit-report-sa-zatca"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-canonical",
+ "invoicekit-evidence",
+ "invoicekit-format-ubl",
+ "invoicekit-ir",
+ "invoicekit-signer",
+ "invoicekit-signer-zatca",
+ "invoicekit-verify",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-report-th-rd"
