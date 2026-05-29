@@ -16,6 +16,13 @@ path = "src/lib.rs"
 
 [dependencies]
 lopdf = { version = "0.36", default-features = false }
+# Streaming FlateDecode (DEFLATE/zlib) used to size-cap an attacker-named
+# embedded-file stream before its decompressed bytes are materialised, so a
+# decompression bomb cannot force an unbounded allocation. lopdf already pulls
+# flate2 transitively for its own stream codec, so this is an already-resolved
+# dependency (no new lockfile version). License "MIT OR Apache-2.0" (allowed by
+# deny.toml).
+flate2 = "1"
 thiserror.workspace = true
 # Unicode Bidirectional Algorithm (UAX #9). Used to detect right-to-
 # left lines in extracted PDF text and rebuild logical reading order.

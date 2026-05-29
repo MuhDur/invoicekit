@@ -22,10 +22,25 @@
 //! bytes. Non-Factur-X PDFs return `Ok(None)`, never panic.
 
 use std::collections::HashSet;
+use std::io::Read;
 
-use lopdf::{Dictionary, Document, Object, ObjectId};
+use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 use crate::PdfTextError;
+
+/// Hard ceiling on the *decompressed* size of an embedded-file stream,
+/// in bytes. A real Factur-X / ZUGFeRD XML is tens of kilobytes; even
+/// the verbose EXTENDED profile with embedded free-text stays well
+/// under a megabyte, so a 16 MiB ceiling is generous for any conformant
+/// payload while refusing a decompression bomb.
+///
+/// Without this cap, a hostile PDF could name an embedded-file stream
+/// `factur-x.xml`, fill it with a few kilobytes of `FlateDecode` input
+/// that inflate to hundreds of megabytes, and force an unbounded
+/// allocation on intake. The cap is the embedded-file sibling of the
+/// evidence-bundle `decode_all_capped` guard and the name-tree cycle
+/// guard above.
+const MAX_EMBEDDED_FILE_SIZE: u64 = 16 * 1024 * 1024;
 
 /// Hard ceiling on embedded-files name-tree depth. PDF name trees are
 /// balanced and never approach this in practice (a tree this deep
@@ -212,14 +227,79 @@ fn read_filespec(doc: &Document, filespec: &Dictionary) -> Option<Vec<u8>> {
     for key in [b"F" as &[u8], b"UF"] {
         if let Ok(Object::Reference(stream_ref)) = ef_dict.get(key) {
             if let Ok(stream) = doc.get_object(*stream_ref).and_then(Object::as_stream) {
-                let decoded = stream
-                    .decompressed_content()
-                    .unwrap_or_else(|_| stream.content.clone());
-                return Some(decoded);
+                // Cap the decompressed size. An attacker controls both the
+                // attachment name (so this branch is reachable) and the
+                // stream bytes, so an unbounded `decompressed_content()`
+                // here is a decompression-bomb sink.
+                return decode_embedded_capped(stream, MAX_EMBEDDED_FILE_SIZE);
             }
         }
     }
     None
+}
+
+/// Decode an embedded-file stream while refusing to materialise more
+/// than `limit` bytes.
+///
+/// For the common single-`FlateDecode` case (what every Factur-X writer
+/// emits) the DEFLATE stream is read through a [`Read::take`] reader
+/// bounded at `limit + 1`, so decoding stops the instant the cap is
+/// crossed instead of inflating the full bomb. For any other filter
+/// (or filter chain, or an uncompressed stream) we fall back to lopdf's
+/// decoder and then enforce the same size cap on the result. Either way
+/// an output larger than `limit` yields `None`, which the caller treats
+/// as "no usable attachment".
+fn decode_embedded_capped(stream: &Stream, limit: u64) -> Option<Vec<u8>> {
+    // Read one byte past the cap so an output landing exactly on `limit`
+    // is accepted while anything larger is detected and rejected.
+    let read_budget = limit.saturating_add(1);
+
+    if is_single_flate_decode(stream) {
+        let mut decoder = flate2::read::ZlibDecoder::new(stream.content.as_slice());
+        let mut out = Vec::new();
+        // Bound the *decoder's output* (not the compressed input), so a
+        // tiny input that inflates without bound stops at the ceiling.
+        if Read::take(&mut decoder, read_budget)
+            .read_to_end(&mut out)
+            .is_err()
+        {
+            // A truncated / corrupt DEFLATE stream is not a Factur-X
+            // payload we can use; skip it rather than surfacing raw bytes.
+            return None;
+        }
+        if out.len() as u64 > limit {
+            return None;
+        }
+        return Some(out);
+    }
+
+    // Uncommon path: LZWDecode / ASCII85Decode / chains / no filter.
+    // lopdf materialises the whole output, so enforce the cap on the
+    // result and reject anything over the ceiling.
+    let decoded = stream
+        .decompressed_content()
+        .unwrap_or_else(|_| stream.content.clone());
+    if decoded.len() as u64 > limit {
+        return None;
+    }
+    Some(decoded)
+}
+
+/// True when the stream's `Filter` is exactly `FlateDecode` (a single
+/// filter, not a chain) and it carries no `DecodeParms` predictor we'd
+/// have to replay. This is the shape every Factur-X / ZUGFeRD writer
+/// emits for the embedded XML, and the only one we decode through the
+/// size-capped streaming path; everything else falls back to lopdf.
+fn is_single_flate_decode(stream: &Stream) -> bool {
+    // A predictor (`DecodeParms`) would need post-processing lopdf does
+    // internally; an XML attachment never uses one, so treat its
+    // presence as "not the fast path" and let lopdf handle it.
+    if stream.dict.get(b"DecodeParms").is_ok() {
+        return false;
+    }
+    stream
+        .filters()
+        .is_ok_and(|filters| matches!(filters.as_slice(), [b"FlateDecode"]))
 }
 
 fn resolve_dict(doc: &Document, id: ObjectId) -> Result<Dictionary, PdfTextError> {
@@ -346,6 +426,91 @@ mod tests {
 
         let mut bytes = Vec::new();
         doc.save_to(&mut bytes).expect("serialize fixture pdf");
+        bytes
+    }
+
+    /// FlateDecode-compress `plain` into a zlib stream the way a
+    /// Factur-X writer would. Returns the compressed bytes to drop into
+    /// a `/Filter /FlateDecode` stream.
+    fn flate_compress(plain: &[u8]) -> Vec<u8> {
+        use std::io::Write as _;
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        encoder.write_all(plain).expect("zlib write");
+        encoder.finish().expect("zlib finish")
+    }
+
+    /// Like [`build_factur_x_pdf`], but the embedded XML stream is
+    /// FlateDecode-compressed (the universal Factur-X shape) so the
+    /// extractor exercises its size-capped streaming-decode path. The
+    /// stream's `decompressed` size is whatever `plain` is; the
+    /// on-the-wire bytes are the compressed form, which can be tiny even
+    /// when `plain` is enormous (a decompression bomb).
+    fn build_factur_x_pdf_flate(attachment_name: &str, plain: &[u8]) -> Vec<u8> {
+        let mut doc = Document::with_version("1.7");
+
+        let mut xml_stream = Stream::new(
+            dictionary! { "Type" => "EmbeddedFile", "Subtype" => Object::Name(b"text/xml".to_vec()) },
+            flate_compress(plain),
+        );
+        // Mark the on-wire bytes as FlateDecode so the extractor decodes
+        // them. `Stream::new` already set `/Length` to the compressed
+        // size, which is what we want.
+        xml_stream.dict.set("Filter", Object::Name(b"FlateDecode".to_vec()));
+        let xml_stream_id = doc.add_object(xml_stream);
+
+        let filespec_id = doc.add_object(dictionary! {
+            "Type" => "Filespec",
+            "F" => Object::String(attachment_name.as_bytes().to_vec(), lopdf::StringFormat::Literal),
+            "UF" => Object::String(attachment_name.as_bytes().to_vec(), lopdf::StringFormat::Literal),
+            "AFRelationship" => Object::Name(b"Alternative".to_vec()),
+            "EF" => dictionary! {
+                "F" => xml_stream_id,
+                "UF" => xml_stream_id,
+            },
+        });
+
+        let content_id = doc.add_object(Stream::new(
+            Dictionary::new(),
+            Content {
+                operations: vec![Operation::new("q", vec![]), Operation::new("Q", vec![])],
+            }
+            .encode()
+            .expect("encode page content"),
+        ));
+        let leaf_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => Object::Reference((0, 0)),
+            "Contents" => content_id,
+        });
+        let parent_id = doc.add_object(dictionary! {
+            "Type" => "Pages",
+            "Count" => 1,
+            "Kids" => vec![leaf_id.into()],
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+        });
+        if let Ok(Object::Dictionary(d)) = doc.get_object_mut(leaf_id) {
+            d.set("Parent", parent_id);
+        }
+
+        let names_id = doc.add_object(dictionary! {
+            "EmbeddedFiles" => dictionary! {
+                "Names" => vec![
+                    Object::String(attachment_name.as_bytes().to_vec(), lopdf::StringFormat::Literal),
+                    filespec_id.into(),
+                ],
+            },
+        });
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => parent_id,
+            "Names" => names_id,
+            "AF" => vec![filespec_id.into()],
+        });
+        doc.trailer.set("Root", catalog_id);
+
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).expect("serialize flate fixture pdf");
         bytes
     }
 
@@ -592,6 +757,63 @@ mod tests {
         assert!(!is_canonical_factur_x_name("Factur-X.xml"));
         assert!(!is_canonical_factur_x_name("ZUGFERD-INVOICE.XML"));
         assert!(!is_canonical_factur_x_name("invoice.xml"));
+    }
+
+    /// A normally-sized, FlateDecode-compressed embedded XML must still
+    /// round-trip through the new size-capped streaming-decode path.
+    /// This proves the cap is behaviour-preserving for conformant input.
+    #[test]
+    fn extracts_flate_compressed_attachment() {
+        let xml = xml_for("EN 16931");
+        let pdf = build_factur_x_pdf_flate("factur-x.xml", &xml);
+        let extracted = extract_factur_x_xml(&pdf)
+            .expect("extract from flate-compressed pdf")
+            .expect("attachment present");
+        assert_eq!(extracted, xml);
+    }
+
+    /// Regression for the embedded-file decompression bomb: a hostile
+    /// PDF names a `factur-x.xml` stream whose `FlateDecode` input is a
+    /// few kilobytes but inflates to far more than the 16 MiB cap.
+    /// Before the cap, `read_filespec` called the unbounded
+    /// `decompressed_content()` and materialised the whole bomb; with
+    /// the cap the over-size output is refused and extraction returns
+    /// `Ok(None)` (no usable attachment) instead of exhausting memory.
+    #[test]
+    fn rejects_embedded_file_decompression_bomb() {
+        // 64 MiB of zeros compresses to a few kilobytes of DEFLATE but
+        // inflates well past the 16 MiB ceiling.
+        let bomb = vec![0u8; 64 * 1024 * 1024];
+        let pdf = build_factur_x_pdf_flate("factur-x.xml", &bomb);
+        // The on-wire PDF stays tiny — proof the bomb's danger is the
+        // *decompressed* size, not the input size.
+        assert!(
+            pdf.len() < 1024 * 1024,
+            "compressed bomb PDF should be small, got {} bytes",
+            pdf.len()
+        );
+        assert_eq!(
+            extract_factur_x_xml(&pdf).expect("bomb PDF still parses"),
+            None,
+            "over-cap embedded file must be refused, not materialised"
+        );
+    }
+
+    /// A payload that sits just under the cap must still extract: the
+    /// guard rejects bombs without clipping legitimately-large (but
+    /// bounded) attachments.
+    #[test]
+    fn accepts_embedded_file_just_under_cap() {
+        // 1 MiB of a repeating byte — well-formed, comfortably under the
+        // 16 MiB ceiling, and large enough to exercise the streaming
+        // reader past trivial sizes.
+        let payload = vec![b'x'; 1024 * 1024];
+        let pdf = build_factur_x_pdf_flate("factur-x.xml", &payload);
+        let extracted = extract_factur_x_xml(&pdf)
+            .expect("under-cap pdf parses")
+            .expect("under-cap attachment present");
+        assert_eq!(extracted.len(), payload.len());
+        assert_eq!(extracted, payload);
     }
 
     /// Strict gate: a 5 MB Factur-X PDF must extract in under 50 ms.

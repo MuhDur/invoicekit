@@ -668,7 +668,7 @@ performance** skills and closes the residuals.
 | Full end-to-end test coverage | ✅ 2404 tests, every country crate has offline E2E |
 | Skill matrix + skills-used log | ✅ §4 + per-turn entries |
 | Code quality (simplify-and-refactor) | ✅ all 109 crates evaluated to convergence |
-| Audit skills (multi-pass bug hunt) | 🔄 round-1: 22/22 resolved; round-2: 9/9 resolved (T23); round-3 pending (loop-until-dry not yet converged) |
+| Audit skills (multi-pass bug hunt) | 🔄 R1: 22/22, R2: 9/9, R3: 9/9 resolved (T24, incl. canonical fixed-forward + now property-tested); trend 22→9→9; R5 = class-exhaustive sweep to force convergence |
 | Performance | ✅ already engineered + CI-gated + budgeted (D19) |
 | Release / build outputs | ✅ v0.1.1 published, all artifacts |
 
@@ -717,3 +717,50 @@ performance** skills and closes the residuals.
   reproducing regression tests), `verification-before-completion` (central gate). D17 enforced on `canonical`.
 - **Next:** commit + push, then **round-3 audit** (loop continues until dry) in parallel with the code-quality /
   simplify-and-refactor loop over the crates round-2 did NOT touch.
+
+### Turn 24 — 2026-05-29 — Round-3 audit (9 bugs) fixed; canonical fixed forward TWICE → property-tested
+- **D20 (sequencing):** the loop-until-dry audit and the *writing* refactor loop must NOT run concurrently on
+  overlapping crates — a write mid-audit injects stale findings and corrupts the convergence signal. Audit rounds
+  run alone (read-only); the targeted refactor pass runs after each round's fixes land, on final code. The
+  whole-workspace refactor already converged (Waves QA/QB/QC, §12 ✅), so only newly-changed code is in scope.
+- **Round-3 deep audit** (read-only, 6 fresh lenses + regression-check of the 30 prior fixes, 23 agents,
+  adversarial verify): **9 confirmed bugs** (1 high, 3 medium, 5 low). Trend **22 → 9 → 9** — NOT converged.
+  Character shifted: almost all are **siblings of already-fixed classes in crates not yet swept** (multibyte
+  `split_at`, untrusted-Decimal overflow, decompression bombs) + one **regression of the round-2 canonical fix**.
+- **Round-4 TDD fix workflow** (7 disjoint crates, reproduce→fix→adversarial-review): **6/7 clean on the first
+  pass** — `intake-witness` (multibyte VAT `split_at`), `report-gr-mydata` + `report-mx-cfdi` (unchecked-Decimal
+  overflow, the `rust_decimal` `Sum`/`Add` panic), `report-mx-cfdi` (attribute escaper now emits `&#x9;`/`&#xA;`/
+  `&#xD;`), `intake-pdf` (Factur-X FlateDecode decompression-bomb cap via `flate2` + page/fragment caps + O(k²)→
+  O(k) `distinct_buckets`), `transmit-peppol-partner` (submission-id URL path-segment percent-encoding),
+  `reconcile` (substate-shedding base transition now allowed). `flate2` added to `intake-pdf` — already a
+  transitive dep (no new lockfile version), license MIT OR Apache-2.0 (allowed).
+- **`canonical` regressed AGAIN (the load-bearing finding).** Round-3 found the round-2 fix was order-dependent /
+  non-idempotent for the *two-attribute UBL-UDT/CII-UDT* collision. The round-4 agent fixed THAT but the
+  adversarial reviewer caught it introducing a NEW regression in the *source-prefix-vs-suffix* shape (an input
+  `xmlns:udt2="urn:third"` colliding with the generated suffix → dropped namespace + double-booked `udt2` +
+  non-idempotent). Two consecutive automated fixes each shifted the bug. **Root cause of the recurrence:** the
+  proptest generator (`arb_xml_element`) emits NO namespaces or attributes, so the entire prefix-disambiguation
+  class had zero property coverage — every fix was validated only against single-family goldens that never trigger
+  a collision.
+- **Fixed forward by hand (not a third blind agent):** replaced the grouped allocator with a single deterministic
+  pass (`assign_attribute_prefixes`) over distinct attribute URIs sorted by `(preferred_prefix, uri)`, where each
+  URI takes the first of `pfx`, `pfx2`, `pfx3`, … that is free against **both** the in-scope rendered bindings
+  *and* the full set already allocated on this element. Checking the full `used` set is what stops a generated
+  suffix from stealing the prefix a later distinct namespace will render under. Hand-verified it reproduces the
+  correct `udt`/`udt2`/`udt22` output, honors inherited bindings, and is a fixed point.
+- **D21 (the durable fix is the property test, not the patch):** added 2 targeted regression tests (two-attribute
+  collision + source-prefix-vs-suffix) AND 2 generative proptests — `canonicalize_xml_namespaced_is_idempotent`
+  and `canonicalize_xml_attribute_order_is_irrelevant` — with a generator that mixes UBL-UDT/CII-UDT and source
+  prefixes aliasing generated suffixes (`udt2`/`udt3`). Both pass at **PROPTEST_CASES=20000**. Any future
+  disambiguation regression now fails a property test, not a hand-built example.
+- **Central verification:** `cargo build --workspace` clean; **`cargo test --workspace` = 2441 passed / 0 failed**
+  (+21 over the 2420 baseline); `cargo clippy --workspace --all-targets -D warnings` clean; **13 canonical golden
+  tests + rfc8785 bytes byte-identical** (D17 held); scope = the 7 round-3 crates only.
+- **Skills used:** `multi-pass-bug-hunting` (round-3 loop-until-dry), `testing-real-service-e2e-no-mocks`
+  (per-bug regression tests), `testing-fuzzing`/property testing (the canonical proptest gap), `verification-
+  before-completion` (central gate). D17 + D18 enforced.
+- **Next (round-5 = the convergence-forcing move):** rounds 2 and 3 both surfaced the SAME classes at NEW sibling
+  sites, so site-by-site discovery will not converge efficiently. Run a **class-exhaustive grep-driven sweep** that
+  enumerates EVERY remaining instance of each known-dangerous pattern (multibyte `&str` byte-slice/`split_at`,
+  unchecked `Decimal` arithmetic on untrusted amounts, unbounded decompression/allocation of untrusted bytes,
+  string-built XML/URL/path without escaping) across all 109 crates and drives each class to literal zero.

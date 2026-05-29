@@ -28,6 +28,23 @@ use lopdf::{Document, Object, ObjectId};
 
 use crate::PdfTextError;
 
+/// Maximum number of pages [`extract_pdf_text`] will process from an
+/// untrusted PDF before treating the input as abusive. A real invoice
+/// is a handful of pages; even a verbose multi-line-item document with
+/// supporting annexes stays in the low dozens, so a 4096-page ceiling
+/// is generous while still refusing a PDF that declares millions of
+/// pages purely to exhaust intake.
+const MAX_PAGES: usize = 4096;
+
+/// Maximum number of text fragments [`extract_pdf_text`] will
+/// accumulate across the whole document before bailing. Each fragment
+/// is an allocation and feeds the per-page reading-order pass, so an
+/// unbounded fragment count is a denial-of-service amplifier on a
+/// hostile content stream. A dense real page holds a few thousand
+/// fragments; a million across the document is a generous ceiling no
+/// conformant invoice approaches.
+const MAX_FRAGMENTS_TOTAL: usize = 1_000_000;
+
 /// The full text surface of a single PDF, page by page.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct StructuredText {
@@ -114,11 +131,34 @@ pub fn extract_pdf_text(bytes: &[u8]) -> Result<StructuredText, PdfTextError> {
         return Err(PdfTextError::Encrypted);
     }
 
+    let all_pages = doc.get_pages();
+    if all_pages.len() > MAX_PAGES {
+        return Err(PdfTextError::TooLarge {
+            detail: format!(
+                "page count {} exceeds ceiling {MAX_PAGES}",
+                all_pages.len()
+            ),
+        });
+    }
+
     let mut pages = Vec::new();
-    for (idx, (_page_no, page_id)) in doc.get_pages().into_iter().enumerate() {
+    let mut fragments_so_far = 0usize;
+    for (idx, (_page_no, page_id)) in all_pages.into_iter().enumerate() {
         let (width_pt, height_pt) = page_size(&doc, page_id);
         let fragments = extract_page(&doc, page_id)
             .map_err(|detail| PdfTextError::Page { page: idx, detail })?;
+        // Cap the *total* fragment count across the document before the
+        // per-page reading-order pass runs, so a single hostile content
+        // stream that emits millions of show-text operators cannot force
+        // unbounded allocation or super-linear sorting/clustering work.
+        fragments_so_far = fragments_so_far.saturating_add(fragments.len());
+        if fragments_so_far > MAX_FRAGMENTS_TOTAL {
+            return Err(PdfTextError::TooLarge {
+                detail: format!(
+                    "text-fragment count exceeds ceiling {MAX_FRAGMENTS_TOTAL}"
+                ),
+            });
+        }
         let fragments = crate::script_order::reading_order(fragments);
         pages.push(PageText {
             index: idx,
@@ -601,5 +641,143 @@ mod tests {
         assert_eq!(st.pages[1].fragments[0].text, "page-two");
         assert_eq!(st.pages[0].index, 0);
         assert_eq!(st.pages[1].index, 1);
+    }
+
+    /// Build a PDF with `n` empty pages hung off one `Pages` node. Used
+    /// to exercise the page-count ceiling without any per-page text
+    /// work — the cap is checked from the page list alone.
+    fn build_pdf_with_n_pages(n: usize) -> Vec<u8> {
+        use lopdf::Dictionary;
+        let mut doc = Document::with_version("1.4");
+        let pages_id = doc.new_object_id();
+        let mut kids = Vec::with_capacity(n);
+        for _ in 0..n {
+            let mut page = Dictionary::new();
+            page.set("Type", "Page");
+            page.set("Parent", Object::Reference(pages_id));
+            page.set(
+                "MediaBox",
+                Object::Array(vec![
+                    Object::Integer(0),
+                    Object::Integer(0),
+                    Object::Integer(612),
+                    Object::Integer(792),
+                ]),
+            );
+            kids.push(Object::Reference(doc.add_object(Object::Dictionary(page))));
+        }
+        let mut pages = Dictionary::new();
+        pages.set("Type", "Pages");
+        let count = i64::try_from(kids.len()).expect("page count fits i64");
+        pages.set("Kids", Object::Array(kids));
+        pages.set("Count", Object::Integer(count));
+        doc.objects.insert(pages_id, Object::Dictionary(pages));
+        let mut catalog = Dictionary::new();
+        catalog.set("Type", "Catalog");
+        catalog.set("Pages", Object::Reference(pages_id));
+        let catalog_id = doc.add_object(Object::Dictionary(catalog));
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).expect("serialize many-page pdf");
+        bytes
+    }
+
+    /// A PDF at exactly the page ceiling still extracts; one page over
+    /// is refused with [`PdfTextError::TooLarge`]. Without the cap an
+    /// attacker could declare an unbounded page list and force intake
+    /// to walk every one.
+    #[test]
+    fn rejects_pdf_over_page_ceiling() {
+        let at_cap = build_pdf_with_n_pages(MAX_PAGES);
+        let st = extract_pdf_text(&at_cap).expect("page count at cap is accepted");
+        assert_eq!(st.pages.len(), MAX_PAGES);
+
+        let over_cap = build_pdf_with_n_pages(MAX_PAGES + 1);
+        let err = extract_pdf_text(&over_cap).expect_err("over-cap page count must be refused");
+        assert!(
+            matches!(err, PdfTextError::TooLarge { .. }),
+            "expected TooLarge, got {err:?}"
+        );
+    }
+
+    /// Build a one-page PDF whose content stream emits `n` `Tj`
+    /// show-text operators, each producing one fragment.
+    fn build_pdf_with_n_fragments(n: usize) -> Vec<u8> {
+        use lopdf::Dictionary;
+        let mut doc = Document::with_version("1.4");
+        let pages_id = doc.new_object_id();
+
+        let mut font = Dictionary::new();
+        font.set("Type", "Font");
+        font.set("Subtype", "Type1");
+        font.set("BaseFont", "Helvetica");
+        let font_id = doc.add_object(Object::Dictionary(font));
+
+        // BT ... ET with n `(x)Tj` runs. Each `Tj` emits its own
+        // fragment (position is irrelevant to the fragment count), so
+        // we keep the stream as short as possible to bound test cost.
+        let mut content = String::with_capacity(n * 6 + 32);
+        content.push_str("BT /F1 12 Tf 72 780 Td\n");
+        for _ in 0..n {
+            content.push_str("(x)Tj\n");
+        }
+        content.push_str("ET\n");
+        let content_id =
+            doc.add_object(lopdf::Stream::new(Dictionary::new(), content.into_bytes()));
+
+        let mut fonts = Dictionary::new();
+        fonts.set("F1", Object::Reference(font_id));
+        let mut resources = Dictionary::new();
+        resources.set("Font", Object::Dictionary(fonts));
+        let mut page = Dictionary::new();
+        page.set("Type", "Page");
+        page.set("Parent", Object::Reference(pages_id));
+        page.set(
+            "MediaBox",
+            Object::Array(vec![
+                Object::Integer(0),
+                Object::Integer(0),
+                Object::Integer(612),
+                Object::Integer(792),
+            ]),
+        );
+        page.set("Resources", Object::Dictionary(resources));
+        page.set("Contents", Object::Reference(content_id));
+        let leaf_id = doc.add_object(Object::Dictionary(page));
+
+        let mut pages = Dictionary::new();
+        pages.set("Type", "Pages");
+        pages.set("Kids", Object::Array(vec![Object::Reference(leaf_id)]));
+        pages.set("Count", Object::Integer(1));
+        doc.objects.insert(pages_id, Object::Dictionary(pages));
+        let mut catalog = Dictionary::new();
+        catalog.set("Type", "Catalog");
+        catalog.set("Pages", Object::Reference(pages_id));
+        let catalog_id = doc.add_object(Object::Dictionary(catalog));
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).expect("serialize many-fragment pdf");
+        bytes
+    }
+
+    /// A single page that emits more than [`MAX_FRAGMENTS_TOTAL`]
+    /// show-text operators is refused with [`PdfTextError::TooLarge`]
+    /// rather than accumulating an unbounded fragment vector and feeding
+    /// it to the per-page reading-order pass. A modestly-sized page is
+    /// still extracted normally.
+    #[test]
+    fn rejects_pdf_over_fragment_ceiling() {
+        // Comfortably under the ceiling: extracts every fragment.
+        let small = build_pdf_with_n_fragments(1000);
+        let st = extract_pdf_text(&small).expect("small fragment count is accepted");
+        assert_eq!(st.pages[0].fragments.len(), 1000);
+
+        // Just over the ceiling: refused.
+        let over = build_pdf_with_n_fragments(MAX_FRAGMENTS_TOTAL + 1);
+        let err = extract_pdf_text(&over).expect_err("over-cap fragment count must be refused");
+        assert!(
+            matches!(err, PdfTextError::TooLarge { .. }),
+            "expected TooLarge, got {err:?}"
+        );
     }
 }

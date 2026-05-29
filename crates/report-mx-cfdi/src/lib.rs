@@ -107,6 +107,11 @@ pub enum CfdiSerializeError {
     /// The transmission context was malformed (e.g. blank LugarExpedicion).
     #[error("invalid CFDI context: {0}")]
     BadContext(String),
+    /// Summing the document-level traslado tax amounts overflowed the
+    /// `Decimal` range. The amounts are untrusted at this point, so an
+    /// out-of-range sum is reported rather than allowed to panic.
+    #[error("tax amount summation overflowed the decimal range")]
+    AmountOverflow,
 }
 
 /// CFDI 4.0 fixed comprobante version attribute.
@@ -221,7 +226,7 @@ pub fn to_cfdi_xml(
     attr(
         &mut out,
         "TotalImpuestosTrasladados",
-        &fmt_amount(total_traslados(document)),
+        &fmt_amount(total_traslados(document)?),
     );
     out.push_str(">\n");
     out.push_str("    <cfdi:Traslados>\n");
@@ -307,9 +312,19 @@ fn summary_rate(summary: &invoicekit_ir::TaxCategorySummary) -> Decimal {
         .map_or(Decimal::ZERO, invoicekit_ir::DecimalValue::inner)
 }
 
-/// Sum the document-level traslado tax amounts.
-fn total_traslados(document: &CommercialDocument) -> Decimal {
-    document.tax_summary.iter().map(|s| s.tax_amount.inner()).sum()
+/// Sum the document-level traslado tax amounts with checked addition.
+///
+/// The tax-summary amounts are untrusted at this point, so the sum is
+/// accumulated with [`Decimal::checked_add`] rather than the panicking `Sum`
+/// impl; an out-of-range total yields [`CfdiSerializeError::AmountOverflow`].
+fn total_traslados(document: &CommercialDocument) -> Result<Decimal, CfdiSerializeError> {
+    document
+        .tax_summary
+        .iter()
+        .try_fold(Decimal::ZERO, |acc, s| {
+            acc.checked_add(s.tax_amount.inner())
+                .ok_or(CfdiSerializeError::AmountOverflow)
+        })
 }
 
 /// Format a `Fecha`: CFDI 4.0 wants `YYYY-MM-DDThh:mm:ss` (no timezone). The IR
@@ -341,7 +356,16 @@ fn attr(out: &mut String, name: &str, value: &str) {
     out.push('"');
 }
 
-/// Append XML-escaped attribute/text content.
+/// Append XML-escaped attribute-value content.
+///
+/// Besides the markup-significant characters (`&`, `<`, `>`, `"`, `'`), this
+/// also emits numeric character references for tab, newline, and carriage
+/// return. In attribute context an XML processor performs attribute-value
+/// normalization, replacing a literal tab/newline/CR with a space (0x20) before
+/// the value reaches the application. Free-text names and line descriptions can
+/// legitimately contain those characters, so they are escaped here to survive
+/// the round trip — matching the canonical UBL/CII serializers (`&#x9;`,
+/// `&#xA;`, `&#xD;`).
 fn push_escaped(out: &mut String, text: &str) {
     for ch in text.chars() {
         match ch {
@@ -350,6 +374,9 @@ fn push_escaped(out: &mut String, text: &str) {
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
             '\'' => out.push_str("&apos;"),
+            '\t' => out.push_str("&#x9;"),
+            '\n' => out.push_str("&#xA;"),
+            '\r' => out.push_str("&#xD;"),
             other => out.push(other),
         }
     }
@@ -999,6 +1026,67 @@ mod tests {
         let json = serde_json::to_string(&env).unwrap();
         let back: CfdiReportEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(back, env);
+    }
+
+    #[test]
+    fn total_traslados_overflow_is_reported_not_panicked() {
+        // Regression: untrusted tax-summary amounts must be summed with checked
+        // addition. Two near-maximum Decimals overflow the range; the unchecked
+        // `Sum` impl would panic, so the serializer must surface a clean error.
+        let mut doc = sample_invoice();
+        doc.tax_summary = vec![
+            TaxCategorySummary {
+                category_code: "S".to_owned(),
+                taxable_amount: amt(100_000),
+                tax_amount: DecimalValue::new(Decimal::MAX),
+                tax_rate: Some(DecimalValue::new(Decimal::new(1600, 2))),
+            },
+            TaxCategorySummary {
+                category_code: "S2".to_owned(),
+                taxable_amount: amt(100_000),
+                tax_amount: DecimalValue::new(Decimal::MAX),
+                tax_rate: Some(DecimalValue::new(Decimal::new(1600, 2))),
+            },
+        ];
+        let err = to_cfdi_xml(&doc, &CfdiContext::default())
+            .expect_err("two Decimal::MAX tax amounts must overflow the sum");
+        assert!(matches!(err, CfdiSerializeError::AmountOverflow));
+        // The single-summary happy path still sums cleanly.
+        assert_eq!(
+            total_traslados(&sample_invoice()).expect("single summary sums without overflow"),
+            Decimal::new(16000, 2)
+        );
+    }
+
+    #[test]
+    fn attr_escapes_tab_newline_carriage_return() {
+        // Regression: tab/newline/CR in free-text names and descriptions must be
+        // emitted as numeric character references, or XML attribute-value
+        // normalization on the recipient silently collapses them to spaces.
+        let mut doc = sample_invoice();
+        doc.supplier.name = "Razon\tSocial".to_owned();
+        doc.customer.name = "Cliente\nDos".to_owned();
+        doc.lines[0].description = "Linea\runo".to_owned();
+        let xml = to_cfdi_xml(&doc, &CfdiContext::default()).expect("serializes");
+        assert!(
+            xml.contains("Nombre=\"Razon&#x9;Social\""),
+            "tab not escaped:\n{xml}"
+        );
+        assert!(
+            xml.contains("Nombre=\"Cliente&#xA;Dos\""),
+            "newline not escaped:\n{xml}"
+        );
+        assert!(
+            xml.contains("Descripcion=\"Linea&#xD;uno\""),
+            "carriage return not escaped:\n{xml}"
+        );
+        // The raw control characters must NOT survive in the output.
+        assert!(!xml.contains('\t'), "raw tab leaked into XML");
+        // The emitted XML has its own structural newlines; assert the literal
+        // control characters did not leak into the attribute values instead.
+        assert!(!xml.contains("Razon\tSocial"));
+        assert!(!xml.contains("Cliente\nDos"));
+        assert!(!xml.contains("Linea\runo"));
     }
 
     #[test]

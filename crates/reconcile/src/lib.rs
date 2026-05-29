@@ -948,6 +948,17 @@ impl CountrySubStateRegistry {
         let Some(system) = transition_country_system(from, to)? else {
             return Ok(());
         };
+        // Shedding the country sub-state on a base transition (the target has no
+        // sub-state) is always legitimate: archiving or otherwise clearing a
+        // country-routed invoice must stay reachable. Per-system rules describe
+        // moves *into* sub-states, so they can never match a sub-state-less
+        // target; without this carve-out a routed invoice could never be
+        // archived once its system has any configured rules. The base-state
+        // machine (`can_transition_to`) already gates which base moves are
+        // valid, so this does not loosen base-level safety.
+        if to.country_substate.is_none() {
+            return Ok(());
+        }
         let has_rules = self
             .transitions
             .iter()
@@ -2326,6 +2337,61 @@ mod tests {
             ReconcileError::InvalidCountrySubStateTransition { system, .. } if system == "KSEF"
         ));
         assert_eq!(machine.current().base, TransmissionBaseState::Reserved);
+    }
+
+    #[test]
+    fn country_substate_registry_allows_shedding_substate_on_base_transition() {
+        // A country-routed invoice must still be archivable. Archival sheds the
+        // country sub-state (`to.country_substate == None`) while the base move
+        // (Acknowledged -> Archived) stays reachable. This must not be blocked
+        // just because the routing system (ZATCA) has configured rules.
+        let registry = country_registry();
+        let mut machine = TransmissionStateMachine::with_country_registry(
+            TransmissionState::new(TransmissionBaseState::Sent),
+            registry,
+        );
+        machine
+            .apply(
+                TransmissionState::new(TransmissionBaseState::Delivered)
+                    .with_country_substate(country_substate("ZATCA", "cleared")),
+                "ZATCA cleared invoice",
+            )
+            .expect("clearance should be allowed");
+        machine
+            .apply(
+                TransmissionState::new(TransmissionBaseState::Acknowledged)
+                    .with_country_substate(country_substate("ZATCA", "reported")),
+                "ZATCA reported clearance",
+            )
+            .expect("reporting should be allowed");
+
+        // Base transition that drops the sub-state (archival) is allowed.
+        machine
+            .apply(
+                TransmissionState::new(TransmissionBaseState::Archived),
+                "archive final evidence",
+            )
+            .expect("archival shedding the country sub-state should be allowed");
+        assert_eq!(machine.current().base, TransmissionBaseState::Archived);
+        assert!(machine.current().country_substate.is_none());
+
+        // Other per-system rules still apply: a non-shedding move into a
+        // sub-state that no rule allows is still rejected.
+        let mut blocked = TransmissionStateMachine::with_country_registry(
+            TransmissionState::new(TransmissionBaseState::Reserved),
+            country_registry(),
+        );
+        let err = blocked
+            .apply(
+                TransmissionState::new(TransmissionBaseState::Sent)
+                    .with_country_substate(country_substate("KSEF", "unknown")),
+                "unknown KSeF code",
+            )
+            .expect_err("unconfigured sub-state code should still be rejected");
+        assert!(matches!(
+            err,
+            ReconcileError::InvalidCountrySubStateTransition { system, .. } if system == "KSEF"
+        ));
     }
 
     #[test]

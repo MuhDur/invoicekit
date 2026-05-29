@@ -75,6 +75,12 @@ pub enum MyDataXmlError {
     /// The transmission context was malformed (e.g. a blank `series`).
     #[error("invalid myDATA document context: {0}")]
     BadContext(String),
+    /// A monetary total or a per-line pro-rated VAT product overflowed the
+    /// representable `Decimal` range while accumulating the `invoiceSummary`.
+    /// Untrusted invoice amounts near `Decimal::MAX` reach this rather than
+    /// panicking the adapter.
+    #[error("myDATA totals are not representable: {0}")]
+    TotalsUnrepresentable(&'static str),
 }
 
 /// Serialize an InvoiceKit [`CommercialDocument`] to a deterministic AADE
@@ -156,9 +162,15 @@ pub fn to_invoices_doc_xml(
     let mut total_vat = Decimal::ZERO;
     for (index, line) in document.lines.iter().enumerate() {
         let net = line.line_extension_amount.inner();
-        let (vat_amount, vat_category, exemption) = line_vat(document, line);
-        total_net += net;
-        total_vat += vat_amount;
+        let (vat_amount, vat_category, exemption) = line_vat(document, line)?;
+        // checked_add: summing untrusted per-line amounts can exceed
+        // Decimal::MAX. Bail with a typed error rather than panicking.
+        total_net = total_net
+            .checked_add(net)
+            .ok_or(MyDataXmlError::TotalsUnrepresentable("totalNetValue"))?;
+        total_vat = total_vat
+            .checked_add(vat_amount)
+            .ok_or(MyDataXmlError::TotalsUnrepresentable("totalVatAmount"))?;
         open(&mut out, 2, "invoiceDetails");
         el(&mut out, 3, "lineNumber", &(index + 1).to_string());
         el(&mut out, 3, "netValue", &fmt_amount(net));
@@ -180,7 +192,10 @@ pub fn to_invoices_doc_xml(
     }
 
     // --- invoiceSummary ---
-    let total_gross = total_net + total_vat;
+    // checked_add: net + vat can itself overflow even when each fit.
+    let total_gross = total_net
+        .checked_add(total_vat)
+        .ok_or(MyDataXmlError::TotalsUnrepresentable("totalGrossValue"))?;
     open(&mut out, 2, "invoiceSummary");
     el(&mut out, 3, "totalNetValue", &fmt_amount(total_net));
     el(&mut out, 3, "totalVatAmount", &fmt_amount(total_vat));
@@ -266,16 +281,16 @@ const VAT_CATEGORY_EXCLUDING: u8 = 7;
 fn line_vat(
     document: &CommercialDocument,
     line: &invoicekit_ir::DocumentLine,
-) -> (Decimal, u8, Option<u8>) {
+) -> Result<(Decimal, u8, Option<u8>), MyDataXmlError> {
     let Some(cat) = line.tax_category.as_ref() else {
-        return (Decimal::ZERO, VAT_CATEGORY_EXCLUDING, Some(1));
+        return Ok((Decimal::ZERO, VAT_CATEGORY_EXCLUDING, Some(1)));
     };
     let Some(summary) = document
         .tax_summary
         .iter()
         .find(|s| &s.category_code == cat)
     else {
-        return (Decimal::ZERO, VAT_CATEGORY_EXCLUDING, Some(1));
+        return Ok((Decimal::ZERO, VAT_CATEGORY_EXCLUDING, Some(1)));
     };
     let rate = summary
         .tax_rate
@@ -288,11 +303,19 @@ fn line_vat(
     let vat_amount = if band_base.is_zero() {
         Decimal::ZERO
     } else {
-        (summary.tax_amount.inner() * line_net / band_base).round_dp(2)
+        // checked_mul/checked_div: tax_amount * line_net on untrusted amounts
+        // can exceed Decimal::MAX. Bail with a typed error instead of panicking.
+        summary
+            .tax_amount
+            .inner()
+            .checked_mul(line_net)
+            .and_then(|product| product.checked_div(band_base))
+            .ok_or(MyDataXmlError::TotalsUnrepresentable("line vatAmount"))?
+            .round_dp(2)
     };
     let exemption =
         (vat_category == VAT_CATEGORY_EXCLUDING).then_some(1_u8);
-    (vat_amount, vat_category, exemption)
+    Ok((vat_amount, vat_category, exemption))
 }
 
 /// Map a VAT percentage to the myDATA `vatCategory` integer code.
@@ -1068,5 +1091,72 @@ mod tests {
     #[test]
     fn crate_name_is_cargo_package_name() {
         assert_eq!(crate_name(), "invoicekit-report-gr-mydata");
+    }
+
+    /// Two lines each near `Decimal::MAX` overflow the `totalNetValue`
+    /// accumulator. Before the `checked_add` fix this panicked (Decimal's
+    /// `+=` panics on overflow); now it returns a typed error.
+    #[test]
+    fn invoices_doc_totals_overflow_returns_error_not_panic() {
+        let huge = DecimalValue::new(Decimal::MAX);
+        let mut doc = sample_invoice();
+        doc.lines = vec![
+            DocumentLine {
+                id: "1".to_owned(),
+                description: "near-max line a".to_owned(),
+                quantity: DecimalValue::new(Decimal::ONE),
+                unit_code: Some("EA".to_owned()),
+                unit_price: huge.clone(),
+                line_extension_amount: huge.clone(),
+                // No tax_category -> line_vat short-circuits to zero VAT, so
+                // the overflow lands squarely on the net accumulator.
+                tax_category: None,
+                extensions: Vec::new(),
+            },
+            DocumentLine {
+                id: "2".to_owned(),
+                description: "near-max line b".to_owned(),
+                quantity: DecimalValue::new(Decimal::ONE),
+                unit_code: Some("EA".to_owned()),
+                unit_price: huge.clone(),
+                line_extension_amount: huge,
+                tax_category: None,
+                extensions: Vec::new(),
+            },
+        ];
+        doc.tax_summary = Vec::new();
+        let err = to_invoices_doc_xml(&doc, &MyDataDocContext::default())
+            .expect_err("two near-MAX lines must overflow the net total");
+        assert!(matches!(err, MyDataXmlError::TotalsUnrepresentable(_)));
+    }
+
+    /// The per-line pro-rate `tax_amount * line_net` overflows `Decimal::MAX`
+    /// before the divide. Before the `checked_mul` fix this panicked; now it
+    /// returns a typed error.
+    #[test]
+    fn invoices_doc_prorate_product_overflow_returns_error_not_panic() {
+        let huge = DecimalValue::new(Decimal::MAX);
+        let mut doc = sample_invoice();
+        doc.lines = vec![DocumentLine {
+            id: "1".to_owned(),
+            description: "near-max line".to_owned(),
+            quantity: DecimalValue::new(Decimal::ONE),
+            unit_code: Some("EA".to_owned()),
+            unit_price: huge.clone(),
+            line_extension_amount: huge.clone(),
+            tax_category: Some("S".to_owned()),
+            extensions: Vec::new(),
+        }];
+        // band_base non-zero so the pro-rate branch runs; tax_amount * line_net
+        // = MAX * MAX overflows well before the division by band_base.
+        doc.tax_summary = vec![TaxCategorySummary {
+            category_code: "S".to_owned(),
+            taxable_amount: DecimalValue::new(Decimal::from(2)),
+            tax_amount: huge,
+            tax_rate: Some(DecimalValue::new(Decimal::new(2400, 2))),
+        }];
+        let err = to_invoices_doc_xml(&doc, &MyDataDocContext::default())
+            .expect_err("MAX * MAX pro-rate product must overflow");
+        assert!(matches!(err, MyDataXmlError::TotalsUnrepresentable(_)));
     }
 }

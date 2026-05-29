@@ -313,6 +313,12 @@ impl PartnerPeppolAdapter {
 
     /// Vendor-specific poll URL for a submission id.
     fn poll_url(&self, submission_id: &str) -> String {
+        // The submission id originates from the partner's submit
+        // response (see `extract_submission_id`) and is only loosely
+        // validated, so it must be percent-encoded before it can be
+        // interpolated into the URL path — otherwise a hostile id can
+        // inject `/`, `?`, `#`, or `..` and rewrite the request target.
+        let submission_id = percent_encode_path_segment(submission_id);
         match self.config.vendor {
             PartnerVendor::Storecove => {
                 format!(
@@ -571,6 +577,38 @@ fn partner_error_kind(status: u16) -> GatewayErrorKind {
         500..=599 => GatewayErrorKind::GatewayMaintenance,
         _ => GatewayErrorKind::PartnerError,
     }
+}
+
+/// Percent-encode a single URL path segment.
+///
+/// The partner submission id is partner-supplied and only
+/// loosely validated upstream (no leading/trailing whitespace and
+/// no control characters), so it can still contain `/`, `?`, `#`,
+/// `%`, internal spaces, or a `..` traversal. Interpolating it raw
+/// into the poll/status URL path would let it escape its path
+/// segment and rewrite the request target across a network trust
+/// boundary. Encoding it here keeps it confined to one segment.
+///
+/// Bytes outside the RFC 3986 "unreserved" set (ASCII letters and
+/// digits plus `-`, `.`, `_`, `~`) are encoded as `%XX`. Slashes
+/// become `%2F`, so a `..` payload can no longer reach across
+/// segments to traverse the path. Implemented inline so the crate
+/// doesn't pull `percent_encoding` into the workspace for one call.
+fn percent_encode_path_segment(input: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut out = String::with_capacity(input.len());
+    for &byte in input.as_bytes() {
+        let unreserved = byte.is_ascii_alphanumeric()
+            || matches!(byte, b'-' | b'.' | b'_' | b'~');
+        if unreserved {
+            out.push(byte as char);
+        } else {
+            out.push('%');
+            out.push(HEX[(byte >> 4) as usize] as char);
+            out.push(HEX[(byte & 0x0f) as usize] as char);
+        }
+    }
+    out
 }
 
 fn base64_encode(input: &[u8]) -> String {
@@ -919,5 +957,90 @@ mod tests {
     #[test]
     fn crate_name_matches_cargo() {
         assert_eq!(crate_name(), "invoicekit-transmit-peppol-partner");
+    }
+
+    #[test]
+    fn percent_encode_path_segment_leaves_unreserved_intact() {
+        // RFC 3986 unreserved set must pass through unchanged so that
+        // ordinary partner submission ids are not mangled on the wire.
+        assert_eq!(
+            percent_encode_path_segment("sub_001-2.3~AZaz09"),
+            "sub_001-2.3~AZaz09"
+        );
+    }
+
+    #[test]
+    fn percent_encode_path_segment_neutralises_path_injection() {
+        // Every character that could break out of the path segment
+        // must be escaped: `/` `?` `#` `%` and a bare space.
+        let encoded = percent_encode_path_segment("../../admin?x=1#frag with%2e");
+        assert!(!encoded.contains('/'), "slash leaked: {encoded}");
+        assert!(!encoded.contains('?'), "query opener leaked: {encoded}");
+        assert!(!encoded.contains('#'), "fragment opener leaked: {encoded}");
+        assert!(!encoded.contains(' '), "space leaked: {encoded}");
+        // A literal `%` from the input is itself encoded to `%25`, so
+        // the only `%` sequences left are the encoder's own escapes.
+        assert_eq!(
+            encoded,
+            "..%2F..%2Fadmin%3Fx%3D1%23frag%20with%252e"
+        );
+    }
+
+    #[test]
+    fn poll_url_percent_encodes_hostile_submission_id() {
+        use invoicekit_reconcile::GatewaySubmissionId;
+
+        // This hostile id passes `GatewaySubmissionId` validation
+        // (no control chars, no leading/trailing whitespace) yet, if
+        // interpolated raw, would traverse out of the status namespace
+        // and rewrite the request target.
+        let hostile = "../../admin?x=1#frag";
+        let id = GatewaySubmissionId::new(hostile)
+            .expect("hostile id is accepted by the loose upstream validator");
+
+        for vendor in [
+            PartnerVendor::Storecove,
+            PartnerVendor::Ecosio,
+            PartnerVendor::B2brouter,
+        ] {
+            let cfg = PartnerConfig {
+                vendor,
+                api_base: vendor.default_api_base().to_owned(),
+                legal_entity_id: "x".to_owned(),
+                sandbox: false,
+            };
+            let adapter = PartnerPeppolAdapter::new(
+                cfg,
+                Box::new(StaticSecretResolver::new("k", None)),
+                Box::new(MockHttpClient::new(vec![])),
+            );
+            let url = adapter.poll_url(id.as_str());
+            // The hostile path-control characters must NOT survive into
+            // the URL path: the raw traversal/query/fragment substring
+            // is gone, replaced by its percent-encoded form.
+            assert!(
+                !url.contains("../../admin"),
+                "raw traversal leaked into {vendor:?} poll URL: {url}"
+            );
+            assert!(
+                !url.contains('?'),
+                "raw query opener leaked into {vendor:?} poll URL: {url}"
+            );
+            assert!(
+                !url.contains('#'),
+                "raw fragment opener leaked into {vendor:?} poll URL: {url}"
+            );
+            // The encoded id is present as a single confined path segment.
+            assert!(
+                url.contains("..%2F..%2Fadmin%3Fx%3D1%23frag"),
+                "encoded id missing from {vendor:?} poll URL: {url}"
+            );
+            // And the URL still begins with the vendor's API base, so the
+            // host/scheme were not rewritten by the payload.
+            assert!(
+                url.starts_with(vendor.default_api_base()),
+                "{vendor:?} poll URL no longer rooted at the API base: {url}"
+            );
+        }
     }
 }

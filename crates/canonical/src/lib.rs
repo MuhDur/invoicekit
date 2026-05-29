@@ -382,28 +382,30 @@ fn write_xml_start(
         frame.output.remove("");
     }
 
+    // The invoice-prefix overlay can map two distinct namespace URIs onto the
+    // same rendered prefix (for example the UBL and CII UnqualifiedDataType
+    // namespaces both prefer `udt`). Resolving that collision per attribute in
+    // document order would let the bare prefix go to whichever colliding URI
+    // appears first in the source, making canonicalization order-dependent and
+    // non-idempotent. Instead, assign rendered prefixes up front in a stable
+    // order keyed by the namespace URI, independent of attribute source order.
+    let attribute_namespaces = resolve_attribute_namespaces(&frame, &raw_attributes)?;
+    let prefix_assignment = assign_attribute_prefixes(
+        &frame,
+        &namespace_declarations,
+        &raw_attributes,
+        &attribute_namespaces,
+    );
+
     let mut rendered_attribute_names = BTreeSet::new();
     let mut canonical_attributes = Vec::with_capacity(raw_attributes.len());
-    for attr in raw_attributes {
-        let namespace_uri = lookup_attribute_namespace(&frame, &attr.prefix)?;
-        let preferred_prefix = namespace_uri.as_ref().map_or_else(String::new, |uri| {
-            preferred_invoice_prefix(uri, &attr.prefix, true)
+    for (attr, namespace_uri) in raw_attributes.into_iter().zip(attribute_namespaces) {
+        let rendered_prefix = namespace_uri.as_deref().map_or_else(String::new, |uri| {
+            prefix_assignment
+                .get(uri)
+                .cloned()
+                .expect("every attribute namespace URI was assigned a prefix")
         });
-        // The invoice-prefix overlay can map two distinct namespace URIs onto the
-        // same rendered prefix (for example the UBL and CII UnqualifiedDataType
-        // namespaces both prefer `udt`). If that prefix is already bound to a
-        // different URI in scope, emitting it here would silently rebind it and
-        // corrupt the element (or an inherited) namespace in the signed output.
-        // Disambiguate to a stable, overlay-free prefix instead of clobbering.
-        let rendered_prefix = match namespace_uri.as_deref() {
-            Some(uri) => disambiguate_attribute_prefix(
-                &frame,
-                &namespace_declarations,
-                &preferred_prefix,
-                uri,
-            ),
-            None => preferred_prefix,
-        };
         let rendered_name = render_xml_qname(&rendered_prefix, &attr.local_name);
 
         if !rendered_attribute_names.insert(rendered_name.clone()) {
@@ -540,43 +542,118 @@ fn preferred_invoice_prefix(uri: &str, original_prefix: &str, is_attribute: bool
     }
 }
 
-/// Pick a rendered prefix for an attribute namespace that does not rebind a
-/// prefix already in scope for a different URI.
+/// Resolve each raw attribute's namespace URI in source order.
 ///
-/// Returns `preferred` unchanged in the common case (no conflict, or the prefix
-/// already maps to `uri`). When `preferred` is bound to a different URI — either
-/// inherited via `frame.output` or just declared on this element — append the
-/// smallest numeric suffix that yields a free or matching binding. The result is
-/// deterministic, never collides with the overlay's reserved prefixes, and is a
-/// fixed point of canonicalization (a re-canonicalized document reproduces it).
-fn disambiguate_attribute_prefix(
+/// Returns one entry per attribute (in the same order), with `None` for
+/// unprefixed attributes (which carry no namespace). Errors if any prefix is
+/// not declared in scope.
+fn resolve_attribute_namespaces(
     frame: &NamespaceFrame,
-    declarations: &BTreeMap<String, String>,
-    preferred: &str,
-    uri: &str,
-) -> String {
-    // The `xml` prefix and the XML namespace never need a declaration, so they
-    // can never conflict with another binding; keep them as-is.
-    if preferred.is_empty() || preferred == "xml" || uri == XML_NAMESPACE_URI {
-        return preferred.to_owned();
-    }
-    let conflicts = |prefix: &str| {
-        declarations
-            .get(prefix)
-            .or_else(|| frame.output.get(prefix))
-            .is_some_and(|bound| bound != uri)
-    };
-    if !conflicts(preferred) {
-        return preferred.to_owned();
-    }
-    let mut suffix: u32 = 2;
-    loop {
-        let candidate = format!("{preferred}{suffix}");
-        if !conflicts(&candidate) {
-            return candidate;
+    raw_attributes: &[RawXmlAttribute],
+) -> Result<Vec<Option<String>>, XmlCanonicalizeError> {
+    raw_attributes
+        .iter()
+        .map(|attr| lookup_attribute_namespace(frame, &attr.prefix))
+        .collect()
+}
+
+/// Assign a rendered prefix to every distinct attribute namespace URI on an
+/// element, deterministically and independently of attribute source order.
+///
+/// The invoice-prefix overlay can map several distinct namespace URIs onto the
+/// same preferred prefix (for example the UBL and CII `UnqualifiedDataType`
+/// namespaces both prefer `udt`). Resolving that collision in document order
+/// would make the bare-prefix binding depend on which attribute appears first,
+/// breaking both order-independence and the idempotence guarantee that signing
+/// relies on.
+///
+/// To keep canonicalization a fixed point, the distinct attribute URIs are
+/// allocated rendered prefixes in a single pass over a list sorted by
+/// `(preferred_prefix, uri)`. Each URI takes the first of `preferred`,
+/// `preferred2`, `preferred3`, … that is free — i.e. not already taken on this
+/// element by a different URI and not bound in the inherited/declared rendered
+/// scope (`element_declarations` then `frame.output`) to a different URI. The
+/// `(preferred, uri)` ordering means that, within a set of URIs sharing a
+/// preferred prefix, the lexically smallest URI is offered the bare prefix
+/// first, while a URI already bound to that prefix in scope still reclaims it
+/// (an earlier-sorted URI is pushed to a suffix by the scope conflict). Because
+/// the whole allocation reads only order-independent state — the URI set, their
+/// preferred prefixes, and the inherited scope — and a later pass reproduces the
+/// same inputs from the emitted prefixes, the result is a fixed point.
+///
+/// Checking against the full set of prefixes allocated so far (`used`) as well
+/// as the inherited scope is what makes a generated suffix avoid stealing a
+/// prefix a *later*, distinct namespace will render under (for example a
+/// non-overlay namespace whose own source prefix happens to be `udt2`).
+///
+/// The returned map is keyed by namespace URI so the attribute loop can look up
+/// the rendered prefix for each attribute regardless of where it appeared.
+fn assign_attribute_prefixes(
+    frame: &NamespaceFrame,
+    element_declarations: &BTreeMap<String, String>,
+    raw_attributes: &[RawXmlAttribute],
+    attribute_namespaces: &[Option<String>],
+) -> BTreeMap<String, String> {
+    // For a namespace the overlay does not map, the preferred prefix is the
+    // attribute's own source prefix. Collect the source prefixes seen for each
+    // URI so non-overlay namespaces keep their source prefix as before; for a
+    // URI reached by several source prefixes the lexically smallest is used,
+    // which keeps the choice deterministic and order-independent.
+    let mut source_prefixes: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for (attr, namespace) in raw_attributes.iter().zip(attribute_namespaces) {
+        if let Some(uri) = namespace {
+            source_prefixes
+                .entry(uri.clone())
+                .or_default()
+                .insert(attr.prefix.clone());
         }
-        suffix += 1;
     }
+
+    // One entry per distinct attribute URI, paired with its preferred prefix,
+    // sorted by `(preferred, uri)`. `source_prefixes` is a `BTreeMap`, so this
+    // is a pure function of the URI set and not of attribute source order.
+    let mut entries: Vec<(String, String)> = source_prefixes
+        .iter()
+        .map(|(uri, prefixes)| {
+            let representative_prefix = prefixes.iter().next().map_or("", String::as_str);
+            let preferred = preferred_invoice_prefix(uri, representative_prefix, true);
+            (preferred, uri.clone())
+        })
+        .collect();
+    entries.sort();
+
+    // `used` maps each rendered prefix already allocated on this element to the
+    // URI that owns it, so a candidate prefix is rejected when it is taken by a
+    // different URI here or bound to a different URI in the inherited scope.
+    let mut used: BTreeMap<String, String> = BTreeMap::new();
+    let mut assignment: BTreeMap<String, String> = BTreeMap::new();
+    for (preferred, uri) in entries {
+        // The bare prefix or the XML prefix never needs a declaration, so it can
+        // never collide; map such a URI straight onto the preferred prefix.
+        if preferred.is_empty() || preferred == "xml" || uri == XML_NAMESPACE_URI {
+            assignment.insert(uri, preferred);
+            continue;
+        }
+
+        let conflicts = |candidate: &str| {
+            used.get(candidate).is_some_and(|owner| *owner != uri)
+                || element_declarations
+                    .get(candidate)
+                    .or_else(|| frame.output.get(candidate))
+                    .is_some_and(|bound| *bound != uri)
+        };
+
+        let mut candidate = preferred.clone();
+        let mut suffix: u32 = 2;
+        while conflicts(&candidate) {
+            candidate = format!("{preferred}{suffix}");
+            suffix += 1;
+        }
+        used.insert(candidate.clone(), uri.clone());
+        assignment.insert(uri, candidate);
+    }
+
+    assignment
 }
 
 fn render_xml_qname(prefix: &str, local_name: &str) -> String {
@@ -1030,6 +1107,101 @@ mod tests {
         // The signed form must be a fixed point: re-canonicalizing reproduces it.
         let again = canonicalize_xml(&canonical).expect("re-canonicalization should succeed");
         assert_eq!(canonical, again, "canonicalization is not idempotent");
+    }
+
+    #[test]
+    fn xml_two_attribute_overlay_collision_is_order_independent_and_idempotent() {
+        // Two attributes on an element whose own namespace does NOT collide:
+        // one carries UBL's UnqualifiedDataTypes URI, the other CII's
+        // UnqualifiedDataType URI. The invoice-prefix overlay maps both onto
+        // `udt`. The rendered prefix each receives must depend only on the
+        // namespace URIs (assigned in a stable order), never on the order the
+        // attributes appear in the source. Before the fix the bare `udt` prefix
+        // went to whichever attribute came first, so permuting the source order
+        // flipped the binding and re-canonicalizing was not a fixed point.
+        let ubl_udt = UBL_UDT_NAMESPACE_URI;
+        let cii_udt = CII_UDT_NAMESPACE_URI;
+        let order_a =
+            format!(r#"<Root xmlns:c="{ubl_udt}" xmlns:d="{cii_udt}" c:x="1" d:y="2"></Root>"#);
+        let order_b =
+            format!(r#"<Root xmlns:c="{ubl_udt}" xmlns:d="{cii_udt}" d:y="2" c:x="1"></Root>"#);
+
+        let canonical_a = canonicalize_xml(&order_a).expect("order A canonicalizes");
+        let canonical_b = canonicalize_xml(&order_b).expect("order B canonicalizes");
+
+        // ORDER-INDEPENDENCE: permuting source attribute order is invisible.
+        assert_eq!(
+            canonical_a, canonical_b,
+            "attribute-order permutation changed the canonical bytes"
+        );
+
+        // IDEMPOTENCE: the canonical form is a fixed point for both inputs.
+        let again_a = canonicalize_xml(&canonical_a).expect("re-canonicalize A");
+        let again_b = canonicalize_xml(&canonical_b).expect("re-canonicalize B");
+        assert_eq!(canonical_a, again_a, "canonicalization is not idempotent");
+        assert_eq!(canonical_b, again_b, "canonicalization is not idempotent");
+
+        // Each distinct namespace must survive under its own prefix; the two
+        // URIs must not collapse onto one declaration.
+        assert!(
+            canonical_a.contains(ubl_udt) && canonical_a.contains(cii_udt),
+            "a namespace was dropped: {canonical_a}"
+        );
+        // The lexically smaller URI (UBL, `urn:oasis...`) takes the bare `udt`.
+        assert!(
+            canonical_a.contains(&format!(r#"xmlns:udt="{ubl_udt}""#)),
+            "bare `udt` was not assigned to the lexically smallest URI: {canonical_a}"
+        );
+        assert!(
+            canonical_a.contains(&format!(r#"xmlns:udt2="{cii_udt}""#)),
+            "the colliding URI was not given a stable suffixed prefix: {canonical_a}"
+        );
+    }
+
+    #[test]
+    fn xml_overlay_suffix_does_not_steal_a_source_prefix() {
+        // Three distinct attribute namespaces on one element: UBL-UDT and
+        // CII-UDT (both overlaid onto `udt`), plus a third, non-overlay
+        // namespace whose SOURCE prefix is literally `udt2` — exactly the suffix
+        // the overlay would generate for the second `udt` collision. A naive
+        // collision check that consults only the rendered scope (and not the
+        // not-yet-promoted source binding) double-books `udt2`, drops a
+        // namespace, and silently rebinds the third URI — re-introducing the
+        // signing-corruption class in a new shape. The allocator must hand the
+        // three namespaces three distinct prefixes, order-independently, and
+        // reach a fixed point.
+        let ubl_udt = UBL_UDT_NAMESPACE_URI;
+        let cii_udt = CII_UDT_NAMESPACE_URI;
+        let third = "urn:example:third";
+        let order_a = format!(
+            r#"<Root xmlns:a="{ubl_udt}" xmlns:b="{cii_udt}" xmlns:udt2="{third}" a:x="1" b:y="2" udt2:z="3"></Root>"#
+        );
+        let order_b = format!(
+            r#"<Root xmlns:a="{ubl_udt}" xmlns:b="{cii_udt}" xmlns:udt2="{third}" udt2:z="3" b:y="2" a:x="1"></Root>"#
+        );
+
+        let canonical_a = canonicalize_xml(&order_a).expect("order A canonicalizes");
+        let canonical_b = canonicalize_xml(&order_b).expect("order B canonicalizes");
+
+        // ORDER-INDEPENDENCE and IDEMPOTENCE across both source orders.
+        assert_eq!(
+            canonical_a, canonical_b,
+            "attribute-order permutation changed the canonical bytes: {canonical_a} vs {canonical_b}"
+        );
+        let again_a = canonicalize_xml(&canonical_a).expect("re-canonicalize A");
+        assert_eq!(canonical_a, again_a, "canonicalization is not idempotent");
+
+        // All three distinct namespaces must survive — none dropped, none
+        // rebound onto another's URI.
+        for uri in [ubl_udt, cii_udt, third] {
+            assert!(
+                canonical_a.contains(uri),
+                "namespace {uri} was dropped or rebound: {canonical_a}"
+            );
+        }
+        // Three distinct namespaces require three distinct rendered prefixes.
+        let decls = canonical_a.matches("xmlns:").count();
+        assert_eq!(decls, 3, "expected three distinct prefixes: {canonical_a}");
     }
 
     #[test]

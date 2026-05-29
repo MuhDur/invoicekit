@@ -79,7 +79,134 @@ fn arb_xml_element(max_depth: u32, max_width: usize) -> BoxedStrategy<String> {
     prop_oneof![leaf, recurse].boxed()
 }
 
+/// Namespace URIs the invoice-prefix overlay treats specially. The first two
+/// both map onto the rendered prefix `udt`, so any element carrying attributes
+/// from both forces the prefix-disambiguation path that signing relies on.
+const UBL_UDT: &str = "urn:oasis:names:specification:ubl:schema:xsd:UnqualifiedDataTypes-2";
+const CII_UDT: &str = "urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100";
+
+/// One namespaced attribute: a source prefix, the namespace URI that prefix is
+/// declared to, and a local name + value.
+#[derive(Debug, Clone)]
+struct NsAttr {
+    prefix: String,
+    uri: String,
+    local: String,
+    value: String,
+}
+
+/// Generate a small set of distinctly-prefixed namespaced attributes drawn from
+/// a pool that deliberately mixes the two overlay-colliding `udt` namespaces,
+/// arbitrary foreign namespaces, and source prefixes that look like the suffixes
+/// the disambiguator generates (`udt2`, `udt3`). This is the input shape the
+/// production generator never produced, and where both the prefix-collision and
+/// the source-prefix-vs-suffix corruption bugs lived.
+fn arb_ns_attrs() -> impl Strategy<Value = Vec<NsAttr>> {
+    let uri_pool = prop_oneof![
+        Just(UBL_UDT.to_owned()),
+        Just(CII_UDT.to_owned()),
+        Just("urn:example:foreign-a".to_owned()),
+        Just("urn:example:foreign-b".to_owned()),
+    ];
+    let prefix_pool = prop_oneof![
+        Just("a".to_owned()),
+        Just("b".to_owned()),
+        Just("udt".to_owned()),
+        Just("udt2".to_owned()),
+        Just("udt3".to_owned()),
+    ];
+    prop::collection::vec(
+        (prefix_pool, uri_pool, "[a-z]{1,4}", "[a-zA-Z0-9 ]{0,8}").prop_map(
+            |(prefix, uri, local, value)| NsAttr {
+                prefix,
+                uri,
+                local,
+                value,
+            },
+        ),
+        1..=5,
+    )
+    .prop_map(|attrs| {
+        // A prefix can be declared to exactly one URI in a scope, so fix each
+        // prefix to the first URI it is seen with. Two attributes that expand to
+        // the same (namespace URI, local name) are a genuine duplicate after
+        // overlay remapping — which canonicalization correctly rejects — so drop
+        // those here to keep the generator producing only well-formed inputs.
+        let mut prefix_uri: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
+        let mut seen_expanded: std::collections::BTreeSet<(String, String)> =
+            std::collections::BTreeSet::new();
+        let mut out = Vec::new();
+        for mut a in attrs {
+            let uri = prefix_uri
+                .entry(a.prefix.clone())
+                .or_insert_with(|| a.uri.clone());
+            a.uri.clone_from(uri);
+            if seen_expanded.insert((a.uri.clone(), a.local.clone())) {
+                out.push(a);
+            }
+        }
+        out
+    })
+}
+
+/// Render `<Root>` with the given attributes in the given order, declaring each
+/// distinct source prefix's namespace once.
+fn render_ns_doc(attrs: &[NsAttr]) -> String {
+    let mut decls: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
+    for a in attrs {
+        decls.entry(a.prefix.as_str()).or_insert(a.uri.as_str());
+    }
+    let mut s = String::from("<Root");
+    for (prefix, uri) in &decls {
+        s.push_str(" xmlns:");
+        s.push_str(prefix);
+        s.push_str("=\"");
+        s.push_str(uri);
+        s.push('"');
+    }
+    for a in attrs {
+        s.push(' ');
+        s.push_str(&a.prefix);
+        s.push(':');
+        s.push_str(&a.local);
+        s.push_str("=\"");
+        s.push_str(&a.value);
+        s.push('"');
+    }
+    s.push_str("></Root>");
+    s
+}
+
 proptest! {
+    /// Idempotence over namespaced attributes, including the overlay-prefix
+    /// collisions (`udt` shared by UBL-UDT and CII-UDT) and source prefixes that
+    /// alias generated suffixes. A re-canonicalized document must reproduce
+    /// itself byte-for-byte, or a verifier re-canonicalizing a signed document
+    /// would compute a different hash than the signer.
+    #[test]
+    fn canonicalize_xml_namespaced_is_idempotent(attrs in arb_ns_attrs()) {
+        let doc = render_ns_doc(&attrs);
+        let once = canonicalize_xml(&doc).expect("synthetic namespaced XML canonicalizes");
+        let twice = canonicalize_xml(&once).expect("canonical namespaced XML re-canonicalizes");
+        prop_assert_eq!(once, twice);
+    }
+
+    /// Order-independence: permuting the source order of an element's attributes
+    /// must not change the canonical bytes. (Attribute order is not semantically
+    /// significant in XML, and the prefix the overlay assigns must depend only on
+    /// the set of namespaces present, never on which attribute came first.)
+    #[test]
+    fn canonicalize_xml_attribute_order_is_irrelevant(attrs in arb_ns_attrs()) {
+        let forward = render_ns_doc(&attrs);
+        let mut reversed_attrs = attrs;
+        reversed_attrs.reverse();
+        let reversed = render_ns_doc(&reversed_attrs);
+        let canonical_forward = canonicalize_xml(&forward).expect("forward canonicalizes");
+        let canonical_reversed = canonicalize_xml(&reversed).expect("reversed canonicalizes");
+        prop_assert_eq!(canonical_forward, canonical_reversed);
+    }
+
     /// Idempotence: canonicalizing a value, then canonicalizing the textual
     /// form of that value, returns the same string. Per RFC 8785 §3.4 the
     /// canonical form is a fixed point of the canonicalization function.

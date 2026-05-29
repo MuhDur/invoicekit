@@ -70,6 +70,15 @@ pub enum PdfTextError {
         /// Operator-readable reason.
         detail: String,
     },
+    /// The PDF exceeds an intake resource ceiling (too many pages, or
+    /// too many text fragments). The input is treated as abusive rather
+    /// than processed to exhaustion. The bounds are deliberately
+    /// generous; a conformant invoice never trips them.
+    #[error("PDF exceeds intake limits: {detail}")]
+    TooLarge {
+        /// Operator-readable reason (which ceiling was crossed).
+        detail: String,
+    },
 }
 
 /// Canonical Cargo package name of this crate.

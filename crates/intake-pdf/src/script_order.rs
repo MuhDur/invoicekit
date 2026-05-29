@@ -67,6 +67,8 @@
 //!   classified by majority; a genuinely interleaved layout falls
 //!   back to the horizontal path.
 
+use std::collections::HashSet;
+
 use unicode_bidi::{bidi_class, BidiClass};
 
 use crate::text::TextFragment;
@@ -270,16 +272,37 @@ fn cluster_columns(mut frags: Vec<TextFragment>) -> Vec<Vec<TextFragment>> {
     columns
 }
 
+/// Width of one coordinate bucket, in PDF user-space units. Values
+/// that round to the same multiple of this width collapse to one
+/// bucket.
+const BUCKET_WIDTH: f32 = 4.0;
+
 /// Count how many distinct buckets a coordinate stream falls into,
-/// where values within 4 user-space units collapse to one bucket.
+/// where values within one [`BUCKET_WIDTH`] collapse to one bucket.
 /// Cheap stand-in for a clustering pass; good enough to compare the
 /// column-count against the row-count.
+///
+/// Each value is snapped to a fixed grid (its nearest multiple of
+/// [`BUCKET_WIDTH`]) and inserted into a hash set, so the work is
+/// O(k) in the number of values rather than the O(k^2) a pairwise
+/// "is any earlier value within tolerance" scan would cost. On an
+/// untrusted PDF a column can hold thousands of fragments, so the
+/// quadratic scan was a denial-of-service amplifier; the grid keeps
+/// it linear. The grid is a fixed partition rather than the old
+/// order-dependent greedy merge, which is the right shape for a
+/// coarse stacking heuristic: genuine vertical glyphs sit a full
+/// font-height (~12+ units) apart and land in clearly separate cells.
 fn distinct_buckets(values: impl Iterator<Item = f32>) -> usize {
-    let mut seen: Vec<f32> = Vec::new();
+    let mut seen: HashSet<i64> = HashSet::new();
     for v in values {
-        if !seen.iter().any(|s| (s - v).abs() <= 4.0) {
-            seen.push(v);
-        }
+        // Saturating float-to-int: Rust's `as` clamps out-of-range
+        // values and maps NaN to 0, so a hostile NaN / infinity glyph
+        // position cannot panic or explode the set. Truncation is the
+        // point here (we want a coarse grid key), so the precision/
+        // truncation lints are deliberately silenced.
+        #[allow(clippy::cast_possible_truncation)]
+        let key = (v / BUCKET_WIDTH).round() as i64;
+        seen.insert(key);
     }
     seen.len()
 }
@@ -434,5 +457,36 @@ mod tests {
         ];
         let out = reading_order(frags);
         assert_eq!(joined(&out), "Invoice|2026|فاتورة|رقم");
+    }
+
+    #[test]
+    fn distinct_buckets_collapses_within_tolerance() {
+        // Values inside one BUCKET_WIDTH grid cell collapse together;
+        // values a clear font-height apart stay separate.
+        assert_eq!(distinct_buckets([100.0, 100.5, 101.0].into_iter()), 1);
+        assert_eq!(distinct_buckets([100.0, 112.0, 124.0].into_iter()), 3);
+        assert_eq!(distinct_buckets(std::iter::empty()), 0);
+    }
+
+    #[test]
+    fn distinct_buckets_handles_non_finite_without_panicking() {
+        // A hostile PDF could position glyphs at NaN / infinity. The
+        // integerized key must saturate, not panic.
+        let n = distinct_buckets([f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0].into_iter());
+        assert!(n >= 1, "non-finite coordinates must still bucket, got {n}");
+    }
+
+    #[test]
+    fn distinct_buckets_is_linear_on_large_columns() {
+        // Regression for the former O(k^2) pairwise scan: a deep column
+        // (the shape a hostile vertical-CJK page produces) must be
+        // counted in linear time. 200_000 stacked glyphs would take
+        // ~4e10 comparisons under the old `seen.iter().any()`; the
+        // grid-keyed set finishes effectively instantly. We assert the
+        // count is right and rely on the test simply completing fast.
+        #[allow(clippy::cast_precision_loss)]
+        let ys = (0..200_000i32).map(|i| i as f32 * 12.0);
+        // Every glyph is a full 12 units below the last → all distinct.
+        assert_eq!(distinct_buckets(ys), 200_000);
     }
 }

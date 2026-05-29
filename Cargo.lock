@@ -2383,6 +2383,7 @@ dependencies = [
 name = "invoicekit-intake-pdf"
 version = "0.1.1"
 dependencies = [
+ "flate2",
  "lopdf",
  "thiserror 2.0.18",
  "unicode-bidi",

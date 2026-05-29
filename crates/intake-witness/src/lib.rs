@@ -297,6 +297,13 @@ pub fn validate_eu_vat_id_shape(vat_id: &str) -> Result<&'static str, &'static s
     if vat_id.len() < 4 {
         return Err("too short");
     }
+    // The length gate counts bytes; a multibyte character could otherwise land
+    // mid-codepoint at the `split_at(2)` boundary below and panic. A valid VAT
+    // id is ASCII-only (the body loop already only accepts ASCII), so reject
+    // anything else up front.
+    if !vat_id.is_ascii() {
+        return Err("body contains illegal character");
+    }
     let (prefix, body) = vat_id.split_at(2);
     let Some(cc) = eu_country_for_prefix(prefix) else {
         return Err("unknown country prefix");
@@ -621,5 +628,19 @@ mod tests {
         assert!(validate_eu_vat_id_shape("FRAA999999999").is_ok());
         assert!(validate_eu_vat_id_shape("ELABC12345678").is_ok());
         assert!(validate_eu_vat_id_shape("XI123456789").is_ok());
+    }
+
+    #[test]
+    fn validate_eu_vat_id_shape_rejects_multibyte_without_panic() {
+        // "A" + U+00E9 (e-acute, two UTF-8 bytes) + "1" is four bytes, so it
+        // clears the `len() < 4` byte gate, but byte index 2 lands inside the
+        // multibyte char. Without the ASCII gate, `split_at(2)` panics.
+        let four_byte_non_ascii = "A\u{00E9}1";
+        assert_eq!(four_byte_non_ascii.len(), 4);
+        assert!(!four_byte_non_ascii.is_ascii());
+        assert!(matches!(
+            validate_eu_vat_id_shape(four_byte_non_ascii),
+            Err("body contains illegal character")
+        ));
     }
 }
