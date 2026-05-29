@@ -122,6 +122,7 @@ pub trait EtaProvider: Send + Sync {
 pub struct MockEtaProvider {
     fixed_submitted_at: String,
     next_serial: std::sync::Mutex<u64>,
+    forced_verdict: Option<(EtaStatus, Option<String>)>,
 }
 
 impl MockEtaProvider {
@@ -137,7 +138,31 @@ impl MockEtaProvider {
         Self {
             fixed_submitted_at: submitted_at.into(),
             next_serial: std::sync::Mutex::new(1),
+            forced_verdict: None,
         }
+    }
+
+    /// Force the per-document clearance verdict the next `submit`
+    /// calls will report.
+    ///
+    /// ETA runs eight server-side validators (Structure, Core
+    /// Fields, Signature, National ID, Taxpayer, Reference
+    /// Document, Code, Simple Fields) after a document passes the
+    /// submission gate, then records a per-document status. A
+    /// document that clears all validators is `Valid`; one that
+    /// fails any is `Invalid`. That verdict arrives *after* the
+    /// wire, so — per the [`EtaProvider::submit`] contract — it is
+    /// surfaced through [`EtaStatus`] inside the returned envelope,
+    /// **not** as an `Err`. This knob lets the offline suite drive
+    /// both the `Valid` clearance and the `Invalid` refusal paths
+    /// deterministically.
+    ///
+    /// See the ETA SDK document-validation-rules reference:
+    /// <https://sdk.invoicing.eta.gov.eg/document-validation-rules/>.
+    #[must_use]
+    pub fn with_forced_verdict(mut self, status: EtaStatus, reason: Option<String>) -> Self {
+        self.forced_verdict = Some((status, reason));
+        self
     }
 }
 
@@ -160,13 +185,17 @@ impl EtaProvider for MockEtaProvider {
             v
         };
         let uuid = format!("EG-{serial:0>8x}-{:0>8x}", serial.wrapping_mul(7));
+        let (status, reason) = match &self.forced_verdict {
+            Some((status, reason)) => (*status, reason.clone()),
+            None => (EtaStatus::Submitted, None),
+        };
         Ok(EtaSubmitEnvelope {
             uuid,
             long_id: format!("ETA-LONG-{serial:012}"),
             content_hash_hex: "0".repeat(64),
-            status: EtaStatus::Submitted,
+            status,
             submitted_at: self.fixed_submitted_at.clone(),
-            reason: None,
+            reason,
         })
     }
 }
@@ -259,6 +288,25 @@ mod tests {
         assert!(validate_tax_or_national_id("12345").is_err());
         assert!(validate_tax_or_national_id("12345678901").is_err());
         assert!(validate_tax_or_national_id("12345678A").is_err());
+    }
+
+    #[test]
+    fn submit_honours_forced_invalid_verdict() {
+        // The ETA `Invalid` clearance verdict is a per-document STATUS, not an
+        // `Err` — the adapter contract surfaces it inside the envelope.
+        let p = MockEtaProvider::new()
+            .with_forced_verdict(EtaStatus::Invalid, Some("EINV reference missing".to_owned()));
+        let env = p.submit(&sample_request()).unwrap();
+        assert_eq!(env.status, EtaStatus::Invalid);
+        assert_eq!(env.reason.as_deref(), Some("EINV reference missing"));
+    }
+
+    #[test]
+    fn submit_honours_forced_valid_verdict() {
+        let p = MockEtaProvider::new().with_forced_verdict(EtaStatus::Valid, None);
+        let env = p.submit(&sample_request()).unwrap();
+        assert_eq!(env.status, EtaStatus::Valid);
+        assert!(env.reason.is_none());
     }
 
     #[test]

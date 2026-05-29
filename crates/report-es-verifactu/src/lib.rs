@@ -175,9 +175,19 @@ pub trait VeriFactuProvider: Send + Sync {
 /// `recorded_hash_hex` (BLAKE3-derived but presented as
 /// SHA-256-shaped hex) + `csv`, so cassette-replay tests stay
 /// byte-identical across runs.
+///
+/// Use [`MockVeriFactuProvider::with_forced_status`] to drive
+/// the genuine AEAT *authority verdicts* the trait contract
+/// promises but the happy-path mock never reaches:
+/// [`VeriFactuStatus::AcceptedWithWarnings`] (`AceptadoConErrores`)
+/// and [`VeriFactuStatus::Rejected`] (`Incorrecto`). Those are
+/// `Ok` envelopes, never `Err` — `Err` stays reserved for
+/// pre-wire shape failures and transport faults.
 pub struct MockVeriFactuProvider {
     fixed_recorded_at: String,
     next_serial: std::sync::Mutex<u64>,
+    forced_status: VeriFactuStatus,
+    forced_message: Option<String>,
 }
 
 impl MockVeriFactuProvider {
@@ -193,7 +203,30 @@ impl MockVeriFactuProvider {
         Self {
             fixed_recorded_at: recorded_at.into(),
             next_serial: std::sync::Mutex::new(1),
+            forced_status: VeriFactuStatus::Accepted,
+            forced_message: None,
         }
+    }
+
+    /// Force every registration to return a specific AEAT
+    /// verdict plus an optional `message`. This exercises the
+    /// [`VeriFactuStatus::AcceptedWithWarnings`] and
+    /// [`VeriFactuStatus::Rejected`] branches (the AEAT
+    /// `AceptadoConErrores` / `Incorrecto` `EstadoRegistro`
+    /// values) the always-`Accepted` happy path cannot reach.
+    ///
+    /// The shape validators (`issuer_nif`, `previous_hash_hex`,
+    /// non-empty payload) still run first — a forced verdict
+    /// never bypasses pre-wire `Err` refusal.
+    #[must_use]
+    pub fn with_forced_status(
+        mut self,
+        status: VeriFactuStatus,
+        message: Option<String>,
+    ) -> Self {
+        self.forced_status = status;
+        self.forced_message = message;
+        self
     }
 }
 
@@ -236,10 +269,10 @@ impl VeriFactuProvider for MockVeriFactuProvider {
             v
         };
         Ok(VeriFactuRegisterEnvelope {
-            status: VeriFactuStatus::Accepted,
+            status: self.forced_status,
             recorded_hash_hex: digest,
             csv: format!("MOCK-CSV-{serial:08}"),
-            message: None,
+            message: self.forced_message.clone(),
             recorded_at: self.fixed_recorded_at.clone(),
         })
     }
@@ -450,6 +483,46 @@ mod tests {
         let json = serde_json::to_string(&env).unwrap();
         let parsed: VeriFactuRegisterEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, env);
+    }
+
+    #[test]
+    fn forced_status_surfaces_rejected_as_ok_envelope() {
+        // AEAT `Incorrecto` (rejection) is a verdict, NOT an `Err` — the
+        // engine persists it alongside its audit trail. Shape validation
+        // still runs first (the request below is well-formed).
+        let p = MockVeriFactuProvider::default().with_forced_status(
+            VeriFactuStatus::Rejected,
+            Some("1109 El NIF del destinatario no esta identificado en el censo".to_owned()),
+        );
+        let env = p.register_invoice(&sample_request()).unwrap();
+        assert_eq!(env.status, VeriFactuStatus::Rejected);
+        assert!(env.message.as_deref().unwrap().starts_with("1109"));
+    }
+
+    #[test]
+    fn forced_status_surfaces_accepted_with_warnings() {
+        let p = MockVeriFactuProvider::default().with_forced_status(
+            VeriFactuStatus::AcceptedWithWarnings,
+            Some("AceptadoConErrores".to_owned()),
+        );
+        let env = p.register_invoice(&sample_request()).unwrap();
+        assert_eq!(env.status, VeriFactuStatus::AcceptedWithWarnings);
+        // Even a warning verdict still records a chain link + CSV.
+        assert_eq!(env.recorded_hash_hex.len(), 64);
+        assert!(env.csv.starts_with("MOCK-CSV-"));
+    }
+
+    #[test]
+    fn forced_status_still_refuses_bad_shapes_before_the_wire() {
+        // A forced verdict must never bypass pre-wire shape `Err` refusal.
+        let p = MockVeriFactuProvider::default()
+            .with_forced_status(VeriFactuStatus::Rejected, None);
+        let mut req = sample_request();
+        req.issuer_nif = "BAD".to_owned();
+        assert!(matches!(
+            p.register_invoice(&req).unwrap_err(),
+            VeriFactuError::BadNif(_)
+        ));
     }
 
     #[test]

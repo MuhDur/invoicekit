@@ -226,10 +226,7 @@ pub fn to_cfdi_xml(
     out.push_str(">\n");
     out.push_str("    <cfdi:Traslados>\n");
     for summary in &document.tax_summary {
-        let rate = summary
-        .tax_rate
-        .as_ref()
-        .map_or(Decimal::ZERO, invoicekit_ir::DecimalValue::inner);
+        let rate = summary_rate(summary);
         out.push_str("      <cfdi:Traslado");
         attr(&mut out, "Base", &fmt_amount(summary.taxable_amount.inner()));
         attr(&mut out, "Impuesto", "002");
@@ -298,11 +295,16 @@ fn strip_mx_prefix(value: &str) -> String {
 fn line_tax(document: &CommercialDocument, line: &invoicekit_ir::DocumentLine) -> Option<(Decimal, Decimal)> {
     let cat = line.tax_category.as_ref()?;
     let summary = document.tax_summary.iter().find(|s| &s.category_code == cat)?;
-    let rate = summary
+    Some((summary_rate(summary), summary.tax_amount.inner()))
+}
+
+/// The IVA rate of a tax-summary entry as a [`Decimal`], defaulting to zero when
+/// the entry carries no explicit rate (e.g. exempt categories).
+fn summary_rate(summary: &invoicekit_ir::TaxCategorySummary) -> Decimal {
+    summary
         .tax_rate
         .as_ref()
-        .map_or(Decimal::ZERO, invoicekit_ir::DecimalValue::inner);
-    Some((rate, summary.tax_amount.inner()))
+        .map_or(Decimal::ZERO, invoicekit_ir::DecimalValue::inner)
 }
 
 /// Sum the document-level traslado tax amounts.

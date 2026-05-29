@@ -182,6 +182,13 @@ pub trait SiiProvider: Send + Sync {
 pub struct MockSiiProvider {
     fixed_submitted_at: String,
     next_serial: std::sync::Mutex<u64>,
+    /// When set, [`SiiProvider::submit_dte`] still runs the real
+    /// pre-wire validators but, instead of the happy-path
+    /// `Recibido`, synthesizes this authority verdict in the
+    /// receipt envelope. Lets the offline suite drive the
+    /// `Rechazado` / `AceptadoConReparos` branches — which the
+    /// real SII returns asynchronously — without an `Err`.
+    forced_status: Option<SiiStatus>,
 }
 
 impl MockSiiProvider {
@@ -198,7 +205,19 @@ impl MockSiiProvider {
         Self {
             fixed_submitted_at: submitted_at.into(),
             next_serial: std::sync::Mutex::new(1),
+            forced_status: None,
         }
+    }
+
+    /// Force the SII verdict the next `submit_dte` returns. The
+    /// pre-wire validators still run; only the synthesized
+    /// receipt `status` changes. This is how the audit trail
+    /// captures an authority-side `Rechazado` (a receipt status,
+    /// **not** an `Err`).
+    #[must_use]
+    pub fn with_forced_status(mut self, status: SiiStatus) -> Self {
+        self.forced_status = Some(status);
+        self
     }
 }
 
@@ -223,11 +242,23 @@ impl SiiProvider for MockSiiProvider {
             *g += 1;
             v
         };
+        let status = self.forced_status.unwrap_or(SiiStatus::Recibido);
+        // The SII always returns a glosa with a `Rechazado` or
+        // `AceptadoConReparos` verdict; the happy path carries none.
+        let glosa = match status {
+            SiiStatus::Rechazado => {
+                Some("RECHAZADO: documento con errores de validación".to_owned())
+            }
+            SiiStatus::AceptadoConReparos => {
+                Some("ACEPTADO CON REPAROS: revise observaciones".to_owned())
+            }
+            SiiStatus::Recibido | SiiStatus::Aceptado => None,
+        };
         Ok(SiiSubmitEnvelope {
             track_id: format!("SII-{serial:012}"),
-            status: SiiStatus::Recibido,
+            status,
             submitted_at: self.fixed_submitted_at.clone(),
-            glosa: None,
+            glosa,
         })
     }
 
@@ -404,5 +435,47 @@ mod tests {
         let json = serde_json::to_string(&env).unwrap();
         let parsed: SiiSubmitEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, env);
+    }
+
+    #[test]
+    fn forced_rechazado_is_a_receipt_status_not_an_err() {
+        // A well-formed submission whose CONTENT the SII refuses still
+        // passes the pre-wire validators and returns an Ok envelope with
+        // the Rechazado verdict + a glosa.
+        let p = MockSiiProvider::new().with_forced_status(SiiStatus::Rechazado);
+        let env = p.submit_dte(&sample_request()).unwrap();
+        assert_eq!(env.status, SiiStatus::Rechazado);
+        assert!(env.track_id.starts_with("SII-"));
+        assert!(
+            env.glosa.as_deref().is_some_and(|g| g.contains("RECHAZADO")),
+            "a Rechazado verdict must carry a glosa, got {:?}",
+            env.glosa
+        );
+    }
+
+    #[test]
+    fn forced_status_still_runs_pre_wire_validators() {
+        // Forcing a verdict does NOT bypass shape validation; a bad RUT is
+        // still an Err, never a receipt.
+        let p = MockSiiProvider::new().with_forced_status(SiiStatus::Rechazado);
+        let mut req = sample_request();
+        req.issuer_rut = "BAD".to_owned();
+        assert!(matches!(p.submit_dte(&req).unwrap_err(), SiiError::BadRut(_)));
+    }
+
+    #[test]
+    fn forced_aceptado_con_reparos_carries_glosa() {
+        let p = MockSiiProvider::new().with_forced_status(SiiStatus::AceptadoConReparos);
+        let env = p.submit_dte(&sample_request()).unwrap();
+        assert_eq!(env.status, SiiStatus::AceptadoConReparos);
+        assert!(env.glosa.is_some());
+    }
+
+    #[test]
+    fn validate_rut_rejects_k_in_the_head() {
+        // The verifier digit slot may be `K`, but the body must be digits.
+        assert!(validate_rut("1234K678-9").is_err());
+        assert!(validate_rut("-9").is_err()); // empty head
+        assert!(validate_rut("12345678-").is_err()); // empty tail
     }
 }

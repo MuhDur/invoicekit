@@ -166,6 +166,12 @@ pub trait HaciendaProvider: Send + Sync {
 /// Deterministic mock provider.
 pub struct MockHaciendaProvider {
     fixed_received_at: String,
+    /// When set, the mock forces this terminal verdict (with an optional
+    /// `mensaje`) on every otherwise shape-valid submission. This is how the
+    /// caller exercises Hacienda's `Rechazado` envelope path — the authority
+    /// rejection is a `HaciendaStatus`, not an `Err` — without standing up the
+    /// live ATV REST backend.
+    forced_status: Option<(HaciendaStatus, Option<String>)>,
 }
 
 impl MockHaciendaProvider {
@@ -180,7 +186,24 @@ impl MockHaciendaProvider {
     pub fn with_fixed_received_at(received_at: impl Into<String>) -> Self {
         Self {
             fixed_received_at: received_at.into(),
+            forced_status: None,
         }
+    }
+
+    /// Force the terminal Hacienda verdict on shape-valid submissions.
+    ///
+    /// Use this to drive the authority `Rechazado` / `Recibido` envelope
+    /// branches. The supplied `mensaje` is echoed verbatim into the envelope
+    /// (Hacienda only populates `mensaje` on `Rechazado`, mirroring the
+    /// `MensajeHacienda` response document).
+    #[must_use]
+    pub fn with_forced_status(
+        mut self,
+        status: HaciendaStatus,
+        mensaje: Option<String>,
+    ) -> Self {
+        self.forced_status = Some((status, mensaje));
+        self
     }
 }
 
@@ -201,11 +224,15 @@ impl HaciendaProvider for MockHaciendaProvider {
         if request.comprobante_xml.is_empty() {
             return Err(HaciendaError::BadXml("payload is empty".to_owned()));
         }
+        let (status, mensaje) = match &self.forced_status {
+            Some((status, mensaje)) => (*status, mensaje.clone()),
+            None => (HaciendaStatus::Aceptado, None),
+        };
         Ok(HaciendaSubmitEnvelope {
             clave_numerica: request.clave_numerica.clone(),
-            status: HaciendaStatus::Aceptado,
+            status,
             received_at: self.fixed_received_at.clone(),
-            mensaje: None,
+            mensaje,
         })
     }
 }
@@ -354,6 +381,45 @@ mod tests {
         assert!(validate_clave_numerica(&"5".repeat(49)).is_err());
         assert!(validate_consecutivo(&"0".repeat(20)).is_ok());
         assert!(validate_consecutivo(&"0".repeat(19)).is_err());
+    }
+
+    #[test]
+    fn forced_rechazado_surfaces_as_status_not_error() {
+        // Per the provider contract, a Hacienda refusal is a `Rechazado`
+        // verdict carried *inside* the Ok envelope — never an `Err`.
+        let p = MockHaciendaProvider::new().with_forced_status(
+            HaciendaStatus::Rechazado,
+            Some("clave numerica ya registrada".to_owned()),
+        );
+        let env = p.submit_comprobante(&sample_request()).unwrap();
+        assert_eq!(env.status, HaciendaStatus::Rechazado);
+        assert_eq!(env.mensaje.as_deref(), Some("clave numerica ya registrada"));
+        // The clave is still echoed even on rejection, so the audit trail can
+        // correlate the refusal with the submitted comprobante.
+        assert_eq!(env.clave_numerica, "5".repeat(50));
+    }
+
+    #[test]
+    fn forced_recibido_models_async_pending_verdict() {
+        // Hacienda's recepcion endpoint can return `recibido` (queued) before
+        // the asynchronous `MensajeHacienda` resolves to aceptado/rechazado.
+        let p = MockHaciendaProvider::new()
+            .with_forced_status(HaciendaStatus::Recibido, None);
+        let env = p.submit_comprobante(&sample_request()).unwrap();
+        assert_eq!(env.status, HaciendaStatus::Recibido);
+        assert!(env.mensaje.is_none());
+    }
+
+    #[test]
+    fn forced_status_still_runs_prewire_shape_validation() {
+        // A forced verdict must not bypass local shape checks: a malformed
+        // cédula is refused pre-wire regardless of the configured verdict.
+        let p = MockHaciendaProvider::new()
+            .with_forced_status(HaciendaStatus::Rechazado, None);
+        let mut req = sample_request();
+        req.issuer_cedula = "BAD".to_owned();
+        let err = p.submit_comprobante(&req).unwrap_err();
+        assert!(matches!(err, HaciendaError::BadCedula(_)));
     }
 
     #[test]

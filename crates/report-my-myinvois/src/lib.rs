@@ -196,7 +196,7 @@ pub trait MyInvoisProvider: Send + Sync {
 /// `MyInvoisStatus::Cancelled`.
 pub struct MockMyInvoisProvider {
     fixed_submitted_at: String,
-    next_serial: std::sync::Mutex<u64>,
+    next_serial: std::sync::atomic::AtomicU64,
 }
 
 impl MockMyInvoisProvider {
@@ -211,7 +211,7 @@ impl MockMyInvoisProvider {
     pub fn with_fixed_submitted_at(submitted_at: impl Into<String>) -> Self {
         Self {
             fixed_submitted_at: submitted_at.into(),
-            next_serial: std::sync::Mutex::new(1),
+            next_serial: std::sync::atomic::AtomicU64::new(1),
         }
     }
 }
@@ -236,12 +236,9 @@ impl MyInvoisProvider for MockMyInvoisProvider {
             return Err(MyInvoisError::BadXml("payload is empty".to_owned()));
         }
 
-        let serial = {
-            let mut g = self.next_serial.lock().expect("serial mutex poisoned");
-            let v = *g;
-            *g += 1;
-            v
-        };
+        let serial = self
+            .next_serial
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         let mut content_hash = String::with_capacity(64);
         let _ = write!(content_hash, "{:0>16x}", request.invoice_xml.len() as u64);

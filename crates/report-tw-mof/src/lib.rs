@@ -121,6 +121,7 @@ pub trait MofProvider: Send + Sync {
 pub struct MockMofProvider {
     fixed_issued_at: String,
     next_serial: std::sync::Mutex<u64>,
+    forced_status: MofStatus,
 }
 
 impl MockMofProvider {
@@ -136,7 +137,23 @@ impl MockMofProvider {
         Self {
             fixed_issued_at: issued_at.into(),
             next_serial: std::sync::Mutex::new(1),
+            forced_status: MofStatus::Accepted,
         }
+    }
+
+    /// Force every (shape-valid) submission to return a specific MOF wire
+    /// verdict.
+    ///
+    /// The MOF e-Invoice platform returns either 上傳成功
+    /// ([`MofStatus::Accepted`]) or 上傳失敗 ([`MofStatus::Rejected`]) for an
+    /// otherwise well-formed submission — a *receipt status*, not a transport
+    /// error. This opt-in hook reaches the 上傳失敗 branch deterministically so
+    /// the rejection audit trail can be exercised offline; the default
+    /// constructor is unchanged and still yields [`MofStatus::Accepted`].
+    #[must_use]
+    pub fn with_forced_status(mut self, status: MofStatus) -> Self {
+        self.forced_status = status;
+        self
     }
 }
 
@@ -158,12 +175,18 @@ impl MofProvider for MockMofProvider {
             *g += 1;
             v
         };
+        let reason = match self.forced_status {
+            MofStatus::Accepted => None,
+            // 上傳失敗 verdicts carry an MOF reason string the engine persists
+            // alongside the rejected submission.
+            MofStatus::Rejected => Some("MOF rejected the upload (上傳失敗)".to_owned()),
+        };
         Ok(MofSubmitEnvelope {
             invoice_number: format!("AA-{serial:08}"),
             random_number: format!("{:04}", serial % 10_000),
-            status: MofStatus::Accepted,
+            status: self.forced_status,
             issued_at: self.fixed_issued_at.clone(),
-            reason: None,
+            reason,
         })
     }
 }

@@ -308,14 +308,7 @@ fn fmt_amount(value: Decimal) -> String {
 
 /// Append `<tag>escaped-text</tag>` at the given indent depth.
 fn el(out: &mut String, depth: usize, tag: &str, text: &str) {
-    indent(out, depth);
-    out.push('<');
-    out.push_str(tag);
-    out.push('>');
-    push_escaped(out, text);
-    out.push_str("</");
-    out.push_str(tag);
-    out.push_str(">\n");
+    el_attr(out, depth, tag, &[], text);
 }
 
 /// Append `<tag attr="v" ...>escaped-text</tag>` at the given indent depth.

@@ -101,6 +101,8 @@ pub trait GdtProvider: Send + Sync {
 pub struct MockGdtProvider {
     fixed_recorded_at: String,
     next_serial: std::sync::Mutex<u64>,
+    forced_status: GdtStatus,
+    forced_message: Option<String>,
 }
 
 impl MockGdtProvider {
@@ -116,7 +118,36 @@ impl MockGdtProvider {
         Self {
             fixed_recorded_at: recorded_at.into(),
             next_serial: std::sync::Mutex::new(1),
+            forced_status: GdtStatus::Cleared,
+            forced_message: None,
         }
+    }
+
+    /// Force every (shape-valid) submission to return the given authority
+    /// verdict instead of the default `Cleared`.
+    ///
+    /// The GDT models a per-invoice refusal as `Bị từ chối`
+    /// ([`GdtStatus::Rejected`]) carried *inside* the `Ok` envelope — never as
+    /// an `Err` — so the engine persists the rejection alongside its audit
+    /// trail. Use [`MockGdtProvider::with_rejection`] to attach the GDT's
+    /// `thông báo` (reason text) the portal returns with a refusal.
+    ///
+    /// Pre-wire shape failures (bad MST, empty payload) are still surfaced as
+    /// [`GdtError`] regardless of the forced status.
+    #[must_use]
+    pub fn with_forced_status(mut self, status: GdtStatus) -> Self {
+        self.forced_status = status;
+        self
+    }
+
+    /// Force a `Rejected` verdict carrying the GDT-returned reason text
+    /// (`thông báo`), the way the `hoadondientu.gdt.gov.vn` portal answers a
+    /// refused submission.
+    #[must_use]
+    pub fn with_rejection(mut self, message: impl Into<String>) -> Self {
+        self.forced_status = GdtStatus::Rejected;
+        self.forced_message = Some(message.into());
+        self
     }
 }
 
@@ -138,12 +169,27 @@ impl GdtProvider for MockGdtProvider {
             *g += 1;
             v
         };
-        Ok(GdtSubmitEnvelope {
-            ma_cqt: format!("VN-{serial:012}"),
-            status: GdtStatus::Cleared,
-            recorded_at: self.fixed_recorded_at.clone(),
-            message: None,
-        })
+        match self.forced_status {
+            GdtStatus::Cleared => Ok(GdtSubmitEnvelope {
+                ma_cqt: format!("VN-{serial:012}"),
+                status: GdtStatus::Cleared,
+                recorded_at: self.fixed_recorded_at.clone(),
+                message: None,
+            }),
+            // A refused submission gets NO `mã CQT`: the tax-authority code is
+            // only issued on clearance. The portal returns the refusal reason
+            // (`thông báo`) instead, which the audit trail must persist.
+            GdtStatus::Rejected => Ok(GdtSubmitEnvelope {
+                ma_cqt: String::new(),
+                status: GdtStatus::Rejected,
+                recorded_at: self.fixed_recorded_at.clone(),
+                message: Some(
+                    self.forced_message
+                        .clone()
+                        .unwrap_or_else(|| "GDT từ chối hóa đơn".to_owned()),
+                ),
+            }),
+        }
     }
 }
 
@@ -231,6 +277,31 @@ mod tests {
         assert!(validate_mst("0123456789001").is_ok());
         assert!(validate_mst("012345").is_err());
         assert!(validate_mst("0123456789A").is_err());
+    }
+
+    #[test]
+    fn forced_rejection_is_ok_envelope_not_err() {
+        // A GDT refusal (`Bị từ chối`) is a verdict carried inside the `Ok`
+        // envelope, NOT an `Err` — `Err` is reserved for pre-wire shape /
+        // transport faults. A rejected submission gets no `mã CQT`.
+        let p = MockGdtProvider::new().with_rejection("MST người bán không hoạt động");
+        let env = p.submit_invoice(&sample_request()).unwrap();
+        assert_eq!(env.status, GdtStatus::Rejected);
+        assert!(env.ma_cqt.is_empty(), "a refused invoice gets no mã CQT");
+        assert_eq!(env.message.as_deref(), Some("MST người bán không hoạt động"));
+    }
+
+    #[test]
+    fn forced_rejection_still_runs_pre_wire_validators() {
+        // Even when a `Rejected` verdict is forced, a malformed MST must still
+        // fail pre-wire with `Err`, never reach the (forced) authority verdict.
+        let p = MockGdtProvider::new().with_forced_status(GdtStatus::Rejected);
+        let mut req = sample_request();
+        req.issuer_mst = "12".to_owned();
+        assert!(matches!(
+            p.submit_invoice(&req).unwrap_err(),
+            GdtError::BadMst(_)
+        ));
     }
 
     #[test]

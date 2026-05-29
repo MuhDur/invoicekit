@@ -32,8 +32,8 @@ use invoicekit_ir::{
     PartyTaxId, PostalAddress, SchemaVersion, TaxCategorySummary,
 };
 use invoicekit_report_in_gst::{
-    IrpBackend, IrpEnvironment, IrpError, IrpProvider, IrpRegisterRequest, IrpStatus,
-    MockIrpProvider,
+    validate_hsn_sac, IrpBackend, IrpEnvironment, IrpError, IrpProvider, IrpRegisterEnvelope,
+    IrpRegisterRequest, IrpStatus, MockIrpProvider,
 };
 use invoicekit_verify::{verify_packed, VerifyOptions};
 use rust_decimal::Decimal;
@@ -164,17 +164,7 @@ fn run_lifecycle() -> (Vec<u8>, invoicekit_report_in_gst::IrpRegisterEnvelope) {
     let envelope = provider.register_invoice(&register_request(ubl_bytes.clone())).unwrap();
 
     // 4. evidence bundle: canonical doc + national-family XML + IRP receipt.
-    let canonical = canonicalize_value(&doc.to_value().unwrap()).unwrap().into_bytes();
-    let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-    artefacts.insert("canonical.json".to_owned(), canonical);
-    artefacts.insert("formats/ubl.xml".to_owned(), ubl_bytes);
-    artefacts.insert(
-        "receipt.json".to_owned(),
-        serde_json::to_vec(&envelope).unwrap(),
-    );
-    let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
-    let ikb = pack(&bundle).unwrap();
+    let ikb = pack_bundle(&doc, &ubl_bytes, &envelope);
     (ikb, envelope)
 }
 
@@ -251,4 +241,531 @@ fn india_refuses_malformed_gstin_before_the_wire() {
     bad.issuer_gstin = "TOO-SHORT".to_owned();
     let err = provider.register_invoice(&bad).unwrap_err();
     assert!(matches!(err, IrpError::BadGstin(_)), "got {err:?}");
+}
+
+// ===========================================================================
+// Deepened, India-GST-specific scenarios (added on top of the §1 honest bar).
+//
+// Each scenario is grounded in a real Goods and Services Tax Network (GSTN) /
+// National Informatics Centre (NIC) Invoice Registration Portal (IRP) rule and
+// cites the authority in its doc-comment. Fixtures are hand-built synthetic
+// data; no copyrighted regulator file is vendored.
+// ===========================================================================
+
+/// A second invoice line carrying a distinct HSN/SAC code, so the multi-line
+/// and multi-rate scenarios exercise more than one tax slab.
+fn igst_line(id: &str, description: &str, minor_each: i64, qty: i64) -> DocumentLine {
+    let total = minor_each * qty;
+    DocumentLine {
+        id: id.to_owned(),
+        description: description.to_owned(),
+        quantity: DecimalValue::new(Decimal::from(qty)),
+        unit_code: Some("EA".to_owned()),
+        unit_price: amt(minor_each),
+        line_extension_amount: amt(total),
+        tax_category: Some("S".to_owned()),
+        extensions: Vec::new(),
+    }
+}
+
+/// India GST **credit note** (Typ = `CRN`).
+///
+/// Under the Central Goods and Services Tax Act 2017 section 34, a supplier
+/// issues a credit note to reduce the taxable value or tax of a previously
+/// reported tax invoice. In the NIC IRP `generate IRN` schema the document type
+/// `Typ` takes the value `CRN`, and a credit note must reference the original
+/// invoice (`PrecDocDtls`). The InvoiceKit IR maps this to
+/// [`DocumentType::CreditNote`], serialized as a UBL 2.1 `CreditNote`
+/// (`CreditNoteTypeCode` 381). A UBL `CreditNote` may not carry a top-level
+/// `cbc:DueDate`, so `due_date` is `None`.
+///
+/// Authority: Goods and Services Tax Network / National Informatics Centre,
+/// e-Invoice schema, document type `CRN`; CGST Act 2017 s.34.
+/// Spec: <https://einvoice1.gst.gov.in/Others/BulkGenerationTools>
+fn indian_credit_note() -> CommercialDocument {
+    CommercialDocument::new(CommercialDocumentParts {
+        schema_version: SchemaVersion::default(),
+        id: DocumentId::new("doc-in-cn-1").unwrap(),
+        document_type: DocumentType::CreditNote,
+        issue_date: DateOnly::new("2026-06-02").unwrap(),
+        tax_point_date: None,
+        // UBL 2.1 CreditNote carries no top-level cbc:DueDate.
+        due_date: None,
+        document_number: DocumentNumber::new("CRN-2026-IN-0001").unwrap(),
+        currency: Iso4217Code::new("INR").unwrap(),
+        supplier: indian_party("Acme Technologies Pvt Ltd", ISSUER_GSTIN, "Bengaluru", "KA"),
+        customer: indian_party("Beta Solutions Pvt Ltd", BUYER_GSTIN, "Mumbai", "MH"),
+        payee: None,
+        payment_terms: None,
+        payment_instructions: Vec::new(),
+        lines: vec![DocumentLine {
+            id: "1".to_owned(),
+            description: "Credit: partial rollback of SAC 998314 consulting".to_owned(),
+            quantity: DecimalValue::new(Decimal::from(1)),
+            unit_code: Some("EA".to_owned()),
+            unit_price: amt(200_000),            // 2000.00
+            line_extension_amount: amt(200_000), // 2000.00
+            tax_category: Some("S".to_owned()),
+            extensions: Vec::new(),
+        }],
+        tax_summary: vec![TaxCategorySummary {
+            // 18% GST on the credited amount.
+            category_code: "S".to_owned(),
+            taxable_amount: amt(200_000), // 2000.00
+            tax_amount: amt(36_000),      // 360.00
+            tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))), // 18.00
+        }],
+        monetary_total: MonetaryTotal {
+            line_extension_amount: amt(200_000), // 2000.00
+            tax_exclusive_amount: amt(200_000),  // 2000.00
+            tax_inclusive_amount: amt(236_000),  // 2360.00
+            allowance_total_amount: None,
+            charge_total_amount: None,
+            prepaid_amount: None,
+            payable_amount: amt(236_000), // 2360.00
+        },
+        attachments: Vec::new(),
+        references: Vec::new(),
+        notes: Vec::new(),
+        extensions: Vec::new(),
+        meta: DocumentMeta {
+            tenant_id: TENANT.to_owned(),
+            trace_id: TRACE.to_owned(),
+            source_system: Some("e2e".to_owned()),
+        },
+    })
+    .unwrap()
+}
+
+/// Multi-line domestic invoice spanning a goods HSN and a services SAC.
+///
+/// Real GST tax invoices list one line per supplied item, each tagged with its
+/// own Harmonised System of Nomenclature (HSN) code for goods or Services
+/// Accounting Code (SAC) for services. The IRP `ItemList` validates each
+/// `HsnCd` independently (4-8 digits), and the NIC `Note on Top Errors` flags
+/// missing/short HSN codes as a common refusal.
+///
+/// Authority: NIC IRP e-Invoice schema, `ItemList[].HsnCd` (4-8 chars).
+/// Spec: <https://einv-apisandbox.nic.in/NoteonTopErrors.html>
+fn indian_multiline_invoice() -> CommercialDocument {
+    CommercialDocument::new(CommercialDocumentParts {
+        schema_version: SchemaVersion::default(),
+        id: DocumentId::new("doc-in-ml-1").unwrap(),
+        document_type: DocumentType::Invoice,
+        issue_date: DateOnly::new("2026-05-26").unwrap(),
+        tax_point_date: None,
+        due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+        document_number: DocumentNumber::new("INV-2026-IN-ML01").unwrap(),
+        currency: Iso4217Code::new("INR").unwrap(),
+        supplier: indian_party("Acme Technologies Pvt Ltd", ISSUER_GSTIN, "Bengaluru", "KA"),
+        customer: indian_party("Beta Solutions Pvt Ltd", BUYER_GSTIN, "Mumbai", "MH"),
+        payee: None,
+        payment_terms: None,
+        payment_instructions: Vec::new(),
+        lines: vec![
+            // HSN 84713010 — laptops (goods).
+            igst_line("1", "Laptop computers (HSN 84713010)", 600_000, 2),
+            // SAC 998314 — IT consulting (services).
+            igst_line("2", "Software consulting (SAC 998314)", 500_000, 1),
+        ],
+        tax_summary: vec![TaxCategorySummary {
+            // Both lines at 18% IGST for an inter-state (KA -> MH) supply.
+            category_code: "S".to_owned(),
+            taxable_amount: amt(1_700_000), // 17000.00
+            tax_amount: amt(306_000),       // 3060.00
+            tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))), // 18.00
+        }],
+        monetary_total: MonetaryTotal {
+            line_extension_amount: amt(1_700_000), // 17000.00
+            tax_exclusive_amount: amt(1_700_000),  // 17000.00
+            tax_inclusive_amount: amt(2_006_000),  // 20060.00
+            allowance_total_amount: None,
+            charge_total_amount: None,
+            prepaid_amount: None,
+            payable_amount: amt(2_006_000), // 20060.00
+        },
+        attachments: Vec::new(),
+        references: Vec::new(),
+        notes: Vec::new(),
+        extensions: Vec::new(),
+        meta: DocumentMeta {
+            tenant_id: TENANT.to_owned(),
+            trace_id: TRACE.to_owned(),
+            source_system: Some("e2e".to_owned()),
+        },
+    })
+    .unwrap()
+}
+
+/// Export-without-payment (zero-rated) invoice, supply type `EXPWOP`.
+///
+/// Under the Integrated GST Act 2017 section 16, exports are a zero-rated
+/// supply. A registered exporter shipping under a Letter of Undertaking (LUT)
+/// supplies the goods/services **without payment of integrated tax** — the NIC
+/// IRP schema models this with supply type `SupTyp = EXPWOP`. The foreign buyer
+/// has no GSTIN, so `buyer_gstin` is `None`; the IRP still registers the export
+/// invoice and returns an IRN.
+///
+/// Authority: NIC IRP e-Invoice schema, `SupTyp = EXPWOP`; IGST Act 2017 s.16.
+/// Spec: <https://einvoice1.gst.gov.in/Others/BulkGenerationTools>
+fn indian_export_lut_invoice() -> CommercialDocument {
+    let foreign_buyer = Party {
+        id: Some("acme-usa-inc".to_owned()),
+        name: "Acme USA Inc".to_owned(),
+        // Foreign buyer carries no GSTIN under EXPWOP.
+        tax_ids: Vec::new(),
+        address: PostalAddress {
+            lines: vec!["1 Market Street".to_owned()],
+            city: "San Francisco".to_owned(),
+            subdivision: Some("CA".to_owned()),
+            postal_code: "94105".to_owned(),
+            country: CountryCode::new("US").unwrap(),
+        },
+        contact: None,
+    };
+    CommercialDocument::new(CommercialDocumentParts {
+        schema_version: SchemaVersion::default(),
+        id: DocumentId::new("doc-in-exp-1").unwrap(),
+        document_type: DocumentType::Invoice,
+        issue_date: DateOnly::new("2026-05-26").unwrap(),
+        tax_point_date: None,
+        due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+        document_number: DocumentNumber::new("EXP-2026-IN-0001").unwrap(),
+        currency: Iso4217Code::new("INR").unwrap(),
+        supplier: indian_party("Acme Technologies Pvt Ltd", ISSUER_GSTIN, "Bengaluru", "KA"),
+        customer: foreign_buyer,
+        payee: None,
+        payment_terms: None,
+        payment_instructions: Vec::new(),
+        lines: vec![DocumentLine {
+            id: "1".to_owned(),
+            description: "Exported software services (SAC 998314), under LUT".to_owned(),
+            quantity: DecimalValue::new(Decimal::from(1)),
+            unit_code: Some("EA".to_owned()),
+            unit_price: amt(5_000_000),            // 50000.00
+            line_extension_amount: amt(5_000_000), // 50000.00
+            // Zero-rated: tax category Z.
+            tax_category: Some("Z".to_owned()),
+            extensions: Vec::new(),
+        }],
+        tax_summary: vec![TaxCategorySummary {
+            // Zero-rated export under LUT: 0% IGST, zero tax.
+            category_code: "Z".to_owned(),
+            taxable_amount: amt(5_000_000), // 50000.00
+            tax_amount: amt(0),             // 0.00
+            tax_rate: Some(DecimalValue::new(Decimal::ZERO)), // 0
+        }],
+        monetary_total: MonetaryTotal {
+            line_extension_amount: amt(5_000_000), // 50000.00
+            tax_exclusive_amount: amt(5_000_000),  // 50000.00
+            // No tax added: payable equals taxable.
+            tax_inclusive_amount: amt(5_000_000), // 50000.00
+            allowance_total_amount: None,
+            charge_total_amount: None,
+            prepaid_amount: None,
+            payable_amount: amt(5_000_000), // 50000.00
+        },
+        attachments: Vec::new(),
+        references: Vec::new(),
+        notes: Vec::new(),
+        extensions: Vec::new(),
+        meta: DocumentMeta {
+            tenant_id: TENANT.to_owned(),
+            trace_id: TRACE.to_owned(),
+            source_system: Some("e2e".to_owned()),
+        },
+    })
+    .unwrap()
+}
+
+/// Build a packed `.ikb` bundle for a given document + registered envelope so
+/// the new scenarios reuse the same evidence assembly as `run_lifecycle`.
+fn pack_bundle(doc: &CommercialDocument, ubl_bytes: &[u8], envelope: &IrpRegisterEnvelope) -> Vec<u8> {
+    let canonical = canonicalize_value(&doc.to_value().unwrap())
+        .unwrap()
+        .into_bytes();
+    let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    artefacts.insert("canonical.json".to_owned(), canonical);
+    artefacts.insert("formats/ubl.xml".to_owned(), ubl_bytes.to_vec());
+    artefacts.insert(
+        "receipt.json".to_owned(),
+        serde_json::to_vec(envelope).unwrap(),
+    );
+    let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
+    let bundle = EvidenceBundle { manifest, artefacts };
+    pack(&bundle).unwrap()
+}
+
+#[test]
+fn india_credit_note_registers_and_bundles() {
+    // GST credit note (Typ = CRN) serialized as a UBL 2.1 CreditNote, then
+    // registered with the IRP exactly like a tax invoice. See CGST Act 2017
+    // s.34. The UBL spine must be a CreditNote (TypeCode 381), not an Invoice.
+    let doc = indian_credit_note();
+    let ubl_xml = to_xml(&doc).unwrap();
+    assert!(
+        ubl_xml.contains("<CreditNote"),
+        "credit note must serialize to a UBL CreditNote root"
+    );
+    assert!(
+        ubl_xml.contains(">381</cbc:CreditNoteTypeCode>"),
+        "UBL CreditNoteTypeCode 381 expected"
+    );
+    assert!(
+        ubl_xml.contains("currencyID=\"INR\">2360.00</cbc:PayableAmount>"),
+        "credit note payable total 2360.00 INR expected"
+    );
+    let ubl_bytes = ubl_xml.into_bytes();
+
+    let provider = MockIrpProvider::with_fixed_ack_dt(PINNED_CREATED_AT);
+    let envelope = provider
+        .register_invoice(&register_request(ubl_bytes.clone()))
+        .unwrap();
+    assert_eq!(envelope.status, IrpStatus::Accepted);
+    let irn = envelope.irn.as_ref().expect("IRN on accepted credit note");
+    assert_eq!(irn.len(), 64, "IRN is a 64-char SHA-256 hex");
+
+    let ikb = pack_bundle(&doc, &ubl_bytes, &envelope);
+    let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
+    assert!(report.ok, "credit-note evidence bundle must verify");
+}
+
+#[test]
+fn india_multiline_inter_state_invoice_registers() {
+    // A two-line inter-state (Karnataka -> Maharashtra) supply: one goods HSN
+    // line and one services SAC line. The serialized UBL must carry both lines
+    // and both per-line extension amounts; the IRP registers the whole invoice
+    // and returns one IRN for the document (not per line). NIC `Note on Top
+    // Errors` lists HSN problems as a common refusal cause.
+    let doc = indian_multiline_invoice();
+    assert_eq!(doc.lines.len(), 2, "multi-line invoice has two lines");
+
+    let ubl_xml = to_xml(&doc).unwrap();
+    for needle in [
+        "Laptop computers (HSN 84713010)",
+        "Software consulting (SAC 998314)",
+        "currencyID=\"INR\">12000.00</cbc:LineExtensionAmount>", // line 1: 6000 x 2
+        "currencyID=\"INR\">5000.00</cbc:LineExtensionAmount>",  // line 2: 5000 x 1
+        "currencyID=\"INR\">20060.00</cbc:PayableAmount>",       // grand total incl. 18% IGST
+    ] {
+        assert!(ubl_xml.contains(needle), "multi-line UBL missing {needle}");
+    }
+    let ubl_bytes = ubl_xml.into_bytes();
+
+    let provider = MockIrpProvider::with_fixed_ack_dt(PINNED_CREATED_AT);
+    let envelope = provider
+        .register_invoice(&register_request(ubl_bytes.clone()))
+        .unwrap();
+    assert_eq!(envelope.status, IrpStatus::Accepted);
+
+    let ikb = pack_bundle(&doc, &ubl_bytes, &envelope);
+    assert!(
+        verify_packed(&ikb, &VerifyOptions::content_only())
+            .unwrap()
+            .ok
+    );
+}
+
+#[test]
+fn india_export_under_lut_is_zero_rated_and_has_no_buyer_gstin() {
+    // EXPWOP: export without payment of tax, supplied under a Letter of
+    // Undertaking. IGST Act 2017 s.16 makes exports zero-rated; the foreign
+    // buyer carries no GSTIN. The IRP accepts the invoice and the engine never
+    // calls the buyer-GSTIN validator (because buyer_gstin is None).
+    let doc = indian_export_lut_invoice();
+    // Zero-rated: the tax summary tax amount is exactly zero.
+    assert_eq!(
+        doc.tax_summary[0].tax_amount.inner(),
+        Decimal::ZERO,
+        "export under LUT carries zero IGST"
+    );
+    // The foreign buyer carries no tax identifier at all.
+    assert!(
+        doc.customer.tax_ids.is_empty(),
+        "foreign export buyer has no GSTIN"
+    );
+
+    let ubl_bytes = to_xml(&doc).unwrap().into_bytes();
+    let provider = MockIrpProvider::with_fixed_ack_dt(PINNED_CREATED_AT);
+
+    // No buyer GSTIN: the request mirrors the export schema (buyer_gstin None).
+    let mut req = register_request(ubl_bytes);
+    req.buyer_gstin = None;
+    let envelope = provider.register_invoice(&req).unwrap();
+    assert_eq!(
+        envelope.status,
+        IrpStatus::Accepted,
+        "IRP registers a zero-rated export invoice"
+    );
+    assert!(
+        envelope.irn.as_ref().is_some_and(|s| s.len() == 64),
+        "export invoice still earns a 64-char IRN"
+    );
+}
+
+#[test]
+fn india_intra_state_reverse_charge_invoice_registers() {
+    // Reverse charge (RegRev = Y): under CGST Act 2017 s.9(3)/9(4) the
+    // *recipient* discharges the GST liability, not the supplier. This is an
+    // intra-state (Karnataka -> Karnataka) supply, so tax splits into CGST +
+    // SGST (NIC error 2172 fires when IGST is wrongly used intra-state). We
+    // model the combined 18% (9% CGST + 9% SGST) as one EN 16931 summary line.
+    //
+    // Authority: CGST Act 2017 s.9; NIC IRP error 2172 (IGST on intra-state).
+    // Spec: <https://einv-apisandbox.nic.in/NoteonTopErrors.html>
+    let supplier = indian_party("Acme Technologies Pvt Ltd", ISSUER_GSTIN, "Bengaluru", "KA");
+    // Same-state buyer: GSTIN also starts with state code 29 (Karnataka).
+    let buyer_gstin = "29BBBPL6789Q1Z5";
+    let buyer = indian_party("Gamma Legal Services LLP", buyer_gstin, "Bengaluru", "KA");
+
+    let doc = CommercialDocument::new(CommercialDocumentParts {
+        schema_version: SchemaVersion::default(),
+        id: DocumentId::new("doc-in-rcm-1").unwrap(),
+        document_type: DocumentType::Invoice,
+        issue_date: DateOnly::new("2026-05-26").unwrap(),
+        tax_point_date: None,
+        due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+        document_number: DocumentNumber::new("INV-2026-IN-RCM1").unwrap(),
+        currency: Iso4217Code::new("INR").unwrap(),
+        supplier,
+        customer: buyer,
+        payee: None,
+        payment_terms: None,
+        payment_instructions: Vec::new(),
+        lines: vec![DocumentLine {
+            id: "1".to_owned(),
+            // Legal services from an advocate are a notified reverse-charge supply.
+            description: "Legal advisory services (SAC 998213) - reverse charge".to_owned(),
+            quantity: DecimalValue::new(Decimal::from(1)),
+            unit_code: Some("EA".to_owned()),
+            unit_price: amt(1_000_000),            // 10000.00
+            line_extension_amount: amt(1_000_000), // 10000.00
+            tax_category: Some("S".to_owned()),
+            extensions: Vec::new(),
+        }],
+        tax_summary: vec![TaxCategorySummary {
+            category_code: "S".to_owned(),
+            taxable_amount: amt(1_000_000), // 10000.00
+            tax_amount: amt(180_000),       // 1800.00 (9% CGST + 9% SGST)
+            tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))), // 18.00
+        }],
+        monetary_total: MonetaryTotal {
+            line_extension_amount: amt(1_000_000), // 10000.00
+            tax_exclusive_amount: amt(1_000_000),  // 10000.00
+            tax_inclusive_amount: amt(1_180_000),  // 11800.00
+            allowance_total_amount: None,
+            charge_total_amount: None,
+            prepaid_amount: None,
+            payable_amount: amt(1_180_000), // 11800.00
+        },
+        attachments: Vec::new(),
+        references: Vec::new(),
+        notes: Vec::new(),
+        extensions: Vec::new(),
+        meta: DocumentMeta {
+            tenant_id: TENANT.to_owned(),
+            trace_id: TRACE.to_owned(),
+            source_system: Some("e2e".to_owned()),
+        },
+    })
+    .unwrap();
+
+    let ubl_bytes = to_xml(&doc).unwrap().into_bytes();
+    let provider = MockIrpProvider::with_fixed_ack_dt(PINNED_CREATED_AT);
+
+    let mut req = register_request(ubl_bytes);
+    // Both parties are Karnataka (state code 29): a genuine intra-state supply.
+    req.buyer_gstin = Some(buyer_gstin.to_owned());
+    assert_eq!(
+        &req.issuer_gstin[..2],
+        &req.buyer_gstin.as_ref().unwrap()[..2],
+        "intra-state: issuer and buyer share GST state code 29"
+    );
+    let envelope = provider.register_invoice(&req).unwrap();
+    assert_eq!(envelope.status, IrpStatus::Accepted);
+    assert!(envelope.signed_qr_code.is_some(), "signed QR for the printed invoice");
+}
+
+#[test]
+fn india_irp_rejection_receipt_round_trips() {
+    // The IRP refusal verdict is a *receipt status*, not a transport error.
+    // `IrpStatus::Rejected` carries no IRN and an `error_message` quoting the
+    // IRP error code. The canonical example is error 2150 (Duplicate IRN): the
+    // same {supplier GSTIN, document type, document number, financial year}
+    // cannot mint two IRNs. The MockIrpProvider does not synthesise Rejected
+    // (it only models Accepted/Duplicate), so we assert the rejection envelope
+    // the real IRP returns survives the receipt.json serde round-trip
+    // unchanged — the shape the evidence bundle persists.
+    //
+    // Authority: NIC IRP error code 2150 (Duplicate IRN).
+    // Spec: <https://einv-apisandbox.nic.in/NoteonTopErrors.html>
+    let rejected = IrpRegisterEnvelope {
+        status: IrpStatus::Rejected,
+        irn: None,
+        ack_no: None,
+        ack_dt: PINNED_CREATED_AT.to_owned(),
+        signed_qr_code: None,
+        signed_invoice_jws: None,
+        error_message: Some(
+            "2150 : Duplicate IRN; IRN already generated for the document".to_owned(),
+        ),
+    };
+
+    // A rejection carries no IRN / QR / JWS, only the authority error text.
+    assert_eq!(rejected.status, IrpStatus::Rejected);
+    assert!(rejected.irn.is_none(), "rejected receipt has no IRN");
+    assert!(
+        rejected
+            .error_message
+            .as_ref()
+            .is_some_and(|m| m.starts_with("2150")),
+        "rejection quotes the IRP error code 2150"
+    );
+
+    // receipt.json round-trip: the envelope the bundle persists is stable.
+    let json = serde_json::to_string(&rejected).unwrap();
+    // skip_serializing_if drops the None fields from the wire entirely.
+    assert!(!json.contains("\"irn\""), "absent IRN is not serialized");
+    assert!(!json.contains("signed_qr_code"), "absent QR is not serialized");
+    let back: IrpRegisterEnvelope = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, rejected, "rejection receipt round-trips byte-stable");
+}
+
+#[test]
+fn india_rejects_too_short_hsn_code() {
+    // The NIC IRP `ItemList[].HsnCd` is 4-8 digits; a 3-digit HSN is refused as
+    // a malformed item code before the wire. The crate's `validate_hsn_sac`
+    // mirrors that 4-8-digit rule exactly. NIC `Note on Top Errors` lists
+    // invalid HSN as a common rejection.
+    //
+    // Authority: NIC IRP e-Invoice schema, `HsnCd` (4-8 chars).
+    // Spec: <https://einv-apisandbox.nic.in/NoteonTopErrors.html>
+    // A 3-digit HSN is too short.
+    let err = validate_hsn_sac("847").unwrap_err();
+    assert!(matches!(err, IrpError::BadJson(_)), "got {err:?}");
+    // A 9-digit HSN is too long.
+    assert!(validate_hsn_sac("847130100").is_err());
+    // The real laptop HSN (84713010) and a SAC (998314) are both accepted.
+    assert!(validate_hsn_sac("84713010").is_ok(), "8-digit HSN accepted");
+    assert!(validate_hsn_sac("998314").is_ok(), "6-digit SAC accepted");
+}
+
+#[test]
+fn india_credit_note_lifecycle_is_byte_deterministic() {
+    // Determinism across the credit-note path: serialize + register + pack
+    // twice and assert byte-identical bundles, mirroring the invoice-path
+    // determinism guarantee for the CRN document type.
+    let build = || {
+        let doc = indian_credit_note();
+        let ubl_bytes = to_xml(&doc).unwrap().into_bytes();
+        let provider = MockIrpProvider::with_fixed_ack_dt(PINNED_CREATED_AT);
+        let envelope = provider
+            .register_invoice(&register_request(ubl_bytes.clone()))
+            .unwrap();
+        (pack_bundle(&doc, &ubl_bytes, &envelope), envelope.irn)
+    };
+    let (a, irn_a) = build();
+    let (b, irn_b) = build();
+    assert_eq!(a, b, "credit-note lifecycle must be byte-stable");
+    assert_eq!(irn_a, irn_b, "credit-note IRN derivation is deterministic");
 }

@@ -250,3 +250,552 @@ fn hungary_mock_refuses_empty_payload_and_bad_tax_id() {
         "malformed tax id must be refused as BadTaxId, got {err:?}"
     );
 }
+
+// ===========================================================================
+// Deepened, country-specific coverage.
+//
+// External grounding (cited per scenario):
+//
+// * Authority: Nemzeti Adó- és Vámhivatal (NAV) — the Hungarian National Tax
+//   and Customs Administration. Real-time invoice-data reporting ("Online
+//   Számla" / RTIR) is mandatory for invoices issued by domestically
+//   VAT-registered businesses. Reporting is *post-issuance*, NOT clearance:
+//   the invoice is legally issued first, then its data is reported to NAV.
+//   Portal + spec: https://onlineszamla.nav.gov.hu/
+//
+// * Wire schema: NAV Online Számla Interface Specification v3.0. The
+//   `manageInvoiceRequest` carries an `invoiceOperation` whose `invoiceOperation`
+//   enum is CREATE / MODIFY / STORNO; technical annulment of an erroneously
+//   reported submission goes through the separate `manageAnnulment` operation.
+//   This crate models all four as `NavOperation::{Create, Modify, Storno, Annul}`.
+//   Spec hub: https://onlineszamla.nav.gov.hu/dokumentaciok
+//
+// * Status lifecycle: a submitted transaction moves RECEIVED -> PROCESSING ->
+//   DONE; a per-invoice technical/business validation block resolves the index
+//   to ABORTED, with the failing rules carried in
+//   technical/businessValidationMessages. Modelled as
+//   `NavStatus::{Received, InProgress, Done, Aborted}` + `validation_result`.
+//
+// * Hungarian VAT (Act CXXVII of 2007 on Value Added Tax, "Áfa tv."): standard
+//   rate 27% (the highest standard VAT rate in the EU), reduced rates 18% and
+//   5%. Subjective tax exemption ("alanyi adómentesség", code AAM) and the
+//   domestic reverse-charge mechanism for listed supplies under §142 are
+//   reported with the supply's VAT exemption / "no VAT charged" markers.
+//
+// Fixtures are hand-built synthetic data; no copyrighted regulator file is
+// vendored. Goldens stay hand-rolled (no `insta`/`pretty_assertions`).
+// ===========================================================================
+
+// Domestic 27%-standard-rate forint credit note (storno-style corrective).
+//
+// NAV reports a credit note (a corrective document that reverses an earlier
+// invoice) via the STORNO invoiceOperation. The IR DocumentType::CreditNote
+// serializes to a UBL 2.1 <CreditNote> with type code 381 and
+// cac:CreditNoteLine / cbc:CreditedQuantity lines. UBL 2.1 forbids a top-level
+// cbc:DueDate on a CreditNote, so due_date stays None.
+fn hungarian_credit_note() -> CommercialDocument {
+    CommercialDocument::new(CommercialDocumentParts {
+        schema_version: SchemaVersion::default(),
+        id: DocumentId::new("doc-hu-e2e-cn-1").unwrap(),
+        document_type: DocumentType::CreditNote,
+        issue_date: DateOnly::new("2026-05-28").unwrap(),
+        tax_point_date: Some(DateOnly::new("2026-05-28").unwrap()),
+        due_date: None,
+        document_number: DocumentNumber::new("STORNO-2026-HU-0001").unwrap(),
+        currency: Iso4217Code::new("HUF").unwrap(),
+        supplier: hungarian_party("Acme Kft", "HU12345678", "Budapest"),
+        customer: hungarian_party("Beta Zrt", "HU98765432", "Debrecen"),
+        payee: None,
+        payment_terms: None,
+        payment_instructions: Vec::new(),
+        lines: vec![DocumentLine {
+            id: "1".to_owned(),
+            description: "Szoftverfejlesztési tanácsadás (sztornó)".to_owned(),
+            quantity: DecimalValue::new(Decimal::from(2)),
+            unit_code: Some("EA".to_owned()),
+            unit_price: amt(5000),
+            line_extension_amount: amt(10000),
+            tax_category: Some("S".to_owned()),
+            extensions: Vec::new(),
+        }],
+        tax_summary: vec![TaxCategorySummary {
+            category_code: "S".to_owned(),
+            taxable_amount: amt(10000),
+            tax_amount: amt(2700),
+            tax_rate: Some(DecimalValue::new(Decimal::new(2700, 2))),
+        }],
+        monetary_total: MonetaryTotal {
+            line_extension_amount: amt(10000),
+            tax_exclusive_amount: amt(10000),
+            tax_inclusive_amount: amt(12700),
+            allowance_total_amount: None,
+            charge_total_amount: None,
+            prepaid_amount: None,
+            payable_amount: amt(12700),
+        },
+        attachments: Vec::new(),
+        references: Vec::new(),
+        notes: Vec::new(),
+        extensions: Vec::new(),
+        meta: DocumentMeta {
+            tenant_id: TENANT.to_owned(),
+            trace_id: TRACE.to_owned(),
+            source_system: Some("e2e".to_owned()),
+        },
+    })
+    .unwrap()
+}
+
+#[test]
+fn hungary_credit_note_serializes_as_storno_corrective() {
+    // NAV's STORNO operation reverses a previously-reported invoice. The IR
+    // CreditNote -> UBL CreditNote path (type code 381) is the format variant;
+    // the report-side operation is `NavOperation::Storno`.
+    let doc = hungarian_credit_note();
+    let ubl = to_xml(&doc).unwrap();
+
+    // UBL 2.1 CreditNote spine, asserted on real rendered values. The
+    // canonicalizer renders namespace declarations inline on each element's open
+    // tag, so we match the element-name prefix (`<cbc:CreditNoteTypeCode`), not
+    // the bare closed form.
+    for needle in [
+        "<CreditNote",
+        ">381</cbc:CreditNoteTypeCode>",
+        "<cac:CreditNoteLine",
+        "<cbc:CreditedQuantity",
+        ">STORNO-2026-HU-0001</cbc:ID>",
+        // Hungary's 27% standard rate renders verbatim as the tax percent.
+        ">27.00</cbc:Percent>",
+        "currencyID=\"HUF\"",
+    ] {
+        assert!(ubl.contains(needle), "HU CreditNote UBL missing {needle}\n{ubl}");
+    }
+    // A CreditNote must NOT carry an Invoice type code or a top-level due date.
+    assert!(
+        !ubl.contains("</cbc:InvoiceTypeCode>"),
+        "a CreditNote must not emit an InvoiceTypeCode"
+    );
+    assert!(
+        !ubl.contains("</cbc:DueDate>"),
+        "UBL 2.1 CreditNote forbids a top-level cbc:DueDate"
+    );
+
+    // The report-side wire operation for a reversal is STORNO; submit it and
+    // confirm NAV accepts the corrective with a fresh NAV- transaction id.
+    let provider = MockNavProvider::with_fixed_recorded_at(FIXED_RECORDED_AT);
+    let mut req = manage_request(ubl.into_bytes());
+    req.operation = NavOperation::Storno;
+    let env = provider.manage_invoice(&req).unwrap();
+    assert_eq!(env.status, NavStatus::Received);
+    assert!(env.transaction_id.starts_with("NAV-"));
+    assert_eq!(req.operation, NavOperation::Storno);
+}
+
+#[test]
+fn hungary_multi_line_mixed_rate_invoice_reports_each_band() {
+    // Mixed-rate invoice exercising three real Hungarian VAT bands in one
+    // document: 27% standard (S), 18% reduced, and 5% reduced. The reduced
+    // rates are reported with their own ClassifiedTaxCategory IDs, distinct
+    // from the standard "S" band, so the per-band TaxSubtotal entries survive
+    // serialization.
+    //
+    // Line economics (all HUF; `amt(minor)` builds a scale-2 Decimal, so
+    // `amt(10000)` renders as 100.00):
+    //   L1: 2 x 50.00 = 100.00 @ 27%  -> tax 27.00  (S)
+    //   L2: 1 x 40.00 =  40.00 @ 18%  -> tax  7.20  (R18)
+    //   L3: 3 x 10.00 =  30.00 @  5%  -> tax  1.50  (R5)
+    //   net 170.00 ; VAT 35.70 ; gross 205.70
+    let line = |id: &str, desc: &str, qty: i64, unit_minor: i64, ext_minor: i64, cat: &str| {
+        DocumentLine {
+            id: id.to_owned(),
+            description: desc.to_owned(),
+            quantity: DecimalValue::new(Decimal::from(qty)),
+            unit_code: Some("EA".to_owned()),
+            unit_price: amt(unit_minor),
+            line_extension_amount: amt(ext_minor),
+            tax_category: Some(cat.to_owned()),
+            extensions: Vec::new(),
+        }
+    };
+    let band = |cat: &str, taxable_minor: i64, tax_minor: i64, rate_minor: i64| TaxCategorySummary {
+        category_code: cat.to_owned(),
+        taxable_amount: amt(taxable_minor),
+        tax_amount: amt(tax_minor),
+        tax_rate: Some(DecimalValue::new(Decimal::new(rate_minor, 2))),
+    };
+
+    let doc = CommercialDocument::new(CommercialDocumentParts {
+        schema_version: SchemaVersion::default(),
+        id: DocumentId::new("doc-hu-e2e-mix-1").unwrap(),
+        document_type: DocumentType::Invoice,
+        issue_date: DateOnly::new("2026-05-26").unwrap(),
+        tax_point_date: None,
+        due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+        document_number: DocumentNumber::new("INV-2026-HU-MIX-1").unwrap(),
+        currency: Iso4217Code::new("HUF").unwrap(),
+        supplier: hungarian_party("Acme Kft", "HU12345678", "Budapest"),
+        customer: hungarian_party("Beta Zrt", "HU98765432", "Szeged"),
+        payee: None,
+        payment_terms: None,
+        payment_instructions: Vec::new(),
+        lines: vec![
+            line("1", "Tanácsadás", 2, 5000, 10000, "S"),
+            line("2", "Szakkönyv (18%)", 1, 4000, 4000, "R18"),
+            line("3", "Élelmiszer (5%)", 3, 1000, 3000, "R5"),
+        ],
+        tax_summary: vec![
+            band("S", 10000, 2700, 2700),
+            band("R18", 4000, 720, 1800),
+            band("R5", 3000, 150, 500),
+        ],
+        monetary_total: MonetaryTotal {
+            line_extension_amount: amt(17000),
+            tax_exclusive_amount: amt(17000),
+            tax_inclusive_amount: amt(20570),
+            allowance_total_amount: None,
+            charge_total_amount: None,
+            prepaid_amount: None,
+            payable_amount: amt(20570),
+        },
+        attachments: Vec::new(),
+        references: Vec::new(),
+        notes: Vec::new(),
+        extensions: Vec::new(),
+        meta: DocumentMeta {
+            tenant_id: TENANT.to_owned(),
+            trace_id: TRACE.to_owned(),
+            source_system: Some("e2e".to_owned()),
+        },
+    })
+    .unwrap();
+
+    let ubl = to_xml(&doc).unwrap();
+    // All three real Hungarian VAT percentages render as distinct bands. (The
+    // canonicalizer puts an inline xmlns on each cbc element, so match the
+    // value-plus-close form `>27.00</cbc:Percent>`.)
+    for needle in [
+        ">27.00</cbc:Percent>",
+        ">18.00</cbc:Percent>",
+        ">5.00</cbc:Percent>",
+        // The aggregate VAT (sum of the three bands) on the TaxTotal header.
+        "currencyID=\"HUF\">35.70</cbc:TaxAmount>",
+        // The gross payable.
+        "currencyID=\"HUF\">205.70</cbc:PayableAmount>",
+    ] {
+        assert!(ubl.contains(needle), "mixed-rate UBL missing {needle}\n{ubl}");
+    }
+    // Three invoice lines survived (the open tag carries an inline xmlns:cac).
+    assert_eq!(ubl.matches("<cac:InvoiceLine ").count(), 3);
+    // Three tax bands survived as TaxSubtotal entries.
+    assert_eq!(ubl.matches("<cac:TaxSubtotal>").count(), 3);
+
+    // The whole document still submits and gets a NAV transaction id.
+    let provider = MockNavProvider::with_fixed_recorded_at(FIXED_RECORDED_AT);
+    let env = provider.manage_invoice(&manage_request(ubl.into_bytes())).unwrap();
+    assert_eq!(env.status, NavStatus::Received);
+}
+
+#[test]
+fn hungary_domestic_reverse_charge_invoice_carries_no_vat() {
+    // Domestic reverse charge ("belföldi fordított adózás") under §142 of the
+    // Hungarian VAT Act (Act CXXVII of 2007): for listed supplies the customer,
+    // not the supplier, accounts for the VAT, so the supplier issues the
+    // invoice with NO VAT charged. We model the supply with the EN 16931 VAT
+    // category code "AE" (VAT Reverse Charge) at a 0.00 charged amount.
+    let doc = CommercialDocument::new(CommercialDocumentParts {
+        schema_version: SchemaVersion::default(),
+        id: DocumentId::new("doc-hu-e2e-rc-1").unwrap(),
+        document_type: DocumentType::Invoice,
+        issue_date: DateOnly::new("2026-05-26").unwrap(),
+        tax_point_date: None,
+        due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+        document_number: DocumentNumber::new("INV-2026-HU-RC-1").unwrap(),
+        currency: Iso4217Code::new("HUF").unwrap(),
+        supplier: hungarian_party("Acme Kft", "HU12345678", "Budapest"),
+        customer: hungarian_party("Beta Zrt", "HU98765432", "Miskolc"),
+        payee: None,
+        payment_terms: None,
+        payment_instructions: Vec::new(),
+        lines: vec![DocumentLine {
+            id: "1".to_owned(),
+            // Construction work is a classic §142 reverse-charge supply.
+            description: "Építési-szerelési munka (fordított adózás)".to_owned(),
+            quantity: DecimalValue::new(Decimal::ONE),
+            unit_code: Some("EA".to_owned()),
+            unit_price: amt(500_000),
+            line_extension_amount: amt(500_000),
+            tax_category: Some("AE".to_owned()),
+            extensions: Vec::new(),
+        }],
+        tax_summary: vec![TaxCategorySummary {
+            category_code: "AE".to_owned(),
+            taxable_amount: amt(500_000),
+            // Reverse charge: supplier charges no VAT.
+            tax_amount: amt(0),
+            tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+        }],
+        monetary_total: MonetaryTotal {
+            line_extension_amount: amt(500_000),
+            tax_exclusive_amount: amt(500_000),
+            // Gross == net: no VAT added under reverse charge.
+            tax_inclusive_amount: amt(500_000),
+            allowance_total_amount: None,
+            charge_total_amount: None,
+            prepaid_amount: None,
+            payable_amount: amt(500_000),
+        },
+        attachments: Vec::new(),
+        references: Vec::new(),
+        notes: Vec::new(),
+        extensions: Vec::new(),
+        meta: DocumentMeta {
+            tenant_id: TENANT.to_owned(),
+            trace_id: TRACE.to_owned(),
+            source_system: Some("e2e".to_owned()),
+        },
+    })
+    .unwrap();
+
+    let ubl = to_xml(&doc).unwrap();
+    for needle in [
+        // The reverse-charge category code rides through to the line + subtotal.
+        ">AE</cbc:ID>",
+        // Net == gross; no VAT was added (amt(500_000) renders as 5000.00).
+        "currencyID=\"HUF\">5000.00</cbc:TaxExclusiveAmount>",
+        "currencyID=\"HUF\">5000.00</cbc:TaxInclusiveAmount>",
+        // Header VAT is zero.
+        "currencyID=\"HUF\">0.00</cbc:TaxAmount>",
+    ] {
+        assert!(
+            ubl.contains(needle),
+            "reverse-charge UBL missing {needle}\n{ubl}"
+        );
+    }
+
+    let provider = MockNavProvider::with_fixed_recorded_at(FIXED_RECORDED_AT);
+    let env = provider.manage_invoice(&manage_request(ubl.into_bytes())).unwrap();
+    assert_eq!(env.status, NavStatus::Received);
+}
+
+#[test]
+fn hungary_subjective_exemption_invoice_is_zero_rated() {
+    // "Alanyi adómentesség" (AAM) — the subjective tax exemption a small
+    // Hungarian business below the turnover threshold elects. Such an issuer
+    // charges no VAT. We model it with the EN 16931 "E" (Exempt) category at a
+    // 0% rate, and assert the exemption flows through to the wire and the
+    // amounts carry no tax.
+    let aam_party = hungarian_party("Kis Vállalkozó Ev", "HU11223344", "Pécs");
+    let doc = CommercialDocument::new(CommercialDocumentParts {
+        schema_version: SchemaVersion::default(),
+        id: DocumentId::new("doc-hu-e2e-aam-1").unwrap(),
+        document_type: DocumentType::Invoice,
+        issue_date: DateOnly::new("2026-05-26").unwrap(),
+        tax_point_date: None,
+        due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+        document_number: DocumentNumber::new("INV-2026-HU-AAM-1").unwrap(),
+        currency: Iso4217Code::new("HUF").unwrap(),
+        supplier: aam_party,
+        customer: hungarian_party("Beta Zrt", "HU98765432", "Győr"),
+        payee: None,
+        payment_terms: None,
+        payment_instructions: Vec::new(),
+        lines: vec![DocumentLine {
+            id: "1".to_owned(),
+            description: "Grafikai munka (alanyi adómentes)".to_owned(),
+            quantity: DecimalValue::new(Decimal::ONE),
+            unit_code: Some("EA".to_owned()),
+            unit_price: amt(80000),
+            line_extension_amount: amt(80000),
+            tax_category: Some("E".to_owned()),
+            extensions: Vec::new(),
+        }],
+        tax_summary: vec![TaxCategorySummary {
+            category_code: "E".to_owned(),
+            taxable_amount: amt(80000),
+            tax_amount: amt(0),
+            tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+        }],
+        monetary_total: MonetaryTotal {
+            line_extension_amount: amt(80000),
+            tax_exclusive_amount: amt(80000),
+            tax_inclusive_amount: amt(80000),
+            allowance_total_amount: None,
+            charge_total_amount: None,
+            prepaid_amount: None,
+            payable_amount: amt(80000),
+        },
+        attachments: Vec::new(),
+        references: Vec::new(),
+        notes: Vec::new(),
+        extensions: Vec::new(),
+        meta: DocumentMeta {
+            tenant_id: TENANT.to_owned(),
+            trace_id: TRACE.to_owned(),
+            source_system: Some("e2e".to_owned()),
+        },
+    })
+    .unwrap();
+
+    let ubl = to_xml(&doc).unwrap();
+    for needle in [
+        ">E</cbc:ID>",
+        // A 0% exempt rate renders as the bare "0" (Decimal::ZERO.to_string()).
+        ">0</cbc:Percent>",
+        // amt(80000) renders as 800.00; the exemption carries no VAT.
+        "currencyID=\"HUF\">800.00</cbc:TaxInclusiveAmount>",
+        "currencyID=\"HUF\">0.00</cbc:TaxAmount>",
+    ] {
+        assert!(ubl.contains(needle), "AAM UBL missing {needle}\n{ubl}");
+    }
+
+    let provider = MockNavProvider::with_fixed_recorded_at(FIXED_RECORDED_AT);
+    let env = provider.manage_invoice(&manage_request(ubl.into_bytes())).unwrap();
+    assert_eq!(env.status, NavStatus::Received);
+}
+
+#[test]
+fn hungary_aborted_verdict_is_ok_envelope_not_err_and_still_bundles() {
+    // NAV per-invoice rejection contract: when a reported invoice fails NAV's
+    // technical/business validation, the transaction index resolves to ABORTED
+    // with the failing rules carried in technical/businessValidationMessages.
+    // That refusal is an authority *verdict*, surfaced as an `Ok` envelope with
+    // `NavStatus::Aborted` + a `validation_result`, NOT a transport `Err`.
+    //
+    // The `MockNavProvider` happy path cannot emit `Aborted` (it has no
+    // forced-status knob and always returns `Received`). To prove the rejection
+    // contract honestly we synthesize the exact envelope NAV would return for an
+    // ABORTED index and assert (a) it carries the failing-rule text, (b) it
+    // round-trips through serde unchanged, and (c) it still bundles + verifies
+    // so the audit trail persists the rejection. This mirrors the Italy SDI
+    // "rejection still bundles and verifies" pattern, adapted to NAV's status
+    // model (NAV has no separate receipt-kind type; the verdict lives in
+    // `NavStatus`).
+    use invoicekit_report_hu_nav::NavManageEnvelope;
+
+    // A representative NAV business-validation block reason. NAV returns these
+    // as `businessValidationMessages` with a rule code; INCORRECT_VAT_AMOUNT is
+    // a real Online Számla v3.0 business-validation error code.
+    let aborted = NavManageEnvelope {
+        transaction_id: "NAV-0000000000000042".to_owned(),
+        status: NavStatus::Aborted,
+        recorded_at: FIXED_RECORDED_AT.to_owned(),
+        validation_result: Some(
+            "INCORRECT_VAT_AMOUNT: reported lineVatData does not match the line net amount"
+                .to_owned(),
+        ),
+    };
+
+    // (a) the verdict is a rejection carrying the failing-rule text.
+    assert_eq!(aborted.status, NavStatus::Aborted);
+    assert_ne!(aborted.status, NavStatus::Done);
+    let reason = aborted.validation_result.as_deref().unwrap();
+    assert!(
+        reason.contains("INCORRECT_VAT_AMOUNT"),
+        "ABORTED envelope must carry the NAV business-validation rule code"
+    );
+
+    // (b) serde round-trip is lossless (the audit trail persists it verbatim).
+    let json = serde_json::to_string(&aborted).unwrap();
+    let parsed: NavManageEnvelope = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed, aborted);
+    // The kebab-case status renders as "aborted" on the wire JSON.
+    assert!(
+        json.contains("\"status\":\"aborted\""),
+        "NavStatus serializes kebab-case; got {json}"
+    );
+
+    // (c) the rejection still assembles into a verifiable evidence bundle.
+    let doc = hungarian_invoice();
+    let canonical = canonicalize_value(&doc.to_value().unwrap())
+        .unwrap()
+        .into_bytes();
+    let ubl = to_xml(&doc).unwrap().into_bytes();
+    let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    artefacts.insert("canonical.json".to_owned(), canonical);
+    artefacts.insert("formats/ubl.xml".to_owned(), ubl);
+    artefacts.insert("receipt.json".to_owned(), serde_json::to_vec(&aborted).unwrap());
+    let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
+    let bundle = EvidenceBundle { manifest, artefacts };
+    let ikb = pack(&bundle).unwrap();
+    let verify = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
+    assert!(
+        verify.ok,
+        "an ABORTED-verdict evidence bundle must still verify (the rejection is auditable)"
+    );
+}
+
+#[test]
+fn hungary_rejects_group_member_and_truncated_tax_ids() {
+    // The adóazonosító / adószám shape rule, exercised on real Hungarian
+    // identifier widths. NAV's adószám is 8 base digits + 1 VAT code + 2 area
+    // code (11 digits, written `12345678-2-41`); the 8-digit core and the
+    // 9-digit individual adóazonosító jel are also accepted by the shape rule.
+    // A 10-digit value (e.g. a truncated group identifier) and any non-digit
+    // body must be refused as `BadTaxId`.
+    use invoicekit_report_hu_nav::{validate_tax_id, NavError};
+
+    // Accepted real Hungarian shapes.
+    assert!(validate_tax_id("12345678").is_ok(), "8-digit core adószám");
+    assert!(
+        validate_tax_id("12345678-2-41").is_ok(),
+        "hyphenated 8-2-2 adószám as NAV prints it"
+    );
+    assert!(
+        validate_tax_id("12345678241").is_ok(),
+        "the same 11-digit adószám without hyphens"
+    );
+
+    // 10 digits is not a valid Hungarian width -> rejected.
+    let ten = validate_tax_id("1234567824").unwrap_err();
+    assert!(
+        matches!(ten, NavError::BadTaxId(_)),
+        "a 10-digit value is not a valid HU tax-id width"
+    );
+
+    // A letter in the body -> rejected (digits only).
+    let alpha = validate_tax_id("1234567X").unwrap_err();
+    assert!(matches!(alpha, NavError::BadTaxId(_)));
+
+    // And the same refusal surfaces through the provider, before the wire.
+    let provider = MockNavProvider::with_fixed_recorded_at(FIXED_RECORDED_AT);
+    let mut req = manage_request(b"<Invoice/>".to_vec());
+    req.issuer_tax_id = "1234567824".to_owned();
+    assert!(matches!(
+        provider.manage_invoice(&req).unwrap_err(),
+        NavError::BadTaxId(_)
+    ));
+}
+
+#[test]
+fn hungary_corrective_lifecycle_modify_then_query_is_deterministic() {
+    // The MODIFY operation reports a correcting invoice that adjusts (rather
+    // than fully reverses) an earlier reported one. Drive the real two-step NAV
+    // async lifecycle (submit -> Received, poll -> Done) on a MODIFY operation
+    // and prove the receipt fields and byte-stability hold for corrections too.
+    let doc = hungarian_invoice();
+    let ubl = to_xml(&doc).unwrap().into_bytes();
+
+    let run = || {
+        let provider = MockNavProvider::with_fixed_recorded_at(FIXED_RECORDED_AT);
+        let mut req = manage_request(ubl.clone());
+        req.operation = NavOperation::Modify;
+        let received = provider.manage_invoice(&req).unwrap();
+        let done = provider
+            .query_transaction(NavEnvironment::Test, &received.transaction_id)
+            .unwrap();
+        (received, done)
+    };
+
+    let (received, done) = run();
+    assert_eq!(received.status, NavStatus::Received);
+    assert!(received.transaction_id.starts_with("NAV-"));
+    assert_eq!(done.status, NavStatus::Done);
+    assert_eq!(done.transaction_id, received.transaction_id);
+    assert_eq!(done.recorded_at, FIXED_RECORDED_AT);
+
+    // Determinism: a fresh provider re-runs to the identical transaction id and
+    // receipt fields (the serial counter resets per-provider).
+    let (received2, done2) = run();
+    assert_eq!(received2, received);
+    assert_eq!(done2, done);
+}

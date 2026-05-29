@@ -118,6 +118,11 @@ pub trait NtsProvider: Send + Sync {
 pub struct MockNtsProvider {
     fixed_issued_at: String,
     next_serial: std::sync::Mutex<u64>,
+    /// When set, the mock synthesizes an authority-side
+    /// 전송오류 (transmission error) receipt instead of an
+    /// approval — i.e. [`NtsStatus::Rejected`] surfaced as a
+    /// receipt, never as `Err`.
+    forced_rejection: Option<String>,
 }
 
 impl MockNtsProvider {
@@ -134,7 +139,24 @@ impl MockNtsProvider {
         Self {
             fixed_issued_at: issued_at.into(),
             next_serial: std::sync::Mutex::new(1),
+            forced_rejection: None,
         }
+    }
+
+    /// Force the mock to return an authority-side
+    /// 전송오류 (transmission error) verdict carrying `reason`.
+    ///
+    /// The NTS clearance regime refuses malformed or
+    /// non-conforming filings *after* they reach Hometax; that
+    /// refusal is a recorded receipt with
+    /// [`NtsStatus::Rejected`], not a transport `Err`. This
+    /// knob exercises that branch deterministically. Pre-wire
+    /// shape validation (BRN / empty payload) still runs first
+    /// and still returns `Err`.
+    #[must_use]
+    pub fn with_forced_rejection(mut self, reason: impl Into<String>) -> Self {
+        self.forced_rejection = Some(reason.into());
+        self
     }
 }
 
@@ -156,11 +178,20 @@ impl NtsProvider for MockNtsProvider {
             *g += 1;
             v
         };
+        // Authority-side refusal (전송오류) is a *receipt*, not an
+        // `Err`: NTS still records the filing and assigns an
+        // approval number, but stamps the verdict Rejected with a
+        // reason. Surfacing it inside the envelope lets the engine
+        // persist the refusal in its audit trail.
+        let (status, reason) = self.forced_rejection.as_ref().map_or(
+            (NtsStatus::Approved, None),
+            |reason| (NtsStatus::Rejected, Some(reason.clone())),
+        );
         Ok(NtsSubmitEnvelope {
             approval_no: format!("KR-{serial:0>21}"),
-            status: NtsStatus::Approved,
+            status,
             issued_at: self.fixed_issued_at.clone(),
-            reason: None,
+            reason,
         })
     }
 }
@@ -178,6 +209,48 @@ pub fn validate_brn(brn: &str) -> Result<(), NtsError> {
     } else {
         Err(NtsError::BadBrn(format!(
             "BRN must be 10 ASCII digits (optionally hyphenated as NNN-NN-NNNNN), got {brn:?}"
+        )))
+    }
+}
+
+/// Per-digit weights the NTS check-digit algorithm applies to
+/// the first nine digits of a 사업자등록번호.
+const BRN_CHECKSUM_WEIGHTS: [u32; 9] = [1, 3, 7, 1, 3, 7, 1, 3, 5];
+
+/// Validate a Korean BRN's **check digit** (검증번호), not just
+/// its shape.
+///
+/// The National Tax Service assigns the tenth digit of every
+/// 사업자등록번호 as a modulus-10 checksum: weight the first
+/// nine digits by `[1,3,7,1,3,7,1,3,5]`, add `floor(d9 * 5 /
+/// 10)`, and the valid tenth digit is `(10 - (sum mod 10)) mod
+/// 10`. This is the same rule Hometax enforces before it will
+/// accept an e-Tax Invoice, so a BRN that passes
+/// [`validate_brn`] (shape) can still be refused here.
+///
+/// # Errors
+///
+/// Returns [`NtsError::BadBrn`] when the shape is wrong or the
+/// computed check digit does not match the tenth digit.
+pub fn validate_brn_checksum(brn: &str) -> Result<(), NtsError> {
+    validate_brn(brn)?;
+    let digits: Vec<u32> = brn
+        .chars()
+        .filter_map(|c| c.to_digit(10))
+        .collect();
+    let mut sum: u32 = BRN_CHECKSUM_WEIGHTS
+        .iter()
+        .zip(&digits)
+        .map(|(w, d)| w * d)
+        .sum();
+    sum += (digits[8] * 5) / 10;
+    let expected = (10 - (sum % 10)) % 10;
+    if expected == digits[9] {
+        Ok(())
+    } else {
+        Err(NtsError::BadBrn(format!(
+            "BRN check digit failed: expected tenth digit {expected}, got {} in {brn:?}",
+            digits[9]
         )))
     }
 }
@@ -251,6 +324,52 @@ mod tests {
         assert!(validate_brn("123-45-67890").is_ok());
         assert!(validate_brn("12345").is_err());
         assert!(validate_brn("123-45-6789A").is_err());
+    }
+
+    #[test]
+    fn forced_rejection_is_a_receipt_not_an_error() {
+        // The authority-side 전송오류 verdict must surface inside the
+        // envelope (status Rejected + reason), never as Err.
+        let p = MockNtsProvider::default().with_forced_rejection("공급받는자 사업자등록번호 오류");
+        let env = p.submit(&sample_request()).unwrap();
+        assert_eq!(env.status, NtsStatus::Rejected);
+        assert_eq!(
+            env.reason.as_deref(),
+            Some("공급받는자 사업자등록번호 오류")
+        );
+        // Even a rejected filing is recorded with an approval number.
+        assert!(env.approval_no.starts_with("KR-"));
+    }
+
+    #[test]
+    fn forced_rejection_still_runs_pre_wire_validation_first() {
+        // Pre-wire shape failures outrank the forced authority verdict:
+        // a bad BRN is still an Err, never a Rejected receipt.
+        let p = MockNtsProvider::default().with_forced_rejection("late");
+        let mut req = sample_request();
+        req.issuer_brn = "NOPE".to_owned();
+        assert!(matches!(p.submit(&req).unwrap_err(), NtsError::BadBrn(_)));
+    }
+
+    #[test]
+    fn brn_checksum_accepts_real_korean_brns() {
+        // Real, publicly-listed company 사업자등록번호 values whose
+        // tenth digit satisfies the NTS check-digit rule.
+        // Samsung Electronics 124-81-00998, NAVER 220-81-62517,
+        // Kakao 120-81-47521.
+        assert!(validate_brn_checksum("124-81-00998").is_ok());
+        assert!(validate_brn_checksum("220-81-62517").is_ok());
+        assert!(validate_brn_checksum("1208147521").is_ok());
+    }
+
+    #[test]
+    fn brn_checksum_rejects_wrong_check_digit() {
+        // Right shape, wrong tenth digit (the placeholder used by the
+        // shape-only tests fails the real checksum).
+        assert!(validate_brn("123-45-67890").is_ok());
+        assert!(validate_brn_checksum("123-45-67890").is_err());
+        // Flip the last digit of a real BRN.
+        assert!(validate_brn_checksum("124-81-00999").is_err());
     }
 
     #[test]

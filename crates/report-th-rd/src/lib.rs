@@ -116,6 +116,13 @@ pub trait RdProvider: Send + Sync {
 pub struct MockRdProvider {
     fixed_acknowledged_at: String,
     next_serial: std::sync::Mutex<u64>,
+    /// When set, a valid submission yields a `Rejected` envelope
+    /// carrying this reason instead of an `Acknowledged` one. This
+    /// models the RD portal refusing an otherwise well-formed
+    /// submission (e.g. a signing-certificate or schema fault) —
+    /// the refusal is an `Ok` receipt with `RdStatus::Rejected`,
+    /// never an `Err`, so the engine persists it in the audit trail.
+    forced_rejection_reason: Option<String>,
 }
 
 impl MockRdProvider {
@@ -132,7 +139,22 @@ impl MockRdProvider {
         Self {
             fixed_acknowledged_at: acknowledged_at.into(),
             next_serial: std::sync::Mutex::new(1),
+            forced_rejection_reason: None,
         }
+    }
+
+    /// Force every valid submission to come back as an RD
+    /// `Rejected` acknowledgement carrying `reason`.
+    ///
+    /// This is the authority-refusal path: the payload passed the
+    /// pre-wire validators but the Revenue Department portal still
+    /// refused it. Per the [`RdProvider`] contract this is surfaced
+    /// as `RdStatus::Rejected` inside an `Ok` envelope (with the
+    /// `reason` populated), NOT as an `Err`.
+    #[must_use]
+    pub fn with_forced_rejection(mut self, reason: impl Into<String>) -> Self {
+        self.forced_rejection_reason = Some(reason.into());
+        self
     }
 }
 
@@ -154,11 +176,15 @@ impl RdProvider for MockRdProvider {
             *g += 1;
             v
         };
+        let (status, reason) = self.forced_rejection_reason.as_ref().map_or(
+            (RdStatus::Acknowledged, None),
+            |reason| (RdStatus::Rejected, Some(reason.clone())),
+        );
         Ok(RdSubmitEnvelope {
             rd_ref: format!("TH-{serial:012}"),
-            status: RdStatus::Acknowledged,
+            status,
             acknowledged_at: self.fixed_acknowledged_at.clone(),
-            reason: None,
+            reason,
         })
     }
 }
@@ -247,6 +273,31 @@ mod tests {
         assert!(validate_tax_id("123456789012").is_err());
         assert!(validate_tax_id("12345678901234").is_err());
         assert!(validate_tax_id("123456789012A").is_err());
+    }
+
+    #[test]
+    fn forced_rejection_is_an_ok_receipt_not_an_err() {
+        // The Revenue Department portal can refuse an otherwise
+        // well-formed submission. Per the RdProvider contract that
+        // refusal is an `Ok` envelope with `RdStatus::Rejected`, not
+        // an `Err` — so the engine persists it in the audit trail.
+        let p = MockRdProvider::default().with_forced_rejection("RD: invalid digital signature");
+        let env = p.submit_invoice(&sample_request()).unwrap();
+        assert_eq!(env.status, RdStatus::Rejected);
+        assert_eq!(env.reason.as_deref(), Some("RD: invalid digital signature"));
+        // The RD-assigned reference is still issued on a rejection.
+        assert!(env.rd_ref.starts_with("TH-"));
+    }
+
+    #[test]
+    fn forced_rejection_still_validates_inputs_first() {
+        // A forced RD rejection does not bypass the pre-wire
+        // validators: a malformed tax id is still an `Err`.
+        let p = MockRdProvider::default().with_forced_rejection("RD: schema fault");
+        let mut req = sample_request();
+        req.issuer_tax_id = "BAD".to_owned();
+        let err = p.submit_invoice(&req).unwrap_err();
+        assert!(matches!(err, RdError::BadTaxId(_)));
     }
 
     #[test]

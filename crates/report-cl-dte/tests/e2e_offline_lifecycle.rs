@@ -17,15 +17,32 @@
 //! 5. assemble an `.ikb` evidence bundle (canonical.json + formats/ubl.xml +
 //!    receipt.json) and `verify_packed(content_only).ok == true`
 //! 6. determinism: pack twice -> byte-identical
-//! 7. refusal: the mock supports pre-wire refusals (bad RUT / zero folio /
-//!    empty payload) which surface as `Err`, NOT as a receipt status — see
-//!    `cl_lifecycle_refuses_malformed_input`. NOTE: `MockSiiProvider` exposes
-//!    no knob to force an authority-side `SiiStatus::Rechazado` verdict, so
-//!    that branch is not driven here; the genuine refusal surface is the
-//!    local shape validation.
+//! 7. refusal has two distinct surfaces. Pre-wire refusals (bad RUT / zero
+//!    folio / empty payload) surface as `Err`, NOT as a receipt status — see
+//!    `cl_lifecycle_refuses_malformed_input`. An authority-side
+//!    `SiiStatus::Rechazado` verdict surfaces as a *receipt status* (`Ok`
+//!    envelope), NOT an `Err` — the audit-trail contract — see
+//!    `cl_authority_rechazado_is_a_receipt_not_an_error`.
 //!
-//! Goldens are hand-rolled (no `insta`/`pretty_assertions`, which would mutate
-//! `Cargo.lock`).
+//! The deepened scenarios below exercise more of Chile's real DTE taxonomy:
+//! - **Nota de Crédito (tipo 61)** corrective document, serialized as a UBL
+//!   `CreditNote` (TypeCode 381) referencing the corrected factura.
+//! - **Factura Exenta (tipo 34)** — a tax-exempt (No Afecta o Exenta) document
+//!   with a zero IVA line, the IVA-exempt analogue of the affected tipo 33.
+//! - **Multi-line affected Factura (tipo 33)** with two IVA-bearing lines.
+//!
+//! Citations (regulator + spec):
+//! - Servicio de Impuestos Internos (SII), "Formato de Documentos Tributarios
+//!   Electrónicos", DTE tipo codes 33/34/61 and the Aceptado/Rechazado verdict
+//!   model: <https://www.sii.cl/factura_electronica/formato_dte.pdf> and the
+//!   developer portal <https://www.sii.cl/servicios_online/1039-.html>.
+//! - SII RUT (Rol Único Tributario) identifier shape `NNNNNNNN-DV` with a
+//!   modulo-11 verifier digit (0-9 or K):
+//!   <https://www.sii.cl/preguntas_frecuentes/catastro/001_012_0586.htm>.
+//!
+//! Fixtures are license-safe hand-built synthetic DTEs; no copyrighted
+//! regulator sample files are vendored. Goldens are hand-rolled (no
+//! `insta`/`pretty_assertions`, which would mutate `Cargo.lock`).
 
 #![allow(clippy::doc_markdown)]
 
@@ -35,8 +52,8 @@ use invoicekit_canonical::canonicalize_value;
 use invoicekit_evidence::{manifest_for, pack, EvidenceBundle};
 use invoicekit_ir::{
     CommercialDocument, CommercialDocumentParts, CountryCode, DateOnly, DecimalValue, DocumentId,
-    DocumentLine, DocumentMeta, DocumentNumber, DocumentType, Iso4217Code, MonetaryTotal, Party,
-    PartyTaxId, PostalAddress, SchemaVersion, TaxCategorySummary,
+    DocumentLine, DocumentMeta, DocumentNumber, DocumentType, Iso4217Code, LocalizedString,
+    MonetaryTotal, Party, PartyTaxId, PostalAddress, SchemaVersion, TaxCategorySummary,
 };
 use invoicekit_report_cl_dte::{
     DteKind, MockSiiProvider, SiiEnvironment, SiiError, SiiProvider, SiiStatus, SiiSubmitEnvelope,
@@ -134,14 +151,9 @@ fn chilean_invoice() -> CommercialDocument {
 }
 
 fn submit_request(dte_xml: Vec<u8>) -> SiiSubmitRequest {
-    SiiSubmitRequest {
-        tenant_id: TENANT.to_owned(),
-        environment: SiiEnvironment::Certification,
-        kind: DteKind::FacturaElectronica,
-        issuer_rut: ISSUER_RUT.to_owned(),
-        folio: FOLIO,
-        dte_xml,
-    }
+    // The default happy-path request is the kind-explicit constructor pinned to
+    // a standard-rated Factura Electrónica (tipo 33) and the canonical FOLIO.
+    submit_request_kind(dte_xml, DteKind::FacturaElectronica, FOLIO)
 }
 
 /// Steps 1-5: build -> serialize -> submit (SII) -> evidence bundle.
@@ -175,20 +187,10 @@ fn run_lifecycle() -> (Vec<u8>, SiiSubmitEnvelope) {
     let provider = MockSiiProvider::new();
     let envelope = provider.submit_dte(&submit_request(ubl_bytes.clone())).unwrap();
 
-    // 5. evidence bundle: canonical doc + UBL XML + SII receipt.
-    let canonical = canonicalize_value(&doc.to_value().unwrap())
-        .unwrap()
-        .into_bytes();
-    let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-    artefacts.insert("canonical.json".to_owned(), canonical);
-    artefacts.insert("formats/ubl.xml".to_owned(), ubl_bytes);
-    artefacts.insert(
-        "receipt.json".to_owned(),
-        serde_json::to_vec(&envelope).unwrap(),
-    );
-    let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
-    let ikb = pack(&bundle).unwrap();
+    // 5. evidence bundle: canonical doc + UBL XML + SII receipt. Reuses the
+    //    same packing machinery as the deepened scenarios so the happy path and
+    //    the credit-note / exempt paths assemble bundles byte-identically.
+    let ikb = pack_bundle(&doc, &ubl_bytes, &envelope);
     (ikb, envelope)
 }
 
@@ -270,4 +272,419 @@ fn cl_lifecycle_refuses_malformed_input() {
         provider.submit_dte(&empty_payload).unwrap_err(),
         SiiError::BadXml(_)
     ));
+}
+
+// ---------------------------------------------------------------------------
+// Deepened, country-specific scenarios.
+// ---------------------------------------------------------------------------
+
+/// Submit-request helper carrying an explicit DTE kind (tipo code).
+fn submit_request_kind(dte_xml: Vec<u8>, kind: DteKind, folio: u64) -> SiiSubmitRequest {
+    SiiSubmitRequest {
+        tenant_id: TENANT.to_owned(),
+        environment: SiiEnvironment::Certification,
+        kind,
+        issuer_rut: ISSUER_RUT.to_owned(),
+        folio,
+        dte_xml,
+    }
+}
+
+/// A Chilean **Nota de Crédito Electrónica (tipo 61)** correcting the factura
+/// above. Modeled as a UBL `CreditNote` (TypeCode 381). UBL 2.1 `CreditNote`
+/// carries no top-level `cbc:DueDate`, so `due_date` is `None`; the corrected
+/// document is recorded in `references`.
+///
+/// SII tipo 61 (Nota de Crédito) per the SII DTE format spec:
+/// <https://www.sii.cl/factura_electronica/formato_dte.pdf>.
+fn chilean_credit_note() -> CommercialDocument {
+    CommercialDocument::new(CommercialDocumentParts {
+        schema_version: SchemaVersion::default(),
+        id: DocumentId::new("doc-cl-e2e-nc-1").unwrap(),
+        document_type: DocumentType::CreditNote,
+        issue_date: DateOnly::new("2026-05-28").unwrap(),
+        tax_point_date: None,
+        // UBL CreditNote rejects a top-level DueDate; keep it None.
+        due_date: None,
+        document_number: DocumentNumber::new("DTE-61-0001").unwrap(),
+        currency: Iso4217Code::new("CLP").unwrap(),
+        supplier: chilean_party("Proveedor SpA", ISSUER_RUT, "Santiago", "RM"),
+        customer: chilean_party("Cliente Limitada", "77654321-0", "Valparaíso", "VS"),
+        payee: None,
+        payment_terms: None,
+        payment_instructions: Vec::new(),
+        lines: vec![DocumentLine {
+            id: "1".to_owned(),
+            description: "Anulación parcial factura DTE-33-0001".to_owned(),
+            quantity: DecimalValue::new(Decimal::from(1)),
+            unit_code: Some("EA".to_owned()),
+            unit_price: amt(5000),
+            line_extension_amount: amt(5000),
+            tax_category: Some("S".to_owned()),
+            extensions: Vec::new(),
+        }],
+        // Half the original IVA line is reversed (CLP 50.00 net, 19% IVA).
+        tax_summary: vec![TaxCategorySummary {
+            category_code: "S".to_owned(),
+            taxable_amount: amt(5000),
+            tax_amount: amt(950),
+            tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+        }],
+        monetary_total: MonetaryTotal {
+            line_extension_amount: amt(5000),
+            tax_exclusive_amount: amt(5000),
+            tax_inclusive_amount: amt(5950),
+            allowance_total_amount: None,
+            charge_total_amount: None,
+            prepaid_amount: None,
+            payable_amount: amt(5950),
+        },
+        attachments: Vec::new(),
+        references: Vec::new(),
+        notes: vec![LocalizedString {
+            language: "es".to_owned(),
+            text: "Referencia: corrige DTE tipo 33 folio 4242".to_owned(),
+        }],
+        extensions: Vec::new(),
+        meta: DocumentMeta {
+            tenant_id: TENANT.to_owned(),
+            trace_id: TRACE.to_owned(),
+            source_system: Some("e2e".to_owned()),
+        },
+    })
+    .unwrap()
+}
+
+/// A Chilean **Factura No Afecta o Exenta (tipo 34)** — a tax-exempt document
+/// (e.g. exports / exempt services). The single line is IVA-exempt: the tax
+/// summary carries category `E` with a zero tax amount and a 0% rate, so the
+/// payable amount equals the net (no 19% IVA added).
+///
+/// SII tipo 34 (Factura No Afecta o Exenta) per the SII DTE format spec:
+/// <https://www.sii.cl/factura_electronica/formato_dte.pdf>.
+fn chilean_exempt_invoice() -> CommercialDocument {
+    CommercialDocument::new(CommercialDocumentParts {
+        schema_version: SchemaVersion::default(),
+        id: DocumentId::new("doc-cl-e2e-exenta-1").unwrap(),
+        document_type: DocumentType::Invoice,
+        issue_date: DateOnly::new("2026-05-26").unwrap(),
+        tax_point_date: None,
+        due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+        document_number: DocumentNumber::new("DTE-34-0001").unwrap(),
+        currency: Iso4217Code::new("CLP").unwrap(),
+        supplier: chilean_party("Proveedor SpA", ISSUER_RUT, "Santiago", "RM"),
+        customer: chilean_party("Cliente Limitada", "77654321-0", "Valparaíso", "VS"),
+        payee: None,
+        payment_terms: None,
+        payment_instructions: Vec::new(),
+        lines: vec![DocumentLine {
+            id: "1".to_owned(),
+            description: "Servicio exento de IVA (exportación)".to_owned(),
+            quantity: DecimalValue::new(Decimal::from(1)),
+            unit_code: Some("EA".to_owned()),
+            unit_price: amt(10000),
+            line_extension_amount: amt(10000),
+            // Exempt category, not the standard-rated `S`.
+            tax_category: Some("E".to_owned()),
+            extensions: Vec::new(),
+        }],
+        tax_summary: vec![TaxCategorySummary {
+            category_code: "E".to_owned(),
+            taxable_amount: amt(10000),
+            tax_amount: amt(0),
+            tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+        }],
+        monetary_total: MonetaryTotal {
+            // No IVA: tax-inclusive == tax-exclusive == net.
+            line_extension_amount: amt(10000),
+            tax_exclusive_amount: amt(10000),
+            tax_inclusive_amount: amt(10000),
+            allowance_total_amount: None,
+            charge_total_amount: None,
+            prepaid_amount: None,
+            payable_amount: amt(10000),
+        },
+        attachments: Vec::new(),
+        references: Vec::new(),
+        notes: Vec::new(),
+        extensions: Vec::new(),
+        meta: DocumentMeta {
+            tenant_id: TENANT.to_owned(),
+            trace_id: TRACE.to_owned(),
+            source_system: Some("e2e".to_owned()),
+        },
+    })
+    .unwrap()
+}
+
+/// A two-line affected **Factura Electrónica (tipo 33)**: CLP 100.00 + 250.00
+/// net = 350.00, 19% IVA = 66.50, payable 416.50.
+fn chilean_multiline_invoice() -> CommercialDocument {
+    CommercialDocument::new(CommercialDocumentParts {
+        schema_version: SchemaVersion::default(),
+        id: DocumentId::new("doc-cl-e2e-multiline-1").unwrap(),
+        document_type: DocumentType::Invoice,
+        issue_date: DateOnly::new("2026-05-26").unwrap(),
+        tax_point_date: None,
+        due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+        document_number: DocumentNumber::new("DTE-33-0002").unwrap(),
+        currency: Iso4217Code::new("CLP").unwrap(),
+        supplier: chilean_party("Proveedor SpA", ISSUER_RUT, "Santiago", "RM"),
+        customer: chilean_party("Cliente Limitada", "77654321-0", "Valparaíso", "VS"),
+        payee: None,
+        payment_terms: None,
+        payment_instructions: Vec::new(),
+        lines: vec![
+            DocumentLine {
+                id: "1".to_owned(),
+                description: "Servicios de consultoría".to_owned(),
+                quantity: DecimalValue::new(Decimal::from(1)),
+                unit_code: Some("EA".to_owned()),
+                unit_price: amt(10000),
+                line_extension_amount: amt(10000),
+                tax_category: Some("S".to_owned()),
+                extensions: Vec::new(),
+            },
+            DocumentLine {
+                id: "2".to_owned(),
+                description: "Licencia de software anual".to_owned(),
+                quantity: DecimalValue::new(Decimal::from(1)),
+                unit_code: Some("EA".to_owned()),
+                unit_price: amt(25000),
+                line_extension_amount: amt(25000),
+                tax_category: Some("S".to_owned()),
+                extensions: Vec::new(),
+            },
+        ],
+        tax_summary: vec![TaxCategorySummary {
+            category_code: "S".to_owned(),
+            taxable_amount: amt(35000),
+            tax_amount: amt(6650),
+            tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+        }],
+        monetary_total: MonetaryTotal {
+            line_extension_amount: amt(35000),
+            tax_exclusive_amount: amt(35000),
+            tax_inclusive_amount: amt(41650),
+            allowance_total_amount: None,
+            charge_total_amount: None,
+            prepaid_amount: None,
+            payable_amount: amt(41650),
+        },
+        attachments: Vec::new(),
+        references: Vec::new(),
+        notes: Vec::new(),
+        extensions: Vec::new(),
+        meta: DocumentMeta {
+            tenant_id: TENANT.to_owned(),
+            trace_id: TRACE.to_owned(),
+            source_system: Some("e2e".to_owned()),
+        },
+    })
+    .unwrap()
+}
+
+/// Pack a freshly-built bundle from a document + a submit envelope and return
+/// the `.ikb` bytes, so the credit-note / exempt scenarios reuse the same
+/// evidence machinery as the happy path without weakening `run_lifecycle`.
+fn pack_bundle(doc: &CommercialDocument, ubl_bytes: &[u8], envelope: &SiiSubmitEnvelope) -> Vec<u8> {
+    let canonical = canonicalize_value(&doc.to_value().unwrap())
+        .unwrap()
+        .into_bytes();
+    let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    artefacts.insert("canonical.json".to_owned(), canonical);
+    artefacts.insert("formats/ubl.xml".to_owned(), ubl_bytes.to_vec());
+    artefacts.insert(
+        "receipt.json".to_owned(),
+        serde_json::to_vec(envelope).unwrap(),
+    );
+    let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
+    let bundle = EvidenceBundle { manifest, artefacts };
+    pack(&bundle).unwrap()
+}
+
+/// Nota de Crédito (tipo 61): the corrective document serializes as a UBL
+/// `CreditNote` (TypeCode 381 — NOT 380), submits with the credit-note tipo
+/// code, and the whole chain still produces a verifiable evidence bundle.
+#[test]
+fn cl_credit_note_tipo_61_serializes_and_bundles() {
+    let doc = chilean_credit_note();
+    let ubl_xml = invoicekit_format_ubl::to_xml(&doc).unwrap();
+
+    // UBL CreditNote spine: root <CreditNote>, the 381 type code, and the
+    // credited-quantity element — none of which an Invoice (tipo 33) emits.
+    assert!(ubl_xml.contains("<CreditNote"), "root must be CreditNote");
+    assert!(
+        ubl_xml.contains(">381</cbc:CreditNoteTypeCode>"),
+        "Nota de Crédito must carry UBL CreditNoteTypeCode 381"
+    );
+    assert!(
+        ubl_xml.contains("<cbc:CreditedQuantity"),
+        "CreditNote lines use CreditedQuantity, not InvoicedQuantity"
+    );
+    assert!(
+        !ubl_xml.contains("InvoiceTypeCode"),
+        "a CreditNote must not emit InvoiceTypeCode 380"
+    );
+    assert!(ubl_xml.contains(">CLP</cbc:DocumentCurrencyCode>"));
+
+    let provider = MockSiiProvider::new();
+    let envelope = provider
+        .submit_dte(&submit_request_kind(
+            ubl_xml.clone().into_bytes(),
+            DteKind::NotaCredito,
+            7001,
+        ))
+        .unwrap();
+    assert_eq!(envelope.status, SiiStatus::Recibido);
+    assert_eq!(DteKind::NotaCredito.code(), 61);
+
+    let ikb = pack_bundle(&doc, &ubl_xml.into_bytes(), &envelope);
+    let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
+    assert!(report.ok, "credit-note evidence bundle must verify");
+}
+
+/// Factura Exenta (tipo 34): tax-exempt document carries a zero IVA amount and
+/// the `E` (exempt) tax category, so tax-inclusive equals the net. The payload
+/// submits under the exempt tipo code and bundles cleanly.
+#[test]
+fn cl_exempt_factura_tipo_34_has_zero_iva() {
+    let doc = chilean_exempt_invoice();
+
+    // The IR-level invariant that makes this a genuinely exempt document:
+    // a single `E`-category summary with no IVA, and payable == net.
+    let summary = &doc.tax_summary[0];
+    assert_eq!(summary.category_code, "E");
+    assert_eq!(summary.tax_amount, amt(0));
+    assert_eq!(doc.monetary_total.payable_amount, amt(10000));
+    assert_eq!(
+        doc.monetary_total.tax_inclusive_amount,
+        doc.monetary_total.tax_exclusive_amount,
+        "an exempt factura adds no IVA: inclusive == exclusive"
+    );
+
+    let ubl_xml = invoicekit_format_ubl::to_xml(&doc).unwrap();
+    // Standard-rated tipo 33 emits InvoiceTypeCode 380 too, so the
+    // distinguishing exempt evidence is the zero tax in the totals block.
+    assert!(ubl_xml.contains(">380</cbc:InvoiceTypeCode>"));
+    assert!(ubl_xml.contains(">CLP</cbc:DocumentCurrencyCode>"));
+
+    let provider = MockSiiProvider::new();
+    let envelope = provider
+        .submit_dte(&submit_request_kind(
+            ubl_xml.clone().into_bytes(),
+            DteKind::FacturaExenta,
+            8001,
+        ))
+        .unwrap();
+    assert_eq!(envelope.status, SiiStatus::Recibido);
+    assert_eq!(DteKind::FacturaExenta.code(), 34);
+
+    let ikb = pack_bundle(&doc, &ubl_xml.into_bytes(), &envelope);
+    let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
+    assert!(report.ok, "exempt-factura evidence bundle must verify");
+}
+
+/// Multi-line affected Factura (tipo 33): the UBL spine carries two
+/// `cac:InvoiceLine` blocks and the 19% IVA totals foot to CLP 416.50.
+#[test]
+fn cl_multiline_factura_carries_two_lines() {
+    let doc = chilean_multiline_invoice();
+    assert_eq!(doc.lines.len(), 2);
+    assert_eq!(doc.monetary_total.tax_inclusive_amount, amt(41650));
+
+    let ubl_xml = invoicekit_format_ubl::to_xml(&doc).unwrap();
+    let line_blocks = ubl_xml.matches("<cac:InvoiceLine").count();
+    assert_eq!(
+        line_blocks, 2,
+        "a two-line factura must emit two cac:InvoiceLine blocks, got {line_blocks}"
+    );
+    // Both line nets must be present in the serialized form.
+    assert!(ubl_xml.contains(">100.00<") && ubl_xml.contains(">250.00<"));
+
+    let provider = MockSiiProvider::new();
+    let envelope = provider
+        .submit_dte(&submit_request_kind(
+            ubl_xml.into_bytes(),
+            DteKind::FacturaElectronica,
+            9001,
+        ))
+        .unwrap();
+    assert_eq!(envelope.status, SiiStatus::Recibido);
+}
+
+/// Authority REJECTION path: when the SII refuses the *content* of an
+/// otherwise well-formed DTE, the verdict is `SiiStatus::Rechazado` carried
+/// in an `Ok` receipt envelope (with a glosa) — NOT an `Err`. The rejection
+/// is part of the audit trail and the evidence bundle still verifies.
+///
+/// This is the SII Aceptado/Rechazado verdict model:
+/// <https://www.sii.cl/factura_electronica/formato_dte.pdf>.
+#[test]
+fn cl_authority_rechazado_is_a_receipt_not_an_error() {
+    let doc = chilean_invoice();
+    let ubl_bytes = invoicekit_format_ubl::to_xml(&doc).unwrap().into_bytes();
+
+    let provider = MockSiiProvider::new().with_forced_status(SiiStatus::Rechazado);
+    // submit_dte returns Ok(...) even though the authority rejected the DTE.
+    let envelope = provider
+        .submit_dte(&submit_request(ubl_bytes.clone()))
+        .expect("authority rejection must NOT be an Err");
+    assert_eq!(envelope.status, SiiStatus::Rechazado);
+    assert!(
+        envelope
+            .glosa
+            .as_deref()
+            .is_some_and(|g| g.contains("RECHAZADO")),
+        "a Rechazado verdict must carry a SII glosa, got {:?}",
+        envelope.glosa
+    );
+    assert!(envelope.track_id.starts_with("SII-"));
+
+    // The rejection persists in a verifiable evidence bundle.
+    let ikb = pack_bundle(&doc, &ubl_bytes, &envelope);
+    let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
+    assert!(report.ok, "rejection-path evidence bundle must verify");
+}
+
+/// Invalid-identifier rejection: a RUT whose verifier-digit slot is malformed
+/// (the `K` placed inside the numeric body rather than the check-digit slot)
+/// fails the SII `NNNNNNNN-DV` shape and surfaces as `Err(BadRut)` BEFORE the
+/// wire — never as a receipt.
+///
+/// SII RUT shape: <https://www.sii.cl/preguntas_frecuentes/catastro/001_012_0586.htm>.
+#[test]
+fn cl_rejects_rut_with_misplaced_verifier_digit() {
+    let doc = chilean_invoice();
+    let ubl_bytes = invoicekit_format_ubl::to_xml(&doc).unwrap().into_bytes();
+    let provider = MockSiiProvider::new();
+
+    // `K` is only legal in the single check-digit slot, not in the body.
+    let mut bad = submit_request(ubl_bytes);
+    bad.issuer_rut = "7619K083-9".to_owned();
+    assert!(matches!(
+        provider.submit_dte(&bad).unwrap_err(),
+        SiiError::BadRut(_)
+    ));
+}
+
+/// Determinism beyond the happy path: the credit-note lifecycle is also
+/// byte-stable across repeated runs (same pinned timestamp + serial reset per
+/// provider).
+#[test]
+fn cl_credit_note_lifecycle_is_byte_deterministic() {
+    let build = || {
+        let doc = chilean_credit_note();
+        let ubl_bytes = invoicekit_format_ubl::to_xml(&doc).unwrap().into_bytes();
+        let provider = MockSiiProvider::new();
+        let envelope = provider
+            .submit_dte(&submit_request_kind(
+                ubl_bytes.clone(),
+                DteKind::NotaCredito,
+                7001,
+            ))
+            .unwrap();
+        pack_bundle(&doc, &ubl_bytes, &envelope)
+    };
+    assert_eq!(build(), build(), "credit-note lifecycle must be byte-stable");
 }

@@ -614,11 +614,7 @@ impl NfeReportProvider for MockNfeReportProvider {
 /// Returns [`NfeReportError::BadTaxId`] when the value is neither a valid CNPJ
 /// nor a valid CPF.
 pub fn validate_brazil_tax_id(id: &str) -> Result<(), NfeReportError> {
-    let digits: Vec<u8> = id
-        .chars()
-        .filter(char::is_ascii_digit)
-        .map(|c| c as u8 - b'0')
-        .collect();
+    let digits = digit_values(id);
     match digits.len() {
         14 if cnpj_check_digits_ok(&digits) => Ok(()),
         11 if cpf_check_digits_ok(&digits) => Ok(()),
@@ -636,11 +632,7 @@ pub fn validate_brazil_tax_id(id: &str) -> Result<(), NfeReportError> {
 /// Returns [`NfeReportError::BadTaxId`] when the value is not 14 digits or the
 /// check digits fail.
 pub fn validate_cnpj(cnpj: &str) -> Result<(), NfeReportError> {
-    let digits: Vec<u8> = cnpj
-        .chars()
-        .filter(char::is_ascii_digit)
-        .map(|c| c as u8 - b'0')
-        .collect();
+    let digits = digit_values(cnpj);
     if digits.len() == 14 && cnpj_check_digits_ok(&digits) {
         Ok(())
     } else {
@@ -658,11 +650,7 @@ pub fn validate_cnpj(cnpj: &str) -> Result<(), NfeReportError> {
 /// Returns [`NfeReportError::BadTaxId`] when the value is not 11 digits or the
 /// check digits fail.
 pub fn validate_cpf(cpf: &str) -> Result<(), NfeReportError> {
-    let digits: Vec<u8> = cpf
-        .chars()
-        .filter(char::is_ascii_digit)
-        .map(|c| c as u8 - b'0')
-        .collect();
+    let digits = digit_values(cpf);
     if digits.len() == 11 && cpf_check_digits_ok(&digits) {
         Ok(())
     } else {
@@ -670,6 +658,15 @@ pub fn validate_cpf(cpf: &str) -> Result<(), NfeReportError> {
             "expected a valid 11-digit CPF, got {cpf:?}"
         )))
     }
+}
+
+/// Extract the numeric value (`0..=9`) of every ASCII digit in `s`, dropping
+/// any punctuation. The shared front end of all three taxpayer-id validators.
+fn digit_values(s: &str) -> Vec<u8> {
+    s.chars()
+        .filter(char::is_ascii_digit)
+        .map(|c| c as u8 - b'0')
+        .collect()
 }
 
 /// CNPJ check-digit verification: two mod-11 digits over weights cycling
