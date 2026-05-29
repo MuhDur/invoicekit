@@ -1,62 +1,118 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-label="InvoiceKit: the open-source toolkit for the full B2B e-invoicing lifecycle, covering create, check, render, read, send, and archive.">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-label="InvoiceKit: the open-source toolkit for the full B2B e-invoicing lifecycle. A validated, signed invoice flows through create, check, render, read, send, and archive.">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#0d1b2a"/>
       <stop offset="1" stop-color="#10243a"/>
     </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7fafd"/>
+      <stop offset="1" stop-color="#e7eef6"/>
+    </linearGradient>
+    <linearGradient id="ribbon" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0" stop-color="#4dd0c0"/>
       <stop offset="1" stop-color="#4d9de0"/>
     </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#4dd0c0" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#4dd0c0" stop-opacity="0"/>
+    </radialGradient>
   </defs>
 
-  <!-- card -->
+  <!-- Card background; fills the whole canvas with its own dark fill so it reads on light + dark themes -->
   <rect x="0" y="0" width="1280" height="360" rx="20" fill="url(#bg)"/>
-  <rect x="0.5" y="0.5" width="1279" height="359" rx="20" fill="none" stroke="#1f3a52" stroke-width="1"/>
+  <rect x="0.5" y="0.5" width="1279" height="359" rx="19.5" fill="none" stroke="#27496b" stroke-width="1"/>
+  <circle cx="250" cy="250" r="240" fill="url(#glow)"/>
 
-  <!-- wordmark -->
-  <text x="72" y="118" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="68" font-weight="700" fill="#f5f8fb">Invoice<tspan fill="#4dd0c0">Kit</tspan></text>
+  <!-- ============ WORDMARK + TAGLINE (clear upper-left zone, nothing overlaps) ============ -->
+  <text x="80" y="112" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="68" font-weight="700" letter-spacing="-1">
+    <tspan fill="#f5f8fb">Invoice</tspan><tspan fill="#4dd0c0">Kit</tspan>
+  </text>
+  <text x="83" y="156" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="23" font-weight="400" fill="#aebfd0">One engine for the full e-invoicing lifecycle.</text>
+  <rect x="83" y="174" width="64" height="3" rx="1.5" fill="#f4b740"/>
 
-  <!-- accent rule -->
-  <rect x="74" y="142" width="132" height="5" rx="2.5" fill="url(#accent)"/>
+  <!-- ============ LIFECYCLE WAVE (confined to the lower band, well below the tagline) ============ -->
+  <!-- glow underlay then bright ribbon -->
+  <path d="M214 268 C 258 268, 256 262, 300 262 S 420 212, 464 212 S 584 262, 628 262 S 748 212, 792 212 S 912 262, 956 262 S 1076 212, 1120 212 L 1168 212"
+        fill="none" stroke="url(#ribbon)" stroke-width="13" stroke-linecap="round" opacity="0.12"/>
+  <path d="M214 268 C 258 268, 256 262, 300 262 S 420 212, 464 212 S 584 262, 628 262 S 748 212, 792 212 S 912 262, 956 262 S 1076 212, 1120 212 L 1168 212"
+        fill="none" stroke="url(#ribbon)" stroke-width="5" stroke-linecap="round" opacity="0.95"/>
+  <!-- amber arrowhead terminating the flow -->
+  <path d="M1174 212 l -15 -9 l 4 9 l -4 9 z" fill="#f4b740"/>
 
-  <!-- tagline -->
-  <text x="74" y="190" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="25" font-weight="400" fill="#aebfd0">One open-source engine for the full B2B e-invoicing lifecycle.</text>
-  <text x="74" y="222" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="25" font-weight="400" fill="#aebfd0">Rust core, native + WebAssembly delivery. Apache 2.0.</text>
-
-  <!-- lifecycle pipeline -->
-  <g font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="20" font-weight="600" text-anchor="middle">
-    <!-- connecting line -->
-    <line x1="118" y1="292" x2="1162" y2="292" stroke="#27496b" stroke-width="2"/>
-
-    <!-- node template: circle + label -->
-    <g fill="#4dd0c0">
-      <circle cx="118" cy="292" r="9" fill="#0d1b2a" stroke="#4dd0c0" stroke-width="2.5"/>
-      <circle cx="327" cy="292" r="9" fill="#0d1b2a" stroke="#4dd0c0" stroke-width="2.5"/>
-      <circle cx="536" cy="292" r="9" fill="#0d1b2a" stroke="#4dd0c0" stroke-width="2.5"/>
-      <circle cx="745" cy="292" r="9" fill="#0d1b2a" stroke="#4d9de0" stroke-width="2.5"/>
-      <circle cx="954" cy="292" r="9" fill="#0d1b2a" stroke="#4d9de0" stroke-width="2.5"/>
-      <circle cx="1162" cy="292" r="9" fill="#0d1b2a" stroke="#4d9de0" stroke-width="2.5"/>
-    </g>
-    <g fill="#dfe8f1">
-      <text x="118" y="338">create</text>
-      <text x="327" y="338">check</text>
-      <text x="536" y="338">render</text>
-      <text x="745" y="338">read</text>
-      <text x="954" y="338">send</text>
-      <text x="1162" y="338">archive</text>
+  <!-- ============ PROTAGONIST: a validated, signed invoice that starts the journey (lower-left) ============ -->
+  <g transform="translate(96 206)">
+    <!-- document with folded corner -->
+    <path d="M0 12 A12 12 0 0 1 12 0 L78 0 L104 26 L104 104 A12 12 0 0 1 92 116 L12 116 A12 12 0 0 1 0 104 Z" fill="url(#paper)" stroke="#c2cedd" stroke-width="1"/>
+    <path d="M78 0 L104 26 L78 26 Z" fill="#c2d2e2"/>
+    <!-- text rows -->
+    <rect x="16" y="40" width="52" height="6" rx="3" fill="#9fb2c5" opacity="0.7"/>
+    <rect x="16" y="54" width="70" height="6" rx="3" fill="#9fb2c5" opacity="0.55"/>
+    <rect x="16" y="68" width="44" height="6" rx="3" fill="#9fb2c5" opacity="0.55"/>
+    <!-- amber total bar -->
+    <rect x="16" y="92" width="70" height="11" rx="5.5" fill="#f4b740"/>
+    <!-- small verification seal badge on the corner: this invoice is checked + signed -->
+    <g transform="translate(96 18)">
+      <circle r="18" fill="#10243a" stroke="url(#ribbon)" stroke-width="3.5"/>
+      <polyline points="-7,1 -2,6 8,-7" fill="none" stroke="#4dd0c0" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
     </g>
   </g>
 
-  <!-- format chips (top-right) -->
-  <g font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#9fb3c8" text-anchor="middle">
-    <rect x="938" y="56" width="120" height="32" rx="16" fill="none" stroke="#27496b"/>
-    <text x="998" y="77">EN 16931</text>
-    <rect x="1068" y="56" width="124" height="32" rx="16" fill="none" stroke="#27496b"/>
-    <text x="1130" y="77">Peppol BIS</text>
-    <rect x="938" y="98" width="120" height="32" rx="16" fill="none" stroke="#27496b"/>
-    <text x="998" y="119">Factur-X</text>
-    <rect x="1068" y="98" width="124" height="32" rx="16" fill="none" stroke="#27496b"/>
-    <text x="1130" y="119">XRechnung</text>
+  <!-- ============ SIX LIFECYCLE NODES on the wave: create -> check -> render -> read -> send -> archive ============ -->
+  <g>
+    <!-- 1. create = pencil -->
+    <g transform="translate(300 262)">
+      <circle r="31" fill="#10243a" stroke="#27496b" stroke-width="1.5"/>
+      <circle r="31" fill="none" stroke="#4dd0c0" stroke-width="2" opacity="0.55"/>
+      <g transform="translate(-13 -13)" stroke="#eef3f8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <path d="M2 24 L2 18 L18 2 L24 8 L8 24 Z"/>
+        <path d="M14 6 L20 12" stroke="#4dd0c0"/>
+      </g>
+    </g>
+    <!-- 2. check = shield + checkmark -->
+    <g transform="translate(464 212)">
+      <circle r="31" fill="#10243a" stroke="#27496b" stroke-width="1.5"/>
+      <circle r="31" fill="none" stroke="#4dd0c0" stroke-width="2" opacity="0.6"/>
+      <path d="M0 -15 L14 -9 L14 3 C14 12 7 17 0 20 C-7 17 -14 12 -14 3 L-14 -9 Z" fill="none" stroke="#eef3f8" stroke-width="3" stroke-linejoin="round"/>
+      <polyline points="-6,1 -1,7 8,-5" fill="none" stroke="#4dd0c0" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <!-- 3. render = framed page -->
+    <g transform="translate(628 262)">
+      <circle r="31" fill="#10243a" stroke="#27496b" stroke-width="1.5"/>
+      <circle r="31" fill="none" stroke="#4d9de0" stroke-width="2" opacity="0.55"/>
+      <g stroke="#eef3f8" stroke-width="2.8" fill="none" stroke-linejoin="round">
+        <rect x="-11" y="-15" width="22" height="30" rx="3"/>
+        <line x1="-5" y1="-7" x2="5" y2="-7" stroke-linecap="round"/>
+        <line x1="-5" y1="0" x2="5" y2="0" stroke-linecap="round"/>
+        <line x1="-5" y1="7" x2="1" y2="7" stroke-linecap="round" stroke="#4dd0c0"/>
+      </g>
+    </g>
+    <!-- 4. read = eye / scan -->
+    <g transform="translate(792 212)">
+      <circle r="31" fill="#10243a" stroke="#27496b" stroke-width="1.5"/>
+      <circle r="31" fill="none" stroke="#4d9de0" stroke-width="2" opacity="0.6"/>
+      <g stroke="#eef3f8" stroke-width="2.8" fill="none" stroke-linecap="round">
+        <path d="M-16 0 C -9 -11, 9 -11, 16 0 C 9 11, -9 11, -16 0 Z"/>
+        <circle cx="0" cy="0" r="4.4" stroke="#4dd0c0"/>
+      </g>
+    </g>
+    <!-- 5. send = paper plane -->
+    <g transform="translate(956 262)">
+      <circle r="31" fill="#10243a" stroke="#27496b" stroke-width="1.5"/>
+      <circle r="31" fill="none" stroke="#4dd0c0" stroke-width="2" opacity="0.55"/>
+      <g transform="translate(0 1)">
+        <path d="M-16 -8 L16 0 L-16 12 L-10 0 Z" fill="#eef3f8"/>
+        <path d="M-10 0 L16 0 L-3 7 Z" fill="#9fb3c8"/>
+      </g>
+    </g>
+    <!-- 6. archive = padlock -->
+    <g transform="translate(1120 212)">
+      <circle r="31" fill="#10243a" stroke="#27496b" stroke-width="1.5"/>
+      <circle r="31" fill="none" stroke="#4dd0c0" stroke-width="2" opacity="0.6"/>
+      <g transform="translate(0 1)">
+        <path d="M-9 -3 L-9 -8 A9 9 0 0 1 9 -8 L9 -3" fill="none" stroke="#eef3f8" stroke-width="3" stroke-linecap="round"/>
+        <rect x="-12" y="-3" width="24" height="18" rx="3.5" fill="none" stroke="#eef3f8" stroke-width="3"/>
+        <circle cx="0" cy="5" r="2.6" fill="#4dd0c0"/>
+      </g>
+    </g>
   </g>
 </svg>
