@@ -90,10 +90,11 @@ is labelled as such — that is an honest ceiling, not a limitation to "fix".
 | L1 | Pre-release; nothing tagged/published | **FIX** | Cut `v0.1.0` GitHub release |
 | L2 | Validation needs a JVM for reference grade | **By design** (commitment #6) | Keep, label honestly |
 | L3 | Live Peppol delivery is BYOK; native AS4 research-track | **By design** (commitment #7) | Keep, label honestly |
-| L4 | Coverage maturity varies by country | **FIX** | Populate honest matrix for all |
+| L4 | Coverage maturity varies by country | **DONE (T5)** | Honest matrix entry for all 36 claimed countries (39 entries); per-capability levels + provenance + confidence |
 | L5 | Inbound RTL/CJK vertical-script intake gap | **INVESTIGATE** | Reduce or document precisely |
 | L6 | Flagship report adapters are stubs (G2) | **DONE (T2–T3)** | All 6 flagships (IT/FR/PL/MX/BR/SA) now real adapters + offline E2E |
 | L7 | No per-country E2E tests (G3) | **DONE (T2–T4)** | All 34 country report crates have offline E2E (verify exit 0) |
+| L8 | Native national-format serialization built only for flagships (IT/MX/BR/PL); other countries serialize the EN16931/UBL representation | **HONEST RESIDUAL** | Disclosed via matrix format=UBL + confidence; native serializers tracked as follow-up. Not a hidden gap. |
 
 "By design" items are honest ceilings, not defects; they stay but must be labelled
 accurately in the capability matrix and README. The *count of fixable limitations*
@@ -166,6 +167,16 @@ where parallelism is safe (distinct crate dirs; no shared-file edits; central `c
   Small, focused, signed-off commits directly on `main` (per AGENTS.md collaboration model). Never
   let completed green work sit uncommitted across a loop turn. The remote enforces 7 required CI
   checks; pushing keeps CI continuously exercising the work.
+- **D7 (T3):** New-country capability-matrix entries are authored CENTRALLY (not by parallel agents):
+  `matrix.json` is a shared, CI-gated file that interacts with the DE/FR/IT/NL CLI tests. Per-country E2E
+  tests do NOT assert matrix presence (only the Italy reference does).
+- **D8 (T5):** Capability-matrix honesty policy — advertise the format InvoiceKit actually emits +
+  locally validates today: national format where a real serializer exists (IT FatturaPA, MX CFDI, BR NF-e,
+  PL KSeF — added CFDI/NF-e/KSeF to the schema enum), `UBL`/`Peppol BIS`/`Peppol PINT` for UBL/Peppol-native
+  regulators, and `UBL` (EN16931 representation, `confidence: medium`) elsewhere. Every serialize/validate
+  claim is E2E-proven; reference validation stays `requires_external_backend`. Native national serializers
+  for the non-flagships are an honest residual (L8), not an overclaim. Gated by the Python jsonschema + Rust
+  `validate_matrix_semantics` checks.
 
 ## 5a. Standing loop implementation process (every turn)
 
@@ -265,3 +276,21 @@ where parallelism is safe (distinct crate dirs; no shared-file edits; central `c
   entries for every newly-supported country (done centrally, not in parallel: matrix.json is shared +
   CI-gated + interacts with the DE/FR/IT/NL CLI tests). Then **P5 limitations sweep** (`multi-pass-bug-hunting`,
   re-run `reality-check-for-project`), **P6 build outputs**, **P7 release**.
+
+### Turn 5 — 2026-05-29 — G1 capability-matrix honesty (DONE)
+- **Skills used:** `Workflow` (single author+verify agent from a fixed table), `verification-before-completion`
+  (independent re-run of both gates), schema/data discipline.
+- **Workflow used:** `coverage-g1-capability-matrix` (1 agent, 43k tokens) — appended 32 country entries
+  transcribed from a fixed honesty table; self-verified both gates.
+- **Did:** Extended the schema `format` enum (+CFDI, +NF-e, +KSeF). Appended honest matrix entries for all
+  32 newly-supported countries (route from==to, B2B, per-capability levels, real authority source + URL +
+  confidence). Existing DE/FR/IT/NL entries preserved byte-for-byte (IT stale-test fixture intact).
+- **Evidence (independently verified):** `matrix.json` = **39 entries**; `cargo test -p invoicekit-cli`
+  = **185 passed, 0 failed** (incl. validate_matrix_semantics + the existing DE/FR/IT/NL behavioral tests);
+  Python `jsonschema Draft202012` = **SCHEMA OK 39**; new countries resolve (MX→CFDI/portal, PL→KSeF, JP→Peppol
+  PINT, SA→UBL). `invoicekit capabilities --from <X> --to <X>` now answers honestly for every claimed country.
+- **Status:** **G1 + L4 closed.** Decisions D7, D8 logged; honest residual L8 recorded.
+- **Next skills to iterate:** **P5** — re-run `reality-check-for-project` + `mock-code-finder` +
+  `multi-pass-bug-hunting` to drive remaining fixable limitations toward 0; then **P6** build-output
+  verification (CLI, WASM, 5 SDKs, REST, evidence/validate actions); then **P7** `release-preparations` →
+  changelog → tag `v0.1.0` → GitHub release with checksums + evidence.

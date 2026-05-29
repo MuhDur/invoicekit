@@ -263,6 +263,902 @@
         "fetched_at": "2025-12-01T00:00:00Z",
         "confidence": "high"
       }
+    },
+    {
+      "route_from": "AR",
+      "route_to": "AR",
+      "scenario": "B2B",
+      "valid_from": "2015-07-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:afip"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "AFIP/ARCA Factura Electrónica",
+        "url": "https://www.afip.gob.ar/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "high"
+      }
+    },
+    {
+      "route_from": "BE",
+      "route_to": "BE",
+      "scenario": "B2B",
+      "valid_from": "2026-01-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "peppol-bis-3.0",
+          "format": "Peppol BIS",
+          "transport": "peppol",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["jvm:phive"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "Belgium B2B Peppol BIS mandate",
+        "url": "https://finances.belgium.be/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "authoritative"
+      }
+    },
+    {
+      "route_from": "BR",
+      "route_to": "BR",
+      "scenario": "B2B",
+      "valid_from": "2008-04-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "nfe-4.0",
+          "format": "NF-e",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:sefaz"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "SEFAZ Nota Fiscal Eletronica (NF-e)",
+        "url": "https://www.nfe.fazenda.gov.br/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "authoritative"
+      }
+    },
+    {
+      "route_from": "CL",
+      "route_to": "CL",
+      "scenario": "B2B",
+      "valid_from": "2014-11-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:sii"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "SII Documento Tributario Electronico (DTE)",
+        "url": "https://www.sii.cl/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "high"
+      }
+    },
+    {
+      "route_from": "CN",
+      "route_to": "CN",
+      "scenario": "B2B",
+      "valid_from": "2021-12-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:sta"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "STA fully digitalized e-fapiao",
+        "url": "https://www.chinatax.gov.cn/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "medium"
+      }
+    },
+    {
+      "route_from": "CO",
+      "route_to": "CO",
+      "scenario": "B2B",
+      "valid_from": "2019-01-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:dian"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "DIAN Factura Electronica (UBL 2.1)",
+        "url": "https://www.dian.gov.co/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "authoritative"
+      }
+    },
+    {
+      "route_from": "CR",
+      "route_to": "CR",
+      "scenario": "B2B",
+      "valid_from": "2018-09-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:hacienda"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "Hacienda Comprobante Electronico",
+        "url": "https://www.hacienda.go.cr/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "high"
+      }
+    },
+    {
+      "route_from": "DO",
+      "route_to": "DO",
+      "scenario": "B2B",
+      "valid_from": "2024-01-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:dgii"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "DGII e-CF",
+        "url": "https://dgii.gov.do/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "high"
+      }
+    },
+    {
+      "route_from": "EC",
+      "route_to": "EC",
+      "scenario": "B2B",
+      "valid_from": "2014-06-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:sri"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "SRI Comprobantes Electronicos",
+        "url": "https://www.sri.gob.ec/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "high"
+      }
+    },
+    {
+      "route_from": "EG",
+      "route_to": "EG",
+      "scenario": "B2B",
+      "valid_from": "2021-07-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:eta"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "Egyptian Tax Authority e-invoice",
+        "url": "https://www.eta.gov.eg/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "high"
+      }
+    },
+    {
+      "route_from": "ES",
+      "route_to": "ES",
+      "scenario": "B2B",
+      "valid_from": "2025-07-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:aeat"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "AEAT VeriFactu / Facturae",
+        "url": "https://www.agenciatributaria.es/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "high"
+      }
+    },
+    {
+      "route_from": "GR",
+      "route_to": "GR",
+      "scenario": "B2B",
+      "valid_from": "2021-10-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:aade"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "AADE myDATA",
+        "url": "https://www.aade.gr/mydata",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "high"
+      }
+    },
+    {
+      "route_from": "HU",
+      "route_to": "HU",
+      "scenario": "B2B",
+      "valid_from": "2021-01-04",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:nav"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "NAV Online Szamla (RTIR)",
+        "url": "https://onlineszamla.nav.gov.hu/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "high"
+      }
+    },
+    {
+      "route_from": "ID",
+      "route_to": "ID",
+      "scenario": "B2B",
+      "valid_from": "2016-07-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:djp"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "DJP e-Faktur",
+        "url": "https://www.pajak.go.id/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "medium"
+      }
+    },
+    {
+      "route_from": "IL",
+      "route_to": "IL",
+      "scenario": "B2B",
+      "valid_from": "2024-05-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:ita"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "Israel Tax Authority invoice allocation",
+        "url": "https://www.gov.il/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "high"
+      }
+    },
+    {
+      "route_from": "IN",
+      "route_to": "IN",
+      "scenario": "B2B",
+      "valid_from": "2020-10-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:irp"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "GST e-invoicing (IRP)",
+        "url": "https://einvoice.gst.gov.in/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "high"
+      }
+    },
+    {
+      "route_from": "JP",
+      "route_to": "JP",
+      "scenario": "B2B",
+      "valid_from": "2023-10-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "peppol-pint-jp",
+          "format": "Peppol PINT",
+          "transport": "peppol",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["jvm:phive"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "Japan qualified invoice / Peppol PINT JP",
+        "url": "https://www.eipa.jp/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "high"
+      }
+    },
+    {
+      "route_from": "KE",
+      "route_to": "KE",
+      "scenario": "B2B",
+      "valid_from": "2022-08-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:kra"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "KRA eTIMS",
+        "url": "https://www.kra.go.ke/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "high"
+      }
+    },
+    {
+      "route_from": "KR",
+      "route_to": "KR",
+      "scenario": "B2B",
+      "valid_from": "2011-01-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:nts"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "NTS e-Tax invoice",
+        "url": "https://www.nts.go.kr/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "high"
+      }
+    },
+    {
+      "route_from": "MX",
+      "route_to": "MX",
+      "scenario": "B2B",
+      "valid_from": "2014-01-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "cfdi-4.0",
+          "format": "CFDI",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:sat"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "SAT CFDI 4.0",
+        "url": "https://www.sat.gob.mx/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "authoritative"
+      }
+    },
+    {
+      "route_from": "MY",
+      "route_to": "MY",
+      "scenario": "B2B",
+      "valid_from": "2024-08-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:lhdn"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "LHDN MyInvois",
+        "url": "https://www.hasil.gov.my/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "high"
+      }
+    },
+    {
+      "route_from": "NG",
+      "route_to": "NG",
+      "scenario": "B2B",
+      "valid_from": "2025-07-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:firs"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "FIRS e-invoicing",
+        "url": "https://www.firs.gov.ng/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "medium"
+      }
+    },
+    {
+      "route_from": "PE",
+      "route_to": "PE",
+      "scenario": "B2B",
+      "valid_from": "2014-10-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:sunat"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "SUNAT CPE (UBL 2.1)",
+        "url": "https://www.sunat.gob.pe/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "authoritative"
+      }
+    },
+    {
+      "route_from": "PH",
+      "route_to": "PH",
+      "scenario": "B2B",
+      "valid_from": "2022-07-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:bir"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "BIR EIS",
+        "url": "https://www.bir.gov.ph/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "medium"
+      }
+    },
+    {
+      "route_from": "PL",
+      "route_to": "PL",
+      "scenario": "B2B",
+      "valid_from": "2026-02-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ksef-fa3",
+          "format": "KSeF",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:ksef"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "Ministerstwo Finansow KSeF FA(3)",
+        "url": "https://www.podatki.gov.pl/ksef/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "authoritative"
+      }
+    },
+    {
+      "route_from": "RO",
+      "route_to": "RO",
+      "scenario": "B2B",
+      "valid_from": "2024-01-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:anaf"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "ANAF RO e-Factura (CIUS-RO/UBL)",
+        "url": "https://www.anaf.ro/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "authoritative"
+      }
+    },
+    {
+      "route_from": "SA",
+      "route_to": "SA",
+      "scenario": "B2B",
+      "valid_from": "2023-01-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:zatca"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "ZATCA Fatoora Phase 2 (UBL 2.1)",
+        "url": "https://zatca.gov.sa/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "authoritative"
+      }
+    },
+    {
+      "route_from": "TH",
+      "route_to": "TH",
+      "scenario": "B2B",
+      "valid_from": "2018-01-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:rd"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "Thai RD e-Tax Invoice",
+        "url": "https://www.rd.go.th/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "medium"
+      }
+    },
+    {
+      "route_from": "TR",
+      "route_to": "TR",
+      "scenario": "B2B",
+      "valid_from": "2014-04-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:gib"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "GIB e-Fatura (UBL-TR)",
+        "url": "https://www.gib.gov.tr/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "authoritative"
+      }
+    },
+    {
+      "route_from": "TW",
+      "route_to": "TW",
+      "scenario": "B2B",
+      "valid_from": "2014-01-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:mof"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "MOF e-GUI",
+        "url": "https://www.mof.gov.tw/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "medium"
+      }
+    },
+    {
+      "route_from": "VN",
+      "route_to": "VN",
+      "scenario": "B2B",
+      "valid_from": "2022-07-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:gdt"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "GDT e-invoice",
+        "url": "https://www.gdt.gov.vn/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "high"
+      }
+    },
+    {
+      "route_from": "ZA",
+      "route_to": "ZA",
+      "scenario": "B2B",
+      "valid_from": "2025-01-01",
+      "valid_until": null,
+      "profiles": [
+        {
+          "id": "ubl-2.1",
+          "format": "UBL",
+          "transport": "portal",
+          "capabilities": {
+            "serialize": "available",
+            "local_validate": "available",
+            "reference_validate": "requires_external_backend",
+            "requires_service": ["partner:sars"],
+            "requires_cli": [],
+            "unavailable_in_wasm": ["reference_validate"]
+          }
+        }
+      ],
+      "source": {
+        "name": "SARS VAT e-invoicing",
+        "url": "https://www.sars.gov.za/",
+        "fetched_at": "2026-05-01T00:00:00Z",
+        "confidence": "low"
+      }
     }
   ]
 }

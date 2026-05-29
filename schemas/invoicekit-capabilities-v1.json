@@ -73,7 +73,7 @@
         },
         "format": {
           "type": "string",
-          "enum": ["UBL", "CII", "Factur-X", "XRechnung", "Peppol BIS", "Peppol PINT", "FatturaPA", "Chorus Pro"]
+          "enum": ["UBL", "CII", "Factur-X", "XRechnung", "Peppol BIS", "Peppol PINT", "FatturaPA", "Chorus Pro", "CFDI", "NF-e", "KSeF"]
         },
         "transport": {
           "type": "string",
