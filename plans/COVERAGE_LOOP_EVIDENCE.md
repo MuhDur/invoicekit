@@ -93,7 +93,7 @@ is labelled as such — that is an honest ceiling, not a limitation to "fix".
 | L4 | Coverage maturity varies by country | **FIX** | Populate honest matrix for all |
 | L5 | Inbound RTL/CJK vertical-script intake gap | **INVESTIGATE** | Reduce or document precisely |
 | L6 | Flagship report adapters are stubs (G2) | **DONE (T2–T3)** | All 6 flagships (IT/FR/PL/MX/BR/SA) now real adapters + offline E2E |
-| L7 | No per-country E2E tests (G3) | **FIX** | E2E for every country |
+| L7 | No per-country E2E tests (G3) | **DONE (T2–T4)** | All 34 country report crates have offline E2E (verify exit 0) |
 
 "By design" items are honest ceilings, not defects; they stay but must be labelled
 accurately in the capability matrix and README. The *count of fixable limitations*
@@ -246,3 +246,22 @@ where parallelism is safe (distinct crate dirs; no shared-file edits; central `c
 - **Next skills to iterate:** `Workflow` fan-out for **P3** — the ~28 Wave-2/3 built-out countries get
   offline E2E tests wired (serialize→validate→mock→evidence→verify) the same way; then the central
   **capability-matrix population** step (G1) for all newly-supported countries.
+
+### Turn 4 — 2026-05-29 — P3 Wave-2/3 offline E2E (28/28 DONE)
+- **Skills used:** `Workflow`/`dispatching-parallel-agents` (28-country pipeline), `testing-real-service-e2e-no-mocks`,
+  `verification-before-completion` (full-workspace re-verification), `ubs`.
+- **Workflow used:** `coverage-p3-wave23-e2e` (56 agents, 3.43M tokens, 971 tool uses) — per-country
+  implement→review→remediate. Result: **28/28 green, all passed review.**
+- **Did:** Added `tests/e2e_offline_lifecycle.rs` to all 28 built-out Wave-2/3 country crates (AR, BE, CL,
+  CN, CO, CR, DO, EC, EG, ES, GR, HU, ID, IL, IN, JP, KE, KR, MY, NG, PE, PH, RO, TH, TR, TW, VN, ZA),
+  each driving build→serialize(UBL/national)→mock-transmit→evidence-bundle→`verify_packed`(.ok)+determinism,
+  asserting country-specific receipt fields. Lib code untouched (adapters already existed); dev-deps only.
+- **Evidence (independently verified):** `cargo test --workspace` = **2056 passed, 0 failed** (was 1876
+  at baseline → +180); `cargo clippy --workspace --all-targets -- -D warnings` clean; UBS critical=0 across
+  all 34 E2E files; all 34 country crates have a real E2E with `manifest_for`+`pack`+`verify`.
+- **Status:** **G2, G3, L6, L7 closed.** Every country report crate (34) now has honest local-only
+  end-to-end support with an exhaustive offline lifecycle test.
+- **Next skills to iterate:** central **capability-matrix population** (G1/L4) — add honest matrix.json
+  entries for every newly-supported country (done centrally, not in parallel: matrix.json is shared +
+  CI-gated + interacts with the DE/FR/IT/NL CLI tests). Then **P5 limitations sweep** (`multi-pass-bug-hunting`,
+  re-run `reality-check-for-project`), **P6 build outputs**, **P7 release**.
