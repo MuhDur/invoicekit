@@ -292,17 +292,9 @@ async fn validate_invoice(
     State(state): State<RestShimState>,
     Path(id): Path<String>,
 ) -> Result<Json<EngineProcessResponse>, ApiError> {
-    let request = {
-        let invoices = state
-            .invoices
-            .read()
-            .map_err(|_| ApiError::internal("invoice store lock poisoned"))?;
-        invoices
-            .get(&id)
-            .ok_or_else(|| ApiError::not_found("invoice", &id))?
-            .engine_request
-            .clone()
-    };
+    let request = with_invoice(&state, &id, "invoice", |invoice| {
+        invoice.engine_request.clone()
+    })?;
     Ok(Json(engine_process_response(&request)))
 }
 
@@ -310,17 +302,7 @@ async fn render_invoice(
     State(state): State<RestShimState>,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let document = {
-        let invoices = state
-            .invoices
-            .read()
-            .map_err(|_| ApiError::internal("invoice store lock poisoned"))?;
-        invoices
-            .get(&id)
-            .ok_or_else(|| ApiError::not_found("invoice", &id))?
-            .document
-            .clone()
-    };
+    let document = with_invoice(&state, &id, "invoice", |invoice| invoice.document.clone())?;
     let pdf = invoicekit_render_pdf::render_commercial_document_invoice(&document)
         .map_err(|err| ApiError::internal(format!("PDF render failed: {err}")))?;
     let mut response = (StatusCode::OK, pdf).into_response();
@@ -400,17 +382,7 @@ async fn get_bundle(
     State(state): State<RestShimState>,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let bundle = {
-        let invoices = state
-            .invoices
-            .read()
-            .map_err(|_| ApiError::internal("invoice store lock poisoned"))?;
-        invoices
-            .get(&id)
-            .ok_or_else(|| ApiError::not_found("bundle", &id))?
-            .bundle
-            .clone()
-    };
+    let bundle = with_invoice(&state, &id, "bundle", |invoice| invoice.bundle.clone())?;
     let mut response = (StatusCode::OK, bundle).into_response();
     response.headers_mut().insert(
         header::CONTENT_TYPE,
@@ -550,6 +522,27 @@ fn ensure_invoice_exists(state: &RestShimState, id: &str) -> Result<(), ApiError
     } else {
         Err(ApiError::not_found("invoice", id))
     }
+}
+
+/// Acquire the invoice store read lock, look up `id`, and project the stored
+/// invoice through `project`, releasing the lock before returning.
+fn with_invoice<T>(
+    state: &RestShimState,
+    id: &str,
+    kind: &'static str,
+    project: impl FnOnce(&StoredInvoice) -> T,
+) -> Result<T, ApiError> {
+    let invoices = state
+        .invoices
+        .read()
+        .map_err(|_| ApiError::internal("invoice store lock poisoned"))?;
+    let projected = project(
+        invoices
+            .get(id)
+            .ok_or_else(|| ApiError::not_found(kind, id))?,
+    );
+    drop(invoices);
+    Ok(projected)
 }
 
 fn prefixed_hash(prefix: &str, parts: &[&[u8]]) -> String {

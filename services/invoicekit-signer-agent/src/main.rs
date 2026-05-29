@@ -24,7 +24,7 @@ use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use invoicekit_signer::{KeyRef, SignRequest, Signature, Signer, SoftwareSigner};
+use invoicekit_signer::{KeyRef, SignRequest, Signer, SoftwareSigner};
 use serde::{Deserialize, Serialize};
 
 const DAEMON_VERSION: &str = "0.1.0";
@@ -190,11 +190,6 @@ fn decode_base64_strict(input: &str) -> Result<Vec<u8>, String> {
         }
     }
     Ok(out)
-}
-
-// Stub so cargo doc builds; the daemon owns no public re-exports.
-fn _signature_phantom() -> Option<Signature> {
-    None
 }
 
 #[cfg(test)]

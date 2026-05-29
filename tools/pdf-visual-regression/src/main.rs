@@ -344,14 +344,15 @@ fn diff_pngs(baseline: &Path, candidate: &Path, out: Option<&Path>) -> Result<Di
     Ok(outcome)
 }
 
-fn diff_pngs_for_entry(
+/// Returns `Err(Error::Dimensions)` when the two buffers disagree on
+/// width or height. Both diff paths gate on identical dimensions
+/// before comparing pixels, so the check lives here once.
+fn ensure_same_dimensions(
+    baseline: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    candidate: &ImageBuffer<Rgba<u8>, Vec<u8>>,
     baseline_path: &Path,
     candidate_path: &Path,
-    relative_path: &str,
-    threshold: f64,
-) -> Result<DiffOutcome, Error> {
-    let baseline = open_rgba(baseline_path)?;
-    let candidate = open_rgba(candidate_path)?;
+) -> Result<(), Error> {
     if baseline.dimensions() != candidate.dimensions() {
         return Err(Error::Dimensions {
             baseline: baseline_path.to_path_buf(),
@@ -362,6 +363,18 @@ fn diff_pngs_for_entry(
             ah: candidate.height(),
         });
     }
+    Ok(())
+}
+
+fn diff_pngs_for_entry(
+    baseline_path: &Path,
+    candidate_path: &Path,
+    relative_path: &str,
+    threshold: f64,
+) -> Result<DiffOutcome, Error> {
+    let baseline = open_rgba(baseline_path)?;
+    let candidate = open_rgba(candidate_path)?;
+    ensure_same_dimensions(&baseline, &candidate, baseline_path, candidate_path)?;
     let pixel_count = u64::from(baseline.width()) * u64::from(baseline.height());
     let mut drifted: u64 = 0;
     for (a, b) in baseline.pixels().zip(candidate.pixels()) {
@@ -415,16 +428,7 @@ fn render_diff_image(
 ) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, Error> {
     let baseline = open_rgba(baseline_path)?;
     let candidate = open_rgba(candidate_path)?;
-    if baseline.dimensions() != candidate.dimensions() {
-        return Err(Error::Dimensions {
-            baseline: baseline_path.to_path_buf(),
-            candidate: candidate_path.to_path_buf(),
-            expected: baseline.width(),
-            eh: baseline.height(),
-            actual: candidate.width(),
-            ah: candidate.height(),
-        });
-    }
+    ensure_same_dimensions(&baseline, &candidate, baseline_path, candidate_path)?;
     let (w, h) = baseline.dimensions();
     let mut out: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::new(w, h);
     for (x, y, base_px) in baseline.enumerate_pixels() {

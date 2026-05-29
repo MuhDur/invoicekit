@@ -489,17 +489,18 @@ fn extract_line(line: &StripeInvoiceLine, exponent: u32) -> StripeLineSummary {
 }
 
 fn unit_price_for(line: &StripeInvoiceLine, quantity: i64, exponent: u32) -> String {
-    let Some(price) = line.price.as_ref() else {
-        return minor_units_to_decimal(line.amount / quantity, exponent);
-    };
-    if let Some(amount) = price.unit_amount {
-        return minor_units_to_decimal(amount, exponent);
+    if let Some(price) = line.price.as_ref() {
+        if let Some(amount) = price.unit_amount {
+            return minor_units_to_decimal(amount, exponent);
+        }
+        if let Some(decimal) = price.unit_amount_decimal.as_deref() {
+            // Stripe returns the value in the smallest unit as a
+            // decimal string; convert to the major unit.
+            return minor_units_decimal_to_major_decimal(decimal, exponent);
+        }
     }
-    if let Some(decimal) = price.unit_amount_decimal.as_deref() {
-        // Stripe returns the value in the smallest unit as a
-        // decimal string; convert to the major unit.
-        return minor_units_decimal_to_major_decimal(decimal, exponent);
-    }
+    // No price object, or one carrying neither field: derive the
+    // unit price from the line total divided by quantity.
     minor_units_to_decimal(line.amount / quantity, exponent)
 }
 

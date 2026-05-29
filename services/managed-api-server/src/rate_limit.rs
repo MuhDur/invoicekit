@@ -73,11 +73,7 @@ impl TokenBucketRateLimiter {
     /// New limiter with the default policy applied to every route.
     #[must_use]
     pub fn with_default_policy() -> Self {
-        Self {
-            default_policy: RateLimitPolicy::default(),
-            per_route_policy: HashMap::new(),
-            buckets: Mutex::new(HashMap::new()),
-        }
+        Self::with_policy(RateLimitPolicy::default())
     }
 
     /// New limiter with a custom default policy.
