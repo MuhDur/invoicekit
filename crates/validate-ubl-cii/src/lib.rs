@@ -661,6 +661,13 @@ impl XmlNode {
     }
 }
 
+/// Maximum element nesting depth accepted by [`parse_xml`]. Real EN 16931
+/// UBL/CII invoices nest ~15 levels; this generous cap prevents a maliciously
+/// deep document from overflowing the native stack during the recursive
+/// `Drop` of `XmlNode` or the recursive `descendants` traversal (an
+/// uncatchable abort that `catch_unwind` cannot guard).
+const MAX_NESTING_DEPTH: usize = 256;
+
 fn parse_xml(input: &str) -> Result<XmlNode, En16931Error> {
     let mut reader = Reader::from_str(input);
     reader.config_mut().trim_text(false);
@@ -691,6 +698,11 @@ fn parse_xml(input: &str) -> Result<XmlNode, En16931Error> {
                     namespace_uri,
                     read_attrs(reader.decoder(), &start, xml_version)?,
                 );
+                if stack.len() >= MAX_NESTING_DEPTH {
+                    return Err(En16931Error::MalformedXml(format!(
+                        "element nesting depth exceeds {MAX_NESTING_DEPTH}"
+                    )));
+                }
                 stack.push(node);
             }
             Event::Empty(start) => {
@@ -3897,6 +3909,24 @@ mod tests {
     #[test]
     fn crate_name_is_cargo_package_name() {
         assert_eq!(crate_name(), "invoicekit-validate-ubl-cii");
+    }
+
+    /// Maliciously deep XML must be rejected with a `MalformedXml` error rather
+    /// than overflowing the native stack (recursive `XmlNode` `Drop` /
+    /// `descendants` traversal) — an uncatchable abort. Regression for the
+    /// `parse_xml` unbounded-nesting denial of service.
+    #[test]
+    fn deeply_nested_xml_is_rejected_not_stack_overflow() {
+        let depth = MAX_NESTING_DEPTH + 50;
+        let mut xml = String::with_capacity(depth * 7);
+        for _ in 0..depth {
+            xml.push_str("<a>");
+        }
+        for _ in 0..depth {
+            xml.push_str("</a>");
+        }
+        let err = parse_xml(&xml).unwrap_err();
+        assert!(matches!(err, En16931Error::MalformedXml(_)), "got {err:?}");
     }
 
     #[test]

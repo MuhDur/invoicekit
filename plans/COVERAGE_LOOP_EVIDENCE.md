@@ -555,4 +555,32 @@ pipelines + per-crate isomorphic loops to no-op convergence.
 
 **PHASE 2 STATUS: CONVERGED.** Country coverage deepened, RTL/CJK intake closed, every crate passed the isomorphic
 quality evaluation to convergence, and a latent failing CI gate was fixed — all verified, committed, and pushed.
-Self-pacing halted (no further `ScheduleWakeup`).
+
+---
+
+## 11. Phase 3 — deep audit (correctness/security) + remaining residuals
+
+Principal re-invoked the directive → keep converging exhaustively. This phase applies the explicitly-named **audit /
+performance** skills and closes the residuals.
+
+### Turn 17 — 2026-05-29 — Deep bug audit (read-only) + flaky test + DoS hardening
+- **Workflow:** `coverage-p3-deep-bug-audit` (21 agents, READ-ONLY, no edits/builds — safe alongside a flaky-hunt):
+  multi-pass hunt → adversarial verify. **22 confirmed bugs (6 high, 9 medium, 7 low)**, mostly a DoS cluster in
+  `validate-ubl-cii` (the validator parses untrusted XML from the CLI).
+- **Flaky test (L10) FIXED:** flaky-hunt (10× full suite) caught `cli init::run_in_empty_dir_writes_scaffold_files`
+  failing 1/10 — a process-global `set_current_dir` race between concurrent tests. Added a `CWD_LOCK` test mutex
+  serializing the two cwd-mutating tests. Verified stable: cli 5/5 runs 0 failures.
+- **DoS hardening FIXED:** `validate-ubl-cii::parse_xml` had no nesting-depth cap → deeply-nested XML overflowed the
+  native stack (recursive `XmlNode` Drop / `descendants`) — an *uncatchable* abort. Added `MAX_NESTING_DEPTH = 256`
+  guard + regression test (`deeply_nested_xml_is_rejected_not_stack_overflow`).
+- **Canonical finding was a FALSE POSITIVE (reverted):** the audit claimed `canonical` should reject integer-valued
+  floats like `1e16` (as it rejects the integer token `10000000000000000`). Implemented + tested → it **broke
+  `rfc8785_member_ordering`** (the official RFC 8785 vector `1E30`). The I-JSON safe-integer guard scopes to integer
+  *tokens* by design; RFC 8785/JCS *formats* large floats. Reverted the change — central testing caught a bad "fix."
+- **Evidence:** `cargo test --workspace` = **2338 passed, 0 failed** (+1 depth-guard test); clippy `-D warnings` clean
+  on touched crates; UBS criticals 4→4 (no growth; the 4 are the pre-existing arithmetic-overflow panics, next).
+- **Decisions:** D17 — audit findings are adversarially verified AND centrally test-gated before landing; a "confirmed"
+  finding that breaks a standards-conformance test is a false positive and is reverted, not forced.
+- **Next:** fix the remaining **high-severity arithmetic-overflow DoS cluster** in `validate-ubl-cii` BR-CO/BR-AE rules
+  (panicking `Decimal` `*`/`+`/`-`/`.sum()` on attacker-controlled amounts → checked arithmetic emitting findings),
+  then triage the medium/low findings, then L8 native serializers.
