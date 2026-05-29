@@ -20,7 +20,7 @@ use invoicekit_ir::{
     PaymentInstructionKind, PaymentTerms, PostalAddress, Quantity, SchemaVersion,
     TaxCategorySummary,
 };
-use quick_xml::events::{attributes::AttrError, BytesStart, Event};
+use quick_xml::events::{attributes::AttrError, BytesDecl, BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
 use rust_decimal::Decimal;
 use serde::Serialize;
@@ -329,12 +329,7 @@ fn parse_xml_document(input: &str) -> Result<(CommercialDocument, usize), UblErr
                 state.text(&stack, &text)?;
             }
             Event::Decl(decl) => {
-                let version = decl.version()?;
-                xml_version = if version.as_ref() == b"1.1" {
-                    XmlVersion::Explicit1_1
-                } else {
-                    XmlVersion::Explicit1_0
-                };
+                xml_version = xml_version_from_decl(&decl)?;
             }
             Event::DocType(_) => {
                 return Err(UblError::UnsupportedRoot("DOCTYPE".to_owned()));
@@ -1462,12 +1457,7 @@ fn validate_preserved_fragment_xml(expected_element: &str, fragment: &str) -> Re
                 )?;
             }
             Event::Decl(decl) => {
-                let version = decl.version()?;
-                state.xml_version = if version.as_ref() == b"1.1" {
-                    XmlVersion::Explicit1_1
-                } else {
-                    XmlVersion::Explicit1_0
-                };
+                state.xml_version = xml_version_from_decl(&decl)?;
             }
             Event::DocType(_) => {
                 return invalid_preserved_top_level(expected_element, "DOCTYPE is not allowed");
@@ -1944,6 +1934,15 @@ fn read_element_end(
 ) -> Result<ParsedElement, UblError> {
     let frame = current.ok_or_else(|| UblError::UnsupportedRoot("missing namespace".to_owned()))?;
     read_element_name(raw, frame)
+}
+
+fn xml_version_from_decl(decl: &BytesDecl<'_>) -> Result<XmlVersion, UblError> {
+    let version = decl.version()?;
+    Ok(if version.as_ref() == b"1.1" {
+        XmlVersion::Explicit1_1
+    } else {
+        XmlVersion::Explicit1_0
+    })
 }
 
 fn read_element_name(raw: &[u8], frame: &NamespaceFrame) -> Result<ParsedElement, UblError> {

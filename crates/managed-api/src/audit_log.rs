@@ -324,9 +324,10 @@ impl AuditEventStore for InMemoryAuditStore {
         } else {
             None
         };
+        let count = page.len();
         Ok(AuditPage {
-            events: page.clone(),
-            count: page.len(),
+            events: page,
+            count,
             next_cursor,
         })
     }
@@ -352,28 +353,14 @@ pub fn handle_audit_query(
             requested: query.tenant_id.as_str().to_owned(),
         });
     }
-    if let Some(s) = &query.since {
-        if s.is_empty() {
-            return Err(AuditQueryError::Filter("since must not be blank".into()));
-        }
-    }
-    if let Some(u) = &query.until {
-        if u.is_empty() {
-            return Err(AuditQueryError::Filter("until must not be blank".into()));
-        }
-    }
-    if let Some(k) = &query.target_kind {
-        if k.is_empty() {
-            return Err(AuditQueryError::Filter(
-                "target_kind must not be blank".into(),
-            ));
-        }
-    }
-    if let Some(i) = &query.target_id {
-        if i.is_empty() {
-            return Err(AuditQueryError::Filter(
-                "target_id must not be blank".into(),
-            ));
+    for (value, field) in [
+        (&query.since, "since"),
+        (&query.until, "until"),
+        (&query.target_kind, "target_kind"),
+        (&query.target_id, "target_id"),
+    ] {
+        if value.as_deref().is_some_and(str::is_empty) {
+            return Err(AuditQueryError::Filter(format!("{field} must not be blank")));
         }
     }
 

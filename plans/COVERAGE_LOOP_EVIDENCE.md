@@ -667,7 +667,7 @@ performance** skills and closes the residuals.
 | RTL/CJK intake | ✅ L5 closed (Unicode-bidi + CJK vertical, 15 tests) |
 | Full end-to-end test coverage | ✅ 2404 tests, every country crate has offline E2E |
 | Skill matrix + skills-used log | ✅ §4 + per-turn entries |
-| Code quality (simplify-and-refactor) | ✅ all 109 crates evaluated to convergence |
+| Code quality (simplify-and-refactor) | ✅ all 109 crates converged (Waves QA/QB/QC); T28 swept the 22 campaign-touched crates — 10 isomorphic levers applied, 12 honest no-ops, 0 flagged; no Score≥2.0 within-crate candidate remains |
 | Audit skills (multi-pass bug hunt) | ✅ CONVERGED (T27): 51 bugs fixed (R1 22, R2 9, R3 9, class-sweep 10, int-arith 1); 6 dangerous classes all at literal zero (273 sites triaged across two confirming sweeps); trend 22→9→9→0 |
 | Performance | ✅ already engineered + CI-gated + budgeted (D19) |
 | Release / build outputs | ✅ v0.1.1 published, all artifacts |
@@ -847,3 +847,41 @@ performance** skills and closes the residuals.
 - **Skills used:** `multi-pass-bug-hunting` (integer-arithmetic class), `verification-before-completion`.
 - **Audit phase CLOSED.** Pivot to the deferred D20 strand: targeted `simplify-and-refactor-code-isomorphically`
   over the guard/helper code added across the campaign (the parallel code-quality directive).
+
+### Turn 28 — 2026-05-29 — Isomorphic simplification pass over the 22 campaign-touched crates
+- **`simplify-and-refactor-code-isomorphically`** run per-crate over the 22 crates the audit campaign touched
+  (each agent: baseline → map duplication/AI-slop → score ≥2.0 → isomorphism-proof → Edit-only collapse → verify;
+  honest no-op where already minimal; cross-crate dup noted, not acted on). **10 crates applied one lever each,
+  12 honest no-ops, 0 flagged** by adversarial review.
+- **Levers applied (all single-lever, behaviour-preserving, golden-identical):**
+  - `archive` — collapse the S3 + Azure `store`/`retrieve`/`exists` bodies into 3 crate-private generics.
+  - `cli` — extract `parse_and_load` (dedup the parse-args + load-credentials preamble shared by doctor/show).
+  - `transmit-peppol-native-as4` — 2 extractions of duplicated envelope-building spans.
+  - `transmit-peppol-partner` — remove a dead test variable.
+  - `intake-pdf` — extract `operand_pair(op)` for the Td/TD text-positioning operators.
+  - `report-gr-mydata` — collapse two duplicated tax-summary blocks.
+  - `format-ubl` — extract `xml_version_from_decl` (triplicated XML-declaration → `XmlVersion` mapping).
+  - `validate-ubl-cii` — remove an unused `ctx` parameter from `require_text` + its 14 call sites.
+  - `render-html` — extract `open_section(out, slug, heading)` (repeated section-open boilerplate).
+  - `managed-api` — drop a redundant `page.clone()`; collapse 4 identical empty-filter checks into one loop.
+  - No-ops (already minimal): canonical, evidence, peppol-smp-sml, reconcile, report-in-gst, intake-witness,
+    report-mx-cfdi, report-hu-nav, report-br-nfe, report-cl-dte, report-pl-ksef, report-sa-zatca.
+
+  | Metric | Before | After | Δ |
+  |---|---|---|---|
+  | Test pass count | 2456 | 2456 | **0** (isomorphic — no test added/dropped) |
+  | Clippy `-D warnings` | clean | clean | = |
+  | Goldens / byte-determinism | ✓ | ✓ | identical |
+  | LOC (11 files) | — | — | +199 / −193 ≈ **flat** (extractions carry doc-comments; win is dup + dead-code removal) |
+  | Crates with applied lever | — | 10 | duplication/dead-param eliminated in each |
+
+- **Cross-crate candidates NOTED, deliberately NOT acted on** (per the skill's caution on foundation/cross-crate
+  Risk + the marginal-Score hand-off rule): (a) a hex-codec clone (`blake3_hex` / hex encode-decode) spread across
+  cli/evidence/signer — a Tier-3 architectural extraction, modest LOC, not worth the coupling now; (b) the
+  `checked_*`/`try_fold` Decimal pattern across report/format crates — a `DecimalValue` checked-arithmetic API
+  would DRY it and harden the API, but it touches foundation `ir` for modest LOC; logged as a deferred ergonomic
+  enhancement (it does not affect correctness — the per-site fixes already drove the overflow class to zero).
+- **Skills used:** `simplify-and-refactor-code-isomorphically` (per-crate loop), `verification-before-completion`.
+- **Code-quality strand: CONVERGED.** The whole-workspace refactor converged earlier (Waves QA/QB/QC); this pass
+  swept the campaign's new code, applied the 10 worthwhile within-crate simplifications, and honestly found the
+  remainder are no-ops or below-threshold cross-crate candidates. No Score ≥2.0 within-crate candidate remains.

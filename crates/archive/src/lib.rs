@@ -268,34 +268,23 @@ impl<S> S3ObjectLockArchive<S> {
 
 impl<S: ObjectLockStore> Archive for S3ObjectLockArchive<S> {
     fn store(&self, bundle: &EvidenceBundle) -> Result<ArchiveId, ArchiveError> {
-        let bytes = pack(bundle)?;
-        let hash = invoicekit_evidence::blake3_hex(&bytes);
-        let key = object_key(&self.key_prefix, &hash);
-        let receipt = self.store.put_locked_object(ObjectLockPut {
-            backend: ObjectLockBackend::S3ObjectLock,
-            namespace: self.bucket.clone(),
-            key: key.clone(),
-            body: bytes,
-            content_hash: hash,
-            retention: self.retention.clone(),
-        })?;
-        Ok(scheme_archive_id(
+        put_locked_bundle(
+            &self.store,
             "s3",
+            ObjectLockBackend::S3ObjectLock,
             &self.bucket,
-            &key,
-            receipt.version_id.as_deref(),
-        ))
+            &self.key_prefix,
+            &self.retention,
+            bundle,
+        )
     }
 
     fn retrieve(&self, id: &ArchiveId) -> Result<EvidenceBundle, ArchiveError> {
-        let key = object_from_scheme_id("s3", &self.bucket, id)?;
-        let bytes = self.store.get_locked_object(&self.bucket, &key)?;
-        unpack(&bytes).map_err(|err| ArchiveError::Drift(err.to_string()))
+        get_locked_bundle(&self.store, "s3", &self.bucket, id)
     }
 
     fn exists(&self, id: &ArchiveId) -> bool {
-        object_from_scheme_id("s3", &self.bucket, id)
-            .is_ok_and(|key| self.store.locked_object_exists(&self.bucket, &key))
+        locked_bundle_exists(&self.store, "s3", &self.bucket, id)
     }
 }
 
@@ -333,35 +322,80 @@ impl<S> AzureWormArchive<S> {
 
 impl<S: ObjectLockStore> Archive for AzureWormArchive<S> {
     fn store(&self, bundle: &EvidenceBundle) -> Result<ArchiveId, ArchiveError> {
-        let bytes = pack(bundle)?;
-        let hash = invoicekit_evidence::blake3_hex(&bytes);
-        let blob = object_key(&self.blob_prefix, &hash);
-        let receipt = self.store.put_locked_object(ObjectLockPut {
-            backend: ObjectLockBackend::AzureWorm,
-            namespace: self.container.clone(),
-            key: blob.clone(),
-            body: bytes,
-            content_hash: hash,
-            retention: self.retention.clone(),
-        })?;
-        Ok(scheme_archive_id(
+        put_locked_bundle(
+            &self.store,
             "azure",
+            ObjectLockBackend::AzureWorm,
             &self.container,
-            &blob,
-            receipt.version_id.as_deref(),
-        ))
+            &self.blob_prefix,
+            &self.retention,
+            bundle,
+        )
     }
 
     fn retrieve(&self, id: &ArchiveId) -> Result<EvidenceBundle, ArchiveError> {
-        let blob = object_from_scheme_id("azure", &self.container, id)?;
-        let bytes = self.store.get_locked_object(&self.container, &blob)?;
-        unpack(&bytes).map_err(|err| ArchiveError::Drift(err.to_string()))
+        get_locked_bundle(&self.store, "azure", &self.container, id)
     }
 
     fn exists(&self, id: &ArchiveId) -> bool {
-        object_from_scheme_id("azure", &self.container, id)
-            .is_ok_and(|blob| self.store.locked_object_exists(&self.container, &blob))
+        locked_bundle_exists(&self.store, "azure", &self.container, id)
     }
+}
+
+/// Shared `store` body for the object-lock backends. Packs the
+/// bundle, content-addresses it under `prefix`, writes it through
+/// `store` with the requested retention, and mints a
+/// `<scheme>://<namespace>/<object>` archive id.
+fn put_locked_bundle<S: ObjectLockStore>(
+    store: &S,
+    scheme: &str,
+    backend: ObjectLockBackend,
+    namespace: &str,
+    prefix: &str,
+    retention: &RetentionPolicy,
+    bundle: &EvidenceBundle,
+) -> Result<ArchiveId, ArchiveError> {
+    let bytes = pack(bundle)?;
+    let hash = invoicekit_evidence::blake3_hex(&bytes);
+    let object = object_key(prefix, &hash);
+    let receipt = store.put_locked_object(ObjectLockPut {
+        backend,
+        namespace: namespace.to_owned(),
+        key: object.clone(),
+        body: bytes,
+        content_hash: hash,
+        retention: retention.clone(),
+    })?;
+    Ok(scheme_archive_id(
+        scheme,
+        namespace,
+        &object,
+        receipt.version_id.as_deref(),
+    ))
+}
+
+/// Shared `retrieve` body for the object-lock backends: parse the
+/// object out of `id`, read it back, and verify on `unpack`.
+fn get_locked_bundle<S: ObjectLockStore>(
+    store: &S,
+    scheme: &str,
+    namespace: &str,
+    id: &ArchiveId,
+) -> Result<EvidenceBundle, ArchiveError> {
+    let object = object_from_scheme_id(scheme, namespace, id)?;
+    let bytes = store.get_locked_object(namespace, &object)?;
+    unpack(&bytes).map_err(|err| ArchiveError::Drift(err.to_string()))
+}
+
+/// Shared `exists` body for the object-lock backends.
+fn locked_bundle_exists<S: ObjectLockStore>(
+    store: &S,
+    scheme: &str,
+    namespace: &str,
+    id: &ArchiveId,
+) -> bool {
+    object_from_scheme_id(scheme, namespace, id)
+        .is_ok_and(|object| store.locked_object_exists(namespace, &object))
 }
 
 fn normalize_prefix(prefix: &str) -> String {

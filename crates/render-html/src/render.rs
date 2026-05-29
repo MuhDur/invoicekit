@@ -195,10 +195,17 @@ fn write_header(out: &mut String, doc: &CommercialDocument, title: &str) {
     out.push_str("</header>\n");
 }
 
+/// Open a `<section>` with an `aria-labelledby` heading. `slug` keys both
+/// the `aria-labelledby` reference and the `<h2 id>`; `heading` is the
+/// visible label. Emits exactly:
+/// `<section aria-labelledby="{slug}-heading">\n<h2 id="{slug}-heading">{heading}</h2>\n`.
+fn open_section(out: &mut String, slug: &str, heading: &str) {
+    let _ = writeln!(out, r#"<section aria-labelledby="{slug}-heading">"#);
+    let _ = writeln!(out, r#"<h2 id="{slug}-heading">{heading}</h2>"#);
+}
+
 fn write_parties(out: &mut String, doc: &CommercialDocument) {
-    out.push_str(
-        "<section aria-labelledby=\"parties-heading\">\n<h2 id=\"parties-heading\">Parties</h2>\n",
-    );
+    open_section(out, "parties", "Parties");
     out.push_str("<div class=\"parties\">\n");
     out.push_str("<div>\n<h3>Supplier</h3>\n");
     write_party_dl(out, &doc.supplier);
@@ -257,9 +264,7 @@ fn write_address_block(out: &mut String, addr: &PostalAddress) {
 }
 
 fn write_lines(out: &mut String, doc: &CommercialDocument) {
-    out.push_str(
-        "<section aria-labelledby=\"lines-heading\">\n<h2 id=\"lines-heading\">Line items</h2>\n",
-    );
+    open_section(out, "lines", "Line items");
     out.push_str("<table>\n<caption class=\"muted\">Document lines</caption>\n");
     out.push_str(
         "<thead><tr>\n<th scope=\"col\">#</th>\n<th scope=\"col\">Description</th>\n<th scope=\"col\" class=\"num\">Qty</th>\n<th scope=\"col\" class=\"num\">Unit price</th>\n<th scope=\"col\" class=\"num\">Amount</th>\n</tr></thead>\n",
@@ -353,9 +358,7 @@ fn write_payment(out: &mut String, doc: &CommercialDocument) {
     if doc.payment_terms.is_none() && doc.payment_instructions.is_empty() {
         return;
     }
-    out.push_str(
-        "<section aria-labelledby=\"payment-heading\">\n<h2 id=\"payment-heading\">Payment</h2>\n",
-    );
+    open_section(out, "payment", "Payment");
     if let Some(terms) = &doc.payment_terms {
         let _ = writeln!(
             out,
@@ -392,9 +395,7 @@ fn write_notes(out: &mut String, doc: &CommercialDocument) {
     if doc.notes.is_empty() {
         return;
     }
-    out.push_str(
-        "<section aria-labelledby=\"notes-heading\">\n<h2 id=\"notes-heading\">Notes</h2>\n",
-    );
+    open_section(out, "notes", "Notes");
     for note in &doc.notes {
         let _ = writeln!(
             out,

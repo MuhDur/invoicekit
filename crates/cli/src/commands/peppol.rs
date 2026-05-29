@@ -75,20 +75,31 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
     Ok(Args { credentials, json })
 }
 
-fn run_doctor(argv: &[String]) -> ExitCode {
+/// Parse argv and load the referenced BYOK credentials, shared by the
+/// `doctor` and `show` runners. On failure the operator-facing error is
+/// printed here and the caller returns the carried [`ExitCode`].
+fn parse_and_load(argv: &[String]) -> Result<(Args, PeppolCredentials), ExitCode> {
     let parsed = match parse_args(argv) {
         Ok(a) => a,
         Err(msg) => {
             eprintln!("{msg}\n\n{USAGE}");
-            return ExitCode::from(2);
+            return Err(ExitCode::from(2));
         }
     };
     let creds = match PeppolCredentials::from_json_file(&parsed.credentials) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("failed to load credentials: {e}");
-            return ExitCode::from(2);
+            return Err(ExitCode::from(2));
         }
+    };
+    Ok((parsed, creds))
+}
+
+fn run_doctor(argv: &[String]) -> ExitCode {
+    let (parsed, creds) = match parse_and_load(argv) {
+        Ok(v) => v,
+        Err(code) => return code,
     };
     let fs = StdFs;
     let doctor = PeppolDoctor::new(&fs);
@@ -130,19 +141,9 @@ fn print_report_human(report: &invoicekit_transmit_peppol_byok::DoctorReport) {
 }
 
 fn run_show(argv: &[String]) -> ExitCode {
-    let parsed = match parse_args(argv) {
-        Ok(a) => a,
-        Err(msg) => {
-            eprintln!("{msg}\n\n{USAGE}");
-            return ExitCode::from(2);
-        }
-    };
-    let creds = match PeppolCredentials::from_json_file(&parsed.credentials) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("failed to load credentials: {e}");
-            return ExitCode::from(2);
-        }
+    let (_parsed, creds) = match parse_and_load(argv) {
+        Ok(v) => v,
+        Err(code) => return code,
     };
     // Never echo passphrases, even if accidentally set. The
     // `key_passphrase_env` field is only the NAME of the env var

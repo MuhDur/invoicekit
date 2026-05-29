@@ -14,9 +14,10 @@ use quick_xml::{Reader, XmlVersion};
 
 use crate::{
     decode_xml_name, read_element_end, read_element_start, split_qname, top_level_coverage,
-    NamespaceFrame, ParsedElement, UblDocumentKind, UblError, UBL_2_1_CREDIT_NOTE_SCHEMA_URI,
-    UBL_2_1_INVOICE_SCHEMA_URI, UBL_CAC_NAMESPACE_URI, UBL_CBC_NAMESPACE_URI,
-    UBL_CREDIT_NOTE_NAMESPACE_URI, UBL_EXT_NAMESPACE_URI, UBL_INVOICE_NAMESPACE_URI,
+    xml_version_from_decl, NamespaceFrame, ParsedElement, UblDocumentKind, UblError,
+    UBL_2_1_CREDIT_NOTE_SCHEMA_URI, UBL_2_1_INVOICE_SCHEMA_URI, UBL_CAC_NAMESPACE_URI,
+    UBL_CBC_NAMESPACE_URI, UBL_CREDIT_NOTE_NAMESPACE_URI, UBL_EXT_NAMESPACE_URI,
+    UBL_INVOICE_NAMESPACE_URI,
 };
 
 const SCHEMA_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/schemas/ubl-2.1");
@@ -296,12 +297,7 @@ fn top_level_children(xml: &str) -> Result<Vec<String>, UblError> {
                 namespace_stack.pop();
             }
             Event::Decl(decl) => {
-                let version = decl.version()?;
-                xml_version = if version.as_ref() == b"1.1" {
-                    XmlVersion::Explicit1_1
-                } else {
-                    XmlVersion::Explicit1_0
-                };
+                xml_version = xml_version_from_decl(&decl)?;
             }
             Event::DocType(_) => return Err(UblError::UnsupportedRoot("DOCTYPE".to_owned())),
             Event::Text(_)

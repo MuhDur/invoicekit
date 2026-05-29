@@ -319,18 +319,12 @@ fn apply_operator(op: &Operation, state: &mut State, frags: &mut Vec<TextFragmen
             }
         }
         "Td" => {
-            if let (Some(tx), Some(ty)) = (
-                op.operands.first().and_then(as_number),
-                op.operands.get(1).and_then(as_number),
-            ) {
+            if let Some((tx, ty)) = operand_pair(op) {
                 state.translate_text(tx, ty);
             }
         }
         "TD" => {
-            if let (Some(tx), Some(ty)) = (
-                op.operands.first().and_then(as_number),
-                op.operands.get(1).and_then(as_number),
-            ) {
+            if let Some((tx, ty)) = operand_pair(op) {
                 state.leading = -ty;
                 state.translate_text(tx, ty);
             }
@@ -429,6 +423,16 @@ fn decode_string(obj: &Object) -> Option<String> {
         return Some(s.to_owned());
     }
     Some(bytes.iter().map(|b| char::from(*b)).collect())
+}
+
+/// Extract the first two operands of `op` as numbers. Returns `None`
+/// when either operand is missing or not a numeric object. Used by the
+/// `Td`/`TD` text-positioning operators, which both take an `(tx, ty)`
+/// displacement pair.
+fn operand_pair(op: &Operation) -> Option<(f32, f32)> {
+    let tx = op.operands.first().and_then(as_number)?;
+    let ty = op.operands.get(1).and_then(as_number)?;
+    Some((tx, ty))
 }
 
 #[allow(clippy::cast_precision_loss)]

@@ -888,7 +888,6 @@ fn fail_with_severity(
 }
 
 fn require_text(
-    ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
     rule_id: &str,
     term: &str,
@@ -896,7 +895,6 @@ fn require_text(
     value: Option<&str>,
     fix: &str,
 ) -> Result<(), En16931Error> {
-    let _ = ctx;
     if value.is_none() {
         fail(findings, rule_id, term, location, fix)?;
     }
@@ -1528,7 +1526,6 @@ fn br_01(
         ]),
     };
     require_text(
-        ctx,
         findings,
         "BR-01",
         "BT-24",
@@ -1547,7 +1544,6 @@ fn br_02(
         DocumentSyntax::Cii => ctx.root.path_text(&["ExchangedDocument", "ID"]),
     };
     require_text(
-        ctx,
         findings,
         "BR-02",
         "BT-1",
@@ -1570,7 +1566,6 @@ fn br_03(
             .and_then(|node| non_blank(node.text.as_str())),
     };
     require_text(
-        ctx,
         findings,
         "BR-03",
         "BT-2",
@@ -1592,7 +1587,6 @@ fn br_04(
         DocumentSyntax::Cii => ctx.root.path_text(&["ExchangedDocument", "TypeCode"]),
     };
     require_text(
-        ctx,
         findings,
         "BR-04",
         "BT-3",
@@ -1613,7 +1607,6 @@ fn br_05(
         }
     };
     require_text(
-        ctx,
         findings,
         "BR-05",
         "BT-5",
@@ -1642,7 +1635,6 @@ fn br_06(
         ]),
     };
     require_text(
-        ctx,
         findings,
         "BR-06",
         "BT-27",
@@ -1671,7 +1663,6 @@ fn br_07(
         ]),
     };
     require_text(
-        ctx,
         findings,
         "BR-07",
         "BT-44",
@@ -1733,7 +1724,6 @@ fn br_09(
         ]),
     };
     require_text(
-        ctx,
         findings,
         "BR-09",
         "BT-40",
@@ -1795,7 +1785,6 @@ fn br_11(
         ]),
     };
     require_text(
-        ctx,
         findings,
         "BR-11",
         "BT-55",
@@ -1818,7 +1807,6 @@ fn br_12(
         }
     };
     require_text(
-        ctx,
         findings,
         "BR-12",
         "BT-106",
@@ -1841,7 +1829,6 @@ fn br_13(
         }
     };
     require_text(
-        ctx,
         findings,
         "BR-13",
         "BT-109",
@@ -1864,7 +1851,6 @@ fn br_14(
         }
     };
     require_text(
-        ctx,
         findings,
         "BR-14",
         "BT-112",
@@ -1887,7 +1873,6 @@ fn br_15(
         }
     };
     require_text(
-        ctx,
         findings,
         "BR-15",
         "BT-115",

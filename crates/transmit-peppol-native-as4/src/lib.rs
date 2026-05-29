@@ -284,14 +284,7 @@ impl GatewayAdapter for NativeAs4Adapter {
     fn submit(&self, request: SubmitRequest) -> GatewayFuture<'_, GatewayReceipt> {
         let participant = Self::recipient_participant_for(&request);
         Box::pin(async move {
-            let xml = invoicekit_format_ubl::to_xml(&request.document).map_err(|e| {
-                GatewayError::new(
-                    GatewayErrorKind::InvalidRequest,
-                    GatewayOperation::Submit,
-                    format!("native-as4 adapter: UBL serialisation failed: {e}"),
-                    "fix the IR document so format-ubl can serialise it",
-                )
-            })?;
+            let xml = ubl_serialize(&request.document, GatewayOperation::Submit)?;
             let message_id = format!(
                 "ik:{}-{}",
                 request.context.tenant_id.as_str(),
@@ -315,21 +308,7 @@ impl GatewayAdapter for NativeAs4Adapter {
         // receipt; a follow-up bead wires the actual outbox lookup.
         let submission_id = request.submission_id.clone();
         Box::pin(async move {
-            GatewayReceipt::new(
-                GatewayOperation::Poll,
-                request.context.clone(),
-                submission_id,
-                GatewayStatus::Pending,
-                "1970-01-01T00:00:00Z",
-            )
-            .map_err(|e| {
-                GatewayError::new(
-                    GatewayErrorKind::MalformedReceipt,
-                    GatewayOperation::Poll,
-                    format!("native-as4 adapter receipt envelope rejected: {e}"),
-                    "report this as a native-as4 adapter bug",
-                )
-            })
+            pending_receipt(GatewayOperation::Poll, request.context.clone(), submission_id)
         })
     }
 
@@ -350,14 +329,7 @@ impl GatewayAdapter for NativeAs4Adapter {
         // full envelope + signing flow.
         let participant_owner = request.context.tenant_id.as_str().to_owned();
         Box::pin(async move {
-            let xml = invoicekit_format_ubl::to_xml(&request.corrected_document).map_err(|e| {
-                GatewayError::new(
-                    GatewayErrorKind::InvalidRequest,
-                    GatewayOperation::Correct,
-                    format!("native-as4 adapter: UBL serialisation failed: {e}"),
-                    "fix the IR document so format-ubl can serialise it",
-                )
-            })?;
+            let xml = ubl_serialize(&request.corrected_document, GatewayOperation::Correct)?;
             let recipient_participant = request
                 .corrected_document
                 .customer
@@ -428,6 +400,50 @@ fn build_as4_envelope_bytes(message_id: &[u8], soap_body: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Serialises an IR document to UBL XML, mapping a serialisation
+/// failure to the `InvalidRequest` gateway error both `submit` and
+/// `correct` raise. The remedy is identical bar the operation tag.
+fn ubl_serialize(
+    document: &invoicekit_ir::CommercialDocument,
+    operation: GatewayOperation,
+) -> Result<String, GatewayError> {
+    invoicekit_format_ubl::to_xml(document).map_err(|e| {
+        GatewayError::new(
+            GatewayErrorKind::InvalidRequest,
+            operation,
+            format!("native-as4 adapter: UBL serialisation failed: {e}"),
+            "fix the IR document so format-ubl can serialise it",
+        )
+    })
+}
+
+/// Builds the `Pending` receipt both the push-accepted path and the
+/// push-only `poll` return. The native AS4 sender never learns the
+/// final delivery status synchronously, so every locally minted
+/// receipt is `Pending` at the epoch sentinel timestamp; a rejected
+/// receipt envelope maps to a `MalformedReceipt` adapter bug.
+fn pending_receipt(
+    operation: GatewayOperation,
+    context: GatewayContext,
+    submission_id: GatewaySubmissionId,
+) -> Result<GatewayReceipt, GatewayError> {
+    GatewayReceipt::new(
+        operation,
+        context,
+        submission_id,
+        GatewayStatus::Pending,
+        "1970-01-01T00:00:00Z",
+    )
+    .map_err(|e| {
+        GatewayError::new(
+            GatewayErrorKind::MalformedReceipt,
+            operation,
+            format!("native-as4 adapter receipt envelope rejected: {e}"),
+            "report this as a native-as4 adapter bug",
+        )
+    })
+}
+
 fn decode_response(
     context: &GatewayContext,
     response: &TransportResponse,
@@ -446,21 +462,7 @@ fn decode_response(
                 "report this as a native-as4 adapter bug",
             )
         })?;
-        GatewayReceipt::new(
-            operation,
-            context.clone(),
-            submission_id,
-            GatewayStatus::Pending,
-            "1970-01-01T00:00:00Z",
-        )
-        .map_err(|e| {
-            GatewayError::new(
-                GatewayErrorKind::MalformedReceipt,
-                operation,
-                format!("native-as4 adapter receipt envelope rejected: {e}"),
-                "report this as a native-as4 adapter bug",
-            )
-        })
+        pending_receipt(operation, context.clone(), submission_id)
     } else {
         Err(GatewayError::new(
             map_status(response.status),

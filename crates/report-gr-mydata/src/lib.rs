@@ -282,14 +282,13 @@ fn line_vat(
     document: &CommercialDocument,
     line: &invoicekit_ir::DocumentLine,
 ) -> Result<(Decimal, u8, Option<u8>), MyDataXmlError> {
-    let Some(cat) = line.tax_category.as_ref() else {
-        return Ok((Decimal::ZERO, VAT_CATEGORY_EXCLUDING, Some(1)));
-    };
-    let Some(summary) = document
-        .tax_summary
-        .iter()
-        .find(|s| &s.category_code == cat)
-    else {
+    let summary = line.tax_category.as_ref().and_then(|cat| {
+        document
+            .tax_summary
+            .iter()
+            .find(|s| &s.category_code == cat)
+    });
+    let Some(summary) = summary else {
         return Ok((Decimal::ZERO, VAT_CATEGORY_EXCLUDING, Some(1)));
     };
     let rate = summary

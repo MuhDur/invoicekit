@@ -887,7 +887,6 @@ mod tests {
             legal_entity_id: "x".to_owned(),
             sandbox: false,
         };
-        let mock = MockHttpClient::new(vec![]);
         let adapter_storecove = PartnerPeppolAdapter::new(
             cfg_storecove,
             Box::new(StaticSecretResolver::new("k", None)),
@@ -897,7 +896,6 @@ mod tests {
             adapter_storecove.submit_url(),
             "https://api.storecove.com/api/v2/document_submissions"
         );
-        let _ = mock;
         let adapter_ecosio = PartnerPeppolAdapter::new(
             cfg_ecosio,
             Box::new(StaticSecretResolver::new("k", None)),
