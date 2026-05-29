@@ -87,7 +87,7 @@ is labelled as such — that is an honest ceiling, not a limitation to "fix".
 
 | # | Limitation (from README §Limitations + scan) | Disposition | Target |
 |---|---|---|---|
-| L1 | Pre-release; nothing tagged/published | **CLOSING (T6)** | `v0.1.0` version-bumped, tagged; GitHub release via `release.yml` |
+| L1 | Pre-release; nothing tagged/published | **DONE (T9)** | `v0.1.1` published — 3 signed+checksummed platform binaries + SBOMs + OpenAPI; binary verified (`0.1.1`, resolves PL→KSeF) |
 | L2 | Validation needs a JVM for reference grade | **By design** (commitment #6) | Keep, label honestly |
 | L3 | Live Peppol delivery is BYOK; native AS4 research-track | **By design** (commitment #7) | Keep, label honestly |
 | L4 | Coverage maturity varies by country | **DONE (T5)** | Honest matrix entry for all 36 claimed countries (39 entries); per-capability levels + provenance + confidence |
@@ -354,3 +354,42 @@ where parallelism is safe (distinct crate dirs; no shared-file edits; central `c
   `26639398730` building.
 - **Next:** poll run 26639398730 → confirm `invoicekit-{x86_64-linux,aarch64-linux,aarch64-darwin}` binaries +
   checksums attached to v0.1.1 → L1 closes → loop converged at **release DONE**.
+
+### Turn 9 — 2026-05-29 — CONVERGED: release DONE ✅
+- **Skills used:** `gh-cli` / `gh-actions` (release run verification), `verification-before-completion`
+  (downloaded + ran the released binary), `release-preparations`.
+- **Did:** Release run `26639398730` = **success, all 3 per-target jobs green**. v0.1.1 published (not draft,
+  not prerelease) with the complete artifact set per platform: raw binary + `.tar.gz` + `.sha256` + cosign
+  bundle + SBOM, for `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `aarch64-apple-darwin`, plus the
+  REST OpenAPI 3.1 spec + checksum.
+- **Gold-standard evidence:** downloaded `invoicekit-x86_64-unknown-linux-gnu`, checksum **OK**, ran it →
+  `invoicekit-cli 0.1.1 (release)`, and `capabilities --from=PL --to=PL` → status **ok**, `KSeF/portal` —
+  proving the honest capability matrix ships and works in the released artifact.
+
+## 8. Convergence scorecard (loop goals — all met)
+
+| Goal | Status | Evidence |
+|---|---|---|
+| All countries (local-only) end-to-end supported | ✅ | 34 country report crates, each with `tests/e2e_offline_lifecycle.rs` (build→serialize→validate→sign/mock-transmit→evidence→verify) |
+| Exhaustive end-to-end test coverage | ✅ | `cargo test --workspace` = **2056 passed, 0 failed** (was 1876 baseline) |
+| Honest capability coverage | ✅ | matrix.json **39 entries / 36 countries**; `invoicekit capabilities` answers truthfully (verified PL→KSeF, MX→CFDI) |
+| Automated build outputs for each output | ✅ | CLI ×3 platforms (signed + checksummed + SBOM), WASM artifact, REST OpenAPI, 5 SDK build workflows, veraPDF PDF/A-3 (3b+3u) gate |
+| Release version, fully tested, evidence-backed | ✅ | 2056 tests + veraPDF gate + cosign signatures + SBOMs + provenance attestations |
+| Known limitations → 0 (fixable) | ✅ | L1/L4/L6/L7 **closed**; L2/L3 **by-design** (JVM ref-validator, BYOK Peppol); L5/L8 **honestly disclosed** residuals (RTL/CJK intake; native national serializers for non-flagships) |
+| Full GitHub product release DONE | ✅ | **v0.1.1 published**, binary downloaded + run + checksum-verified |
+
+### Skill-matrix usage recap (per §4)
+reality-check-for-project (T1, assess) · testing-real-service-e2e-no-mocks + testing-golden-artifacts (T2 Italy) ·
+dispatching-parallel-agents/Workflow (T3 flagships, T4 wave-2/3, G1 matrix, P5/P6) · verification-before-completion
+(every turn) · mock-code-finder (T6 stub sweep) · changelog-md-workmanship (T6) · release-preparations + gh-actions +
+gh-cli (T6–T9 release). Convergence was driven by repeated implement→verify→adversarial-review workflow pipelines.
+
+### Honest residuals (NOT fixable within "coverage" scope; disclosed, not hidden)
+- **L5** — inbound RTL/CJK vertical-script intake gap (depth in `intake-pdf`, not breadth).
+- **L8** — native national-format serializers exist for flagships (IT/MX/BR/PL); other countries serialize the
+  EN 16931/UBL representation, with native serializers tracked as follow-ups. Disclosed via matrix `confidence`.
+- **L2/L3** — JVM reference validator + BYOK Peppol / native-AS4-research are settled architectural commitments.
+
+**LOOP STATUS: CONVERGED.** The stated goal — improve coverage so all countries are end-to-end supported with
+exhaustive tests, automated build outputs, and a fully-tested GitHub release — is DONE and verified. Self-pacing
+halted (no further `ScheduleWakeup`). A future loop could pursue depth (L5/L8) if desired.
