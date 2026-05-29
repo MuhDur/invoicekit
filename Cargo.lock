@@ -2804,6 +2804,18 @@ dependencies = [
 [[package]]
 name = "invoicekit-report-it-sdi"
 version = "0.0.0"
+dependencies = [
+ "invoicekit-canonical",
+ "invoicekit-evidence",
+ "invoicekit-ir",
+ "invoicekit-signer",
+ "invoicekit-signer-sdi",
+ "invoicekit-verify",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "invoicekit-report-jp-qis"

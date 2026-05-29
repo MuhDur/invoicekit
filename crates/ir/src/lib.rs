@@ -265,6 +265,12 @@ impl CountryCode {
         }
     }
 
+    /// Returns the country code as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
     fn validate(&self) -> Result<(), IrError> {
         if is_upper_ascii_code(&self.0, 2) {
             Ok(())

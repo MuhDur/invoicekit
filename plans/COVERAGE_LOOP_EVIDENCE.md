@@ -59,7 +59,7 @@ is labelled as such — that is an honest ceiling, not a limitation to "fix".
 |---|---|---|
 | Workspace members | 109 packages | `cargo metadata --no-deps` |
 | `cargo check --workspace --all-targets` | **PASS** (exit 0) | run Turn 1 |
-| `cargo test --workspace` | **PASS** (exit 0) | run Turn 1 |
+| `cargo test --workspace` | **PASS** — 1876 tests, 0 failures | run Turn 1 |
 | Beads | 281 total, **all closed**, 0 ready | `br stats` |
 | Capability matrix entries | **7** (DE, FR, IT, NL only) | `jq` on `crates/cli/data/capabilities/matrix.json` |
 | Country `report-*` crates | ~34 | `ls crates/report-*` |
@@ -160,15 +160,23 @@ where parallelism is safe (distinct crate dirs; no shared-file edits; central `c
   (e) appends a turn entry. Solo inline work only for trivial/sequential edits. This satisfies
   the principal's explicit instruction to make workflows part of the loop implementation process.
 
+- **D6 (T2, reinforced by principal):** **Commit AND push to GitHub at every green checkpoint**
+  whenever it makes sense — i.e., after each country/wave reaches green (`cargo test` + `clippy
+  -D warnings` pass for the touched crates and `cargo check --workspace --all-targets` is clean).
+  Small, focused, signed-off commits directly on `main` (per AGENTS.md collaboration model). Never
+  let completed green work sit uncommitted across a loop turn. The remote enforces 7 required CI
+  checks; pushing keeps CI continuously exercising the work.
+
 ## 5a. Standing loop implementation process (every turn)
 
 1. Read `COVERAGE_LOOP_EVIDENCE.md` (this file) + `AGENTS.md`.
 2. Choose the next phase chunk from §5.
 3. **Author a dynamic `Workflow`** for it (fan-out for discovery; pipeline `implement →
    cargo verify → adversarial review` for code). Distinct crate dirs only; reuse resolved deps.
-4. Verify centrally (`cargo test`/`clippy`); commit on `main` when green.
-5. Append a turn entry: skills used, workflow used, evidence, decisions, next skills.
-6. `ScheduleWakeup` to continue until convergence; stop only when §3 fixable limitations = 0,
+4. Verify centrally (`cargo test` + `cargo clippy -D warnings` + workspace `cargo check`).
+5. **Commit AND push to GitHub** the green chunk (D6) — focused commit on `main`.
+6. Append a turn entry: skills used, workflow used, evidence, decisions, next skills.
+7. `ScheduleWakeup` to continue until convergence; stop only when §3 fixable limitations = 0,
    all countries pass §1, build outputs green, and the GitHub release is cut.
 
 ---
@@ -185,3 +193,30 @@ where parallelism is safe (distinct crate dirs; no shared-file edits; central `c
 - **Decisions:** D1–D4.
 - **Next skills to iterate:** discovery workflow (builder's manual) → then `testing-real-service-e2e-no-mocks`
   to hand-build the Italy golden reference (P1).
+
+### Turn 2 — 2026-05-29 — Builder's manual + Italy golden reference (P1 DONE)
+- **Skills used:** `testing-real-service-e2e-no-mocks` (real-artifact offline E2E, no mocks of our own
+  code — only the deterministic SDI transport mock), `testing-golden-artifacts` (hand-rolled determinism
+  goldens), `verification-before-completion` (ran tests+clippy+workspace check before claiming done).
+- **Workflow used:** `coverage-discovery-builders-manual` (6 agents, 552k tokens) → wrote
+  `plans/_discovery_builders_manual.md` (the authoritative implementation reference for the fan-out).
+- **Did (P1 — Italy golden reference, hand-built per D2):**
+  - Real **IR→FatturaPA serializer** (`to_fattura_pa_xml`): deterministic `FatturaElettronica` FPR12 XML
+    (header CedentePrestatore/CessionarioCommittente, body DatiGenerali/DettaglioLinee/DatiRiepilogo),
+    XML-escaped, fixed element order. Genuinely country-specific (not the generic IR verbatim).
+  - **SDI report adapter**: `SdiReportRequest/Envelope/Report/Error`, `SdiReportProvider` trait,
+    `MockSdiReportProvider` **composing the existing `invoicekit-signer-sdi::MockSdiProvider`** (real
+    XAdES signature path + `IdentificativoSdI`), with real `validate_italian_tax_id` (P.IVA 11 / CF 16)
+    and `validate_progressivo` (1..=5 alnum). Rejection (NS) = receipt kind, NOT `Err`.
+  - **E2E test** `tests/e2e_offline_lifecycle.rs`: the first per-country E2E in the workspace — drives
+    build→serialize→validate→sign/transmit→evidence-bundle→`verify_packed`==ok, plus rejection path,
+    byte-determinism, and capability-matrix presence.
+  - **Foundation fix:** added `CountryCode::as_str()` to `invoicekit-ir` (was the only newtype missing it;
+    purely additive — unblocks every country serializer).
+- **Evidence:** `report-it-sdi` = 11 unit + 4 E2E + 1 doctest = **16 tests green**; `clippy -D warnings`
+  clean on it-sdi + ir; `ir` 34 tests green; `cargo check --workspace --all-targets` clean.
+- **Decisions:** D6 (commit/push cadence). Confirmed national-clearance pattern: report adapter composes
+  the country `signer-*` crate; live HTTP stays a follow-up `*-http` crate (honest ceiling).
+- **Next skills to iterate:** `dispatching-parallel-agents` / `Workflow` to fan out **P2 flagships**
+  (FR/PL/MX/BR/SA — each has a signer crate to compose, mirroring Italy), pipeline
+  `implement → cargo verify → adversarial review`. Then `repeatedly-apply-skill` over the per-country unit.
