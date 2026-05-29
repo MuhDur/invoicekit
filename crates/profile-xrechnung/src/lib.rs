@@ -107,7 +107,14 @@ fn project_for_xrechnung_3_x(
     document: &CommercialDocument,
     leitweg_id: Option<&str>,
 ) -> Result<CommercialDocument, XRechnungError> {
-    let mut top_level = collect_existing_top_level(document);
+    // Read the existing document-fields payload once; the
+    // `top_level` overrides are a subset of that same payload.
+    let mut payload = collect_existing_document_fields_payload(document);
+    let mut top_level = payload
+        .get("top_level")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     upsert_top_level(
         &mut top_level,
         "cbc:CustomizationID",
@@ -118,8 +125,6 @@ fn project_for_xrechnung_3_x(
         "cbc:ProfileID",
         &format!("<cbc:ProfileID>{XRECHNUNG_PROFILE_ID}</cbc:ProfileID>"),
     );
-    // Take the rest of the existing document-fields payload as is.
-    let mut payload = collect_existing_document_fields_payload(document);
     payload.insert("top_level".to_owned(), Value::Array(top_level));
     if let Some(id) = leitweg_id {
         // BuyerReference is written from the `buyer_reference`
@@ -139,17 +144,6 @@ fn project_for_xrechnung_3_x(
         .retain(|ext| ext.urn != UBL_DOCUMENT_FIELDS_EXTENSION_URN);
     projected.extensions.push(new_extension);
     Ok(projected)
-}
-
-fn collect_existing_top_level(document: &CommercialDocument) -> Vec<Value> {
-    document
-        .extensions
-        .iter()
-        .find(|ext| ext.urn == UBL_DOCUMENT_FIELDS_EXTENSION_URN)
-        .and_then(|ext| ext.payload.get("top_level"))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
 }
 
 fn collect_existing_document_fields_payload(

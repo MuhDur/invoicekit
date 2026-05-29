@@ -141,8 +141,13 @@ impl Money {
     /// Returns zero in the same currency.
     #[must_use]
     pub fn zero_like(&self) -> Self {
+        self.with_amount(Decimal::ZERO)
+    }
+
+    /// Build a new value with `amount` carrying this value's currency.
+    fn with_amount(&self, amount: Decimal) -> Self {
         Self {
-            amount: Decimal::ZERO,
+            amount,
             currency: self.currency.clone(),
         }
     }
@@ -176,10 +181,7 @@ impl Money {
             .amount
             .checked_add(other.amount)
             .ok_or(MoneyError::Overflow { operation: "add" })?;
-        Ok(Self {
-            amount,
-            currency: self.currency.clone(),
-        })
+        Ok(self.with_amount(amount))
     }
 
     /// Subtract another money value of the same currency.
@@ -204,10 +206,7 @@ impl Money {
             .amount
             .checked_sub(other.amount)
             .ok_or(MoneyError::Overflow { operation: "sub" })?;
-        Ok(Self {
-            amount,
-            currency: self.currency.clone(),
-        })
+        Ok(self.with_amount(amount))
     }
 
     /// Multiply by a scalar `Decimal` (typically a quantity or rate).
@@ -232,10 +231,7 @@ impl Money {
             .amount
             .checked_mul(scalar)
             .ok_or(MoneyError::Overflow { operation: "mul" })?;
-        Ok(Self {
-            amount,
-            currency: self.currency.clone(),
-        })
+        Ok(self.with_amount(amount))
     }
 
     /// Round the amount to `dp` decimal places using `mode`.
@@ -257,10 +253,7 @@ impl Money {
     pub fn round(&self, dp: u32, mode: Rounding) -> Self {
         let strategy = RoundingStrategy::from(mode);
         let amount = self.amount.round_dp_with_strategy(dp, strategy);
-        Self {
-            amount,
-            currency: self.currency.clone(),
-        }
+        self.with_amount(amount)
     }
 
     /// Allocate the amount across `ratios` using the Stripe-style banker's
@@ -382,10 +375,7 @@ impl Money {
             let amount = signed.checked_div(divisor).ok_or(MoneyError::Overflow {
                 operation: "allocate",
             })?;
-            out.push(Self {
-                amount,
-                currency: self.currency.clone(),
-            });
+            out.push(self.with_amount(amount));
         }
         Ok(out)
     }

@@ -1770,32 +1770,33 @@ fn write_invoicekit_metadata_context_parameter(
     Ok(())
 }
 
-fn cii_document_field_value<'a>(document: &'a CommercialDocument, key: &str) -> Option<&'a str> {
+/// Look up a single extension payload value by URN and key.
+fn extension_payload_value<'a>(
+    document: &'a CommercialDocument,
+    urn: &str,
+    key: &str,
+) -> Option<&'a Value> {
     document
         .extensions
         .iter()
-        .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
+        .find(|extension| extension.urn == urn)
         .and_then(|extension| extension.payload.get(key))
+}
+
+fn cii_document_field_value<'a>(document: &'a CommercialDocument, key: &str) -> Option<&'a str> {
+    extension_payload_value(document, mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN, key)
         .and_then(Value::as_str)
 }
 
 fn cii_document_field_values<'a>(document: &'a CommercialDocument, key: &str) -> Vec<&'a str> {
-    document
-        .extensions
-        .iter()
-        .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
-        .and_then(|extension| extension.payload.get(key))
+    extension_payload_value(document, mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN, key)
         .and_then(Value::as_array)
         .map(|items| items.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default()
 }
 
 fn profile_context_values<'a>(document: &'a CommercialDocument, key: &str) -> Vec<&'a str> {
-    document
-        .extensions
-        .iter()
-        .find(|extension| extension.urn == mapping::CII_PROFILE_CONTEXT_EXTENSION_URN)
-        .and_then(|extension| extension.payload.get(key))
+    extension_payload_value(document, mapping::CII_PROFILE_CONTEXT_EXTENSION_URN, key)
         .and_then(Value::as_array)
         .map(|items| items.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default()
@@ -1804,12 +1805,11 @@ fn profile_context_values<'a>(document: &'a CommercialDocument, key: &str) -> Ve
 fn profile_application_context_values(
     document: &CommercialDocument,
 ) -> Result<Vec<CiiApplicationContext>, CiiError> {
-    let Some(values) = document
-        .extensions
-        .iter()
-        .find(|extension| extension.urn == mapping::CII_PROFILE_CONTEXT_EXTENSION_URN)
-        .and_then(|extension| extension.payload.get("application_contexts"))
-    else {
+    let Some(values) = extension_payload_value(
+        document,
+        mapping::CII_PROFILE_CONTEXT_EXTENSION_URN,
+        "application_contexts",
+    ) else {
         return Ok(Vec::new());
     };
     let Some(items) = values.as_array() else {
@@ -1910,12 +1910,11 @@ fn cii_preserved_xml_values(
     container: &str,
     line_id: Option<&str>,
 ) -> Result<Vec<CiiPreservedXml>, CiiError> {
-    let Some(values) = document
-        .extensions
-        .iter()
-        .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
-        .and_then(|extension| extension.payload.get(CII_PRESERVED_XML_KEY))
-    else {
+    let Some(values) = extension_payload_value(
+        document,
+        mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN,
+        CII_PRESERVED_XML_KEY,
+    ) else {
         return Ok(Vec::new());
     };
     let Some(items) = values.as_array() else {
@@ -1950,12 +1949,11 @@ fn has_preserved_xml_at_or_below(
     container: &str,
     line_id: Option<&str>,
 ) -> Result<bool, CiiError> {
-    let Some(values) = document
-        .extensions
-        .iter()
-        .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
-        .and_then(|extension| extension.payload.get(CII_PRESERVED_XML_KEY))
-    else {
+    let Some(values) = extension_payload_value(
+        document,
+        mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN,
+        CII_PRESERVED_XML_KEY,
+    ) else {
         return Ok(false);
     };
     let Some(items) = values.as_array() else {

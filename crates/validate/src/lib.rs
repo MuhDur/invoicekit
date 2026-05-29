@@ -117,9 +117,7 @@ impl RuleId {
     /// ```
     pub fn new(value: impl Into<String>) -> Result<Self, ValidateError> {
         let value = value.into();
-        if value.trim().is_empty() {
-            return Err(ValidateError::BlankField("rule_id"));
-        }
+        non_blank(&value, "rule_id")?;
         Ok(Self(value))
     }
 
@@ -220,6 +218,17 @@ impl BusinessTerm {
             Self::BusinessTerm { code } | Self::BusinessGroup { code } => code,
         }
     }
+}
+
+/// Reject a blank (empty or whitespace-only) required string field.
+///
+/// Centralizes the `trim().is_empty()` guard shared by every value-object
+/// constructor so each call site reads `non_blank(&value, "field")?`.
+fn non_blank(value: &str, field: &'static str) -> Result<(), ValidateError> {
+    if value.trim().is_empty() {
+        return Err(ValidateError::BlankField(field));
+    }
+    Ok(())
 }
 
 fn is_term_code(code: &str, prefix: &str) -> bool {
@@ -330,9 +339,7 @@ impl SuggestedFix {
     /// ```
     pub fn new(summary: impl Into<String>) -> Result<Self, ValidateError> {
         let summary = summary.into();
-        if summary.trim().is_empty() {
-            return Err(ValidateError::BlankField("suggested_fix.summary"));
-        }
+        non_blank(&summary, "suggested_fix.summary")?;
         Ok(Self {
             summary,
             patch: None,
@@ -380,12 +387,8 @@ impl Citation {
     ) -> Result<Self, ValidateError> {
         let source = source.into();
         let section = section.into();
-        if source.trim().is_empty() {
-            return Err(ValidateError::BlankField("citation.source"));
-        }
-        if section.trim().is_empty() {
-            return Err(ValidateError::BlankField("citation.section"));
-        }
+        non_blank(&source, "citation.source")?;
+        non_blank(&section, "citation.section")?;
         Ok(Self {
             source,
             section,
@@ -471,12 +474,8 @@ impl ValidationTrace {
     ) -> Result<Self, ValidateError> {
         let backend = backend.into();
         let trace_id = trace_id.into();
-        if backend.trim().is_empty() {
-            return Err(ValidateError::BlankField("trace.backend"));
-        }
-        if trace_id.trim().is_empty() {
-            return Err(ValidateError::BlankField("trace.trace_id"));
-        }
+        non_blank(&backend, "trace.backend")?;
+        non_blank(&trace_id, "trace.trace_id")?;
         Ok(Self {
             backend,
             trace_id,
@@ -539,12 +538,8 @@ impl ValidationExplainPlan {
     ) -> Result<Self, ValidateError> {
         let backend = backend.into();
         let trace_id = trace_id.into();
-        if backend.trim().is_empty() {
-            return Err(ValidateError::BlankField("explain_plan.backend"));
-        }
-        if trace_id.trim().is_empty() {
-            return Err(ValidateError::BlankField("explain_plan.trace_id"));
-        }
+        non_blank(&backend, "explain_plan.backend")?;
+        non_blank(&trace_id, "explain_plan.trace_id")?;
         Ok(Self {
             schema_version: "1.0".to_owned(),
             backend,
@@ -626,9 +621,7 @@ impl RuleEvaluationStep {
         citations: Vec<ExplainPlanCitation>,
     ) -> Result<Self, ValidateError> {
         let evaluated_at_path = evaluated_at_path.into();
-        if evaluated_at_path.trim().is_empty() {
-            return Err(ValidateError::BlankField("explain_plan.evaluated_at_path"));
-        }
+        non_blank(&evaluated_at_path, "explain_plan.evaluated_at_path")?;
         Ok(Self {
             rule_id,
             evaluated_at_path,

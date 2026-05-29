@@ -940,10 +940,12 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn property_lookup_on_valid_seed_windows_returns_entry() {
-        let registry = Registry::seeded().expect("seed data verifies");
-        let cases = registry
+    /// Flatten every seed manifest into `(list, effective_from, effective_to,
+    /// entry)` tuples for the lookup property tests.
+    fn seed_window_cases(
+        registry: &Registry,
+    ) -> Vec<(String, String, Option<String>, Entry)> {
+        registry
             .manifests()
             .flat_map(|manifest| {
                 manifest.entries.iter().map(|entry| {
@@ -955,7 +957,13 @@ mod tests {
                     )
                 })
             })
-            .collect::<Vec<_>>();
+            .collect::<Vec<_>>()
+    }
+
+    #[test]
+    fn property_lookup_on_valid_seed_windows_returns_entry() {
+        let registry = Registry::seeded().expect("seed data verifies");
+        let cases = seed_window_cases(&registry);
 
         let mut runner = TestRunner::default();
         runner
@@ -987,19 +995,7 @@ mod tests {
     #[test]
     fn property_lookup_outside_valid_seed_windows_returns_none() {
         let registry = Registry::seeded().expect("seed data verifies");
-        let cases = registry
-            .manifests()
-            .flat_map(|manifest| {
-                manifest.entries.iter().map(|entry| {
-                    (
-                        manifest.list.clone(),
-                        manifest.effective_from.clone(),
-                        manifest.effective_to.clone(),
-                        entry.clone(),
-                    )
-                })
-            })
-            .collect::<Vec<_>>();
+        let cases = seed_window_cases(&registry);
 
         let mut runner = TestRunner::default();
         runner

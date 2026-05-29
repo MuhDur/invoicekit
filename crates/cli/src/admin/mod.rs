@@ -111,20 +111,16 @@ pub fn open_sqlite(path: &Path) -> Result<Connection, AdminError> {
         stage: "open sqlite",
         detail: e.to_string(),
     })?;
-    let has_outbox: bool = conn
-        .query_row(
-            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='invoicekit_outbox'",
-            [],
+    let table_exists = |name: &str| -> bool {
+        conn.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+            [name],
             |r| Ok(r.get::<_, i64>(0)? > 0),
         )
-        .unwrap_or(false);
-    let has_dlq: bool = conn
-        .query_row(
-            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='invoicekit_outbox_dead_letter'",
-            [],
-            |r| Ok(r.get::<_, i64>(0)? > 0),
-        )
-        .unwrap_or(false);
+        .unwrap_or(false)
+    };
+    let has_outbox = table_exists("invoicekit_outbox");
+    let has_dlq = table_exists("invoicekit_outbox_dead_letter");
     if !has_outbox || !has_dlq {
         return Err(AdminError::MissingTable {
             path: path.display().to_string(),

@@ -1115,6 +1115,16 @@ fn is_false_indicator(value: &str) -> bool {
     matches!(value.trim(), "false" | "0")
 }
 
+fn indicator_selects_charge(node: &XmlNode, charge: bool) -> bool {
+    charge_indicator(node).is_some_and(|indicator| {
+        if charge {
+            is_true_indicator(indicator)
+        } else {
+            is_false_indicator(indicator)
+        }
+    })
+}
+
 fn has_allowance_charge_reason(node: &XmlNode, syntax: DocumentSyntax) -> bool {
     match syntax {
         DocumentSyntax::Ubl => {
@@ -1158,15 +1168,7 @@ fn collect_document_allowance_charges(
     root: &XmlNode,
     charge: bool,
 ) -> Vec<&XmlNode> {
-    let matches_indicator = |node: &&XmlNode| {
-        charge_indicator(node).is_some_and(|indicator| {
-            if charge {
-                is_true_indicator(indicator)
-            } else {
-                is_false_indicator(indicator)
-            }
-        })
-    };
+    let matches_indicator = |node: &&XmlNode| indicator_selects_charge(node, charge);
     match syntax {
         DocumentSyntax::Ubl => root
             .children_named("AllowanceCharge")
@@ -1199,15 +1201,7 @@ fn line_allowance_charges<'doc>(
     line: &'doc XmlNode,
     charge: bool,
 ) -> Vec<&'doc XmlNode> {
-    let matches_indicator = |node: &&XmlNode| {
-        charge_indicator(node).is_some_and(|indicator| {
-            if charge {
-                is_true_indicator(indicator)
-            } else {
-                is_false_indicator(indicator)
-            }
-        })
-    };
+    let matches_indicator = |node: &&XmlNode| indicator_selects_charge(node, charge);
     match ctx.syntax {
         DocumentSyntax::Ubl => line
             .children_named("AllowanceCharge")
@@ -1219,6 +1213,36 @@ fn line_allowance_charges<'doc>(
                 settlement
                     .children_named("SpecifiedTradeAllowanceCharge")
                     .filter(matches_indicator)
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
+}
+
+fn document_allowance_charges_all<'doc>(ctx: &ValidationContext<'doc>) -> Vec<&'doc XmlNode> {
+    match ctx.syntax {
+        DocumentSyntax::Ubl => ctx.root.children_named("AllowanceCharge").collect(),
+        DocumentSyntax::Cii => cii_header_settlement(ctx)
+            .map(|settlement| {
+                settlement
+                    .children_named("SpecifiedTradeAllowanceCharge")
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
+}
+
+fn line_allowance_charges_all<'doc>(
+    ctx: &ValidationContext<'doc>,
+    line: &'doc XmlNode,
+) -> Vec<&'doc XmlNode> {
+    match ctx.syntax {
+        DocumentSyntax::Ubl => line.children_named("AllowanceCharge").collect(),
+        DocumentSyntax::Cii => line
+            .path(&["SpecifiedLineTradeSettlement"])
+            .map(|settlement| {
+                settlement
+                    .children_named("SpecifiedTradeAllowanceCharge")
                     .collect()
             })
             .unwrap_or_default(),
@@ -3726,16 +3750,7 @@ fn br_co_21(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    let charges: Vec<&XmlNode> = match ctx.syntax {
-        DocumentSyntax::Ubl => ctx.root.children_named("AllowanceCharge").collect(),
-        DocumentSyntax::Cii => cii_header_settlement(ctx)
-            .map(|settlement| {
-                settlement
-                    .children_named("SpecifiedTradeAllowanceCharge")
-                    .collect()
-            })
-            .unwrap_or_default(),
-    };
+    let charges = document_allowance_charges_all(ctx);
     for (index, charge) in charges.into_iter().enumerate() {
         if charge_indicator(charge).is_some_and(is_false_indicator)
             && !has_allowance_charge_reason(charge, ctx.syntax)
@@ -3756,16 +3771,7 @@ fn br_co_22(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    let charges: Vec<&XmlNode> = match ctx.syntax {
-        DocumentSyntax::Ubl => ctx.root.children_named("AllowanceCharge").collect(),
-        DocumentSyntax::Cii => cii_header_settlement(ctx)
-            .map(|settlement| {
-                settlement
-                    .children_named("SpecifiedTradeAllowanceCharge")
-                    .collect()
-            })
-            .unwrap_or_default(),
-    };
+    let charges = document_allowance_charges_all(ctx);
     for (index, charge) in charges.into_iter().enumerate() {
         if charge_indicator(charge).is_some_and(is_true_indicator)
             && !has_allowance_charge_reason(charge, ctx.syntax)
@@ -3787,17 +3793,7 @@ fn br_co_23(
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
     for (line_index, line) in lines(ctx).iter().copied().enumerate() {
-        let charges: Vec<&XmlNode> = match ctx.syntax {
-            DocumentSyntax::Ubl => line.children_named("AllowanceCharge").collect(),
-            DocumentSyntax::Cii => line
-                .path(&["SpecifiedLineTradeSettlement"])
-                .map(|settlement| {
-                    settlement
-                        .children_named("SpecifiedTradeAllowanceCharge")
-                        .collect()
-                })
-                .unwrap_or_default(),
-        };
+        let charges = line_allowance_charges_all(ctx, line);
         for (index, charge) in charges.into_iter().enumerate() {
             if charge_indicator(charge).is_some_and(is_false_indicator)
                 && !has_allowance_charge_reason(charge, ctx.syntax)
@@ -3820,17 +3816,7 @@ fn br_co_24(
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
     for (line_index, line) in lines(ctx).iter().copied().enumerate() {
-        let charges: Vec<&XmlNode> = match ctx.syntax {
-            DocumentSyntax::Ubl => line.children_named("AllowanceCharge").collect(),
-            DocumentSyntax::Cii => line
-                .path(&["SpecifiedLineTradeSettlement"])
-                .map(|settlement| {
-                    settlement
-                        .children_named("SpecifiedTradeAllowanceCharge")
-                        .collect()
-                })
-                .unwrap_or_default(),
-        };
+        let charges = line_allowance_charges_all(ctx, line);
         for (index, charge) in charges.into_iter().enumerate() {
             if charge_indicator(charge).is_some_and(is_true_indicator)
                 && !has_allowance_charge_reason(charge, ctx.syntax)

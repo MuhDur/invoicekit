@@ -562,10 +562,8 @@ impl TransmissionWorker {
         now_seconds: u64,
         jobs: impl IntoIterator<Item = TransmissionJob>,
     ) -> Result<Vec<TransmissionWorkerResult>, ReconcileError> {
-        let mut selected = Vec::new();
-        for job in jobs.into_iter().take(self.config.max_batch_size) {
-            selected.push(job);
-        }
+        let selected: Vec<TransmissionJob> =
+            jobs.into_iter().take(self.config.max_batch_size).collect();
 
         let mut results = Vec::with_capacity(selected.len());
         for job in selected {

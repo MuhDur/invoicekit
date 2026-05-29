@@ -388,34 +388,27 @@ fn validate_artefact_id(id: &str) -> Result<(), BundleError> {
 }
 
 fn artefact_id_from_path(path: &Path) -> Result<String, BundleError> {
+    let invalid = || BundleError::InvalidArtefactPath(path.to_string_lossy().into_owned());
     let mut parts = Vec::new();
     for component in path.components() {
         match component {
             Component::Normal(part) => {
                 let Some(part) = part.to_str() else {
-                    return Err(BundleError::InvalidArtefactPath(
-                        path.to_string_lossy().into_owned(),
-                    ));
+                    return Err(invalid());
                 };
                 if part.is_empty() || part == "." || part == ".." || part.contains('\\') {
-                    return Err(BundleError::InvalidArtefactPath(
-                        path.to_string_lossy().into_owned(),
-                    ));
+                    return Err(invalid());
                 }
                 parts.push(part.to_owned());
             }
             Component::CurDir => {}
             _ => {
-                return Err(BundleError::InvalidArtefactPath(
-                    path.to_string_lossy().into_owned(),
-                ));
+                return Err(invalid());
             }
         }
     }
     if parts.is_empty() {
-        return Err(BundleError::InvalidArtefactPath(
-            path.to_string_lossy().into_owned(),
-        ));
+        return Err(invalid());
     }
     Ok(parts.join("/"))
 }

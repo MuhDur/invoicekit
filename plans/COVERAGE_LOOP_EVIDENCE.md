@@ -494,3 +494,20 @@ convergence. Maintain skill matrix + per-turn skill usage. Dynamic workflows thr
   UBS critical (even a false positive) are stashed, not committed; only verified-isomorphic, no-growth changes land.
 - **Next:** core-foundation quality Wave QB (ir/canonical/format-*/validate/evidence/verify/engine — dependency-careful);
   decide deliberately whether to re-bless the stashed adversarial corpus.
+
+### Turn 15 — 2026-05-29 — Quality Wave QB (foundation) verified + committed
+- **Workflow:** `coverage-p2-quality-wave-qb` (42 agents, 21 mature foundation crates, hard anti-side-effect
+  guards from D16) → **21/21 clean+green**. As predicted, ~10 were no-ops (canonical/tax-calculation/ir/etc.
+  already clean); 11 had small genuine isomorphic simplifications (e.g. money `with_amount` helper collapsing 6
+  struct-literal sites; codelists test-helper extraction; validate/verify/format-cii/evidence/rulepack/reconcile/
+  cli/profile-xrechnung/validate-ubl-cii dedup).
+- **Verified (D16 scrutiny — guards held this time):** scope clean — ONLY `crates/<dir>/src/` changed, **no**
+  conformance-corpus/golden/schema/Cargo.lock edits; `cargo test --workspace` = **2337 passed, 0 failed**
+  (golden tests byte-identical → pure isomorphic); `clippy --workspace -D warnings` clean; UBS criticals **1→1
+  (no growth** vs HEAD; the 1 is a pre-existing false positive). **Net -64 LOC.** Committed.
+- **Skills used:** `simplify-and-refactor-code-isomorphically`, `ubs`, `verification-before-completion`.
+- **Phase-2 quality coverage so far:** 34 country + 5 intake + 16 adapter + 21 foundation = **76 crates** passed
+  the per-crate isomorphic quality evaluation (many converged as no-ops, which is the correct outcome for clean
+  mature code). Remaining: bindings/services/bridges/tools/connectors/apps (top-level consumer crates).
+- **Next:** final quality wave over the remaining top-level consumer crates; then deliberately decide the
+  stashed adversarial-corpus re-bless and the evidence-dsse refactor (both recoverable in `git stash`).

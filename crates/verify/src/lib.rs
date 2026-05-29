@@ -227,6 +227,15 @@ fn manifest_bytes(bundle: &EvidenceBundle) -> Result<Vec<u8>, BundleError> {
     serde_json::to_vec(&unpacked.manifest).map_err(|e| BundleError::BadManifestJson(e.to_string()))
 }
 
+/// Recover the canonical manifest bytes, mapping a re-serialise
+/// failure straight to the `Failed` outcome the three signature /
+/// envelope / timestamp checks all report identically.
+fn manifest_payload(bundle: &EvidenceBundle) -> Result<Vec<u8>, CheckOutcome> {
+    manifest_bytes(bundle).map_err(|err| CheckOutcome::Failed {
+        error: format!("manifest re-serialise failed: {err}"),
+    })
+}
+
 fn run_signature_check(bundle: &EvidenceBundle, options: &VerifyOptions<'_>) -> CheckOutcome {
     let Some(signer) = options.signer else {
         return CheckOutcome::Skipped {
@@ -238,13 +247,9 @@ fn run_signature_check(bundle: &EvidenceBundle, options: &VerifyOptions<'_>) -> 
             reason: "no signature supplied".to_owned(),
         };
     };
-    let payload = match manifest_bytes(bundle) {
+    let payload = match manifest_payload(bundle) {
         Ok(b) => b,
-        Err(err) => {
-            return CheckOutcome::Failed {
-                error: format!("manifest re-serialise failed: {err}"),
-            };
-        }
+        Err(outcome) => return outcome,
     };
     let request = SignRequest {
         key_ref: signature.key_ref.clone(),
@@ -309,13 +314,9 @@ fn run_manifest_envelope_check(
             };
         }
     };
-    let payload = match manifest_bytes(bundle) {
+    let payload = match manifest_payload(bundle) {
         Ok(b) => b,
-        Err(err) => {
-            return CheckOutcome::Failed {
-                error: format!("manifest re-serialise failed: {err}"),
-            };
-        }
+        Err(outcome) => return outcome,
     };
     match verify_envelope(&envelope, MANIFEST_PAYLOAD_TYPE, &payload, signer) {
         Ok(()) => CheckOutcome::Passed,
@@ -336,13 +337,9 @@ fn run_timestamp_check(bundle: &EvidenceBundle, options: &VerifyOptions<'_>) -> 
             reason: "no timestamp record supplied".to_owned(),
         };
     };
-    let manifest = match manifest_bytes(bundle) {
+    let manifest = match manifest_payload(bundle) {
         Ok(b) => b,
-        Err(err) => {
-            return CheckOutcome::Failed {
-                error: format!("manifest re-serialise failed: {err}"),
-            };
-        }
+        Err(outcome) => return outcome,
     };
     let recomputed_imprint = recompute_imprint(options.timestamp_algorithm, &manifest);
     match client.verify_timestamp(timestamp, &recomputed_imprint) {

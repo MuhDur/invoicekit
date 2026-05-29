@@ -162,21 +162,19 @@ impl HotReloadRegistry {
         self: Arc<Self>,
         debounce: Duration,
     ) -> Result<WatchHandle, HotReloadError> {
+        let watcher_err = |detail: String| HotReloadError::Watcher {
+            path: self.dir.clone(),
+            detail,
+        };
         let (event_tx, event_rx) = mpsc::channel::<notify::Result<Event>>();
         let mut watcher = notify::recommended_watcher(move |res| {
             // Channel close means the WatchHandle was dropped; nothing to do.
             let _ = event_tx.send(res);
         })
-        .map_err(|e| HotReloadError::Watcher {
-            path: self.dir.clone(),
-            detail: e.to_string(),
-        })?;
+        .map_err(|e| watcher_err(e.to_string()))?;
         watcher
             .watch(&self.dir, RecursiveMode::NonRecursive)
-            .map_err(|e| HotReloadError::Watcher {
-                path: self.dir.clone(),
-                detail: e.to_string(),
-            })?;
+            .map_err(|e| watcher_err(e.to_string()))?;
 
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let registry = Arc::clone(&self);
@@ -213,10 +211,7 @@ impl HotReloadRegistry {
                     }
                 }
             })
-            .map_err(|e| HotReloadError::Watcher {
-                path: self.dir.clone(),
-                detail: e.to_string(),
-            })?;
+            .map_err(|e| watcher_err(e.to_string()))?;
         Ok(WatchHandle {
             join: Some(join),
             stop_tx,
