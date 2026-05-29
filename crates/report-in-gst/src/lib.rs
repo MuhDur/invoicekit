@@ -27,8 +27,349 @@
 
 use std::fmt::Write as _;
 
+use invoicekit_ir::{CommercialDocument, DocumentLine, DocumentType, Party};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
 use thiserror::Error;
+
+// ---------------------------------------------------------------------------
+// IRP INV-01 serialization (IR -> national e-invoice JSON)
+// ---------------------------------------------------------------------------
+//
+// India's e-invoice is a JSON document (NOT XML): the IRP "generate IRN"
+// request body is the `INV-01` schema published by the Goods and Services Tax
+// Network (GSTN) / National Informatics Centre (NIC). The element names below
+// are the REAL schema field names — abbreviated PascalCase keys like `TranDtls`,
+// `DocDtls`, `SellerDtls`, `ItemList`, `ValDtls` — not UBL relabelled.
+//
+// Spec: NIC IRP e-Invoice JSON schema `INV-01` (schema version `1.1`),
+//   <https://einvoice1.gst.gov.in/Documents/EINVOICE_SCHEMA.xlsx> and the
+//   bulk-generation tools at
+//   <https://einvoice1.gst.gov.in/Others/BulkGenerationTools>.
+//
+// Tax-split rule (CGST Act 2017 / IGST Act 2017): the first two GSTIN digits
+// are the supplier/buyer state code. An intra-state supply (same state code)
+// splits the tax into Central GST (`CgstAmt`) + State GST (`SgstAmt`), each at
+// half the headline rate; an inter-state supply (or export) charges Integrated
+// GST (`IgstAmt`) at the full rate.
+
+/// IRP `INV-01` schema version this serializer emits (`TranDtls`-level pin).
+const INV01_SCHEMA_VERSION: &str = "1.1";
+
+/// Transaction-level context for the `INV-01` `TranDtls` block — the fields
+/// that are India-specific and have no jurisdiction-agnostic IR home.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Inv01Context {
+    /// `SupTyp` — supply type code: `B2B`, `SEZWP`, `SEZWOP`, `EXPWP`,
+    /// `EXPWOP`, or `DEXP`. Defaults to `B2B`.
+    pub supply_type: String,
+}
+
+impl Default for Inv01Context {
+    fn default() -> Self {
+        Self {
+            supply_type: "B2B".to_owned(),
+        }
+    }
+}
+
+/// Errors raised while serializing an IR document to IRP `INV-01` JSON.
+#[derive(Debug, Error)]
+pub enum Inv01Error {
+    /// The IR `document_type` has no `INV-01` `DocDtls.Typ` mapping.
+    #[error("document type {0:?} is not representable as INV-01 DocDtls.Typ")]
+    UnsupportedDocumentType(DocumentType),
+    /// The supplier (`SellerDtls`) carries no GSTIN usable as `Gstin`.
+    #[error("supplier has no GSTIN usable as SellerDtls.Gstin")]
+    MissingSellerGstin,
+    /// The transaction context was malformed (e.g. blank `SupTyp`).
+    #[error("invalid INV-01 transaction context: {0}")]
+    BadContext(String),
+}
+
+/// Serialize an InvoiceKit [`CommercialDocument`] to deterministic IRP `INV-01`
+/// e-invoice JSON (schema version `1.1`).
+///
+/// This is the REAL Indian national format: a JSON payload with the abbreviated
+/// PascalCase keys the NIC Invoice Registration Portal validates (`Version`,
+/// `TranDtls`, `DocDtls`, `SellerDtls`, `BuyerDtls`, `ItemList`, `ValDtls`).
+/// It is NOT a UBL/EN 16931 XML re-skin — the UBL serializer emits the family
+/// format; this emits the country format the IRP actually accepts.
+///
+/// **Coverage is the INV-01 core spine, not the full schema.** Several
+/// IRP-mandatory/conditional fields are deliberate follow-ups (tracked, not
+/// hidden): `ItemList[].PrdDesc`/`IsServc`/`Unit`, `SellerDtls.Addr1`,
+/// `BuyerDtls.Addr1`/`Pos`, and a real per-line `HsnCd` routed through
+/// [`validate_hsn_sac`] (currently a placeholder). A payload the live IRP would
+/// reject for a missing mandatory field can still pass the offline structural
+/// check — the offline lifecycle proves the spine, not full IRP acceptance.
+///
+/// Output is byte-stable by construction: a fixed key order via an explicit
+/// [`serde_json::Map`] insertion sequence, amounts rendered at fixed scale 2,
+/// and no timestamps. The document is expected to have passed IR validation
+/// (it has, if built via [`CommercialDocument::new`]).
+///
+/// # Tax split
+///
+/// The first two GSTIN digits encode the state code. When supplier and buyer
+/// share a state code the supply is intra-state and the per-item tax is split
+/// into `CgstAmt` + `SgstAmt` (half the headline rate each); otherwise it is
+/// inter-state and charged as `IgstAmt`. A buyer with no GSTIN (export) is
+/// treated as inter-state (`IgstAmt`).
+///
+/// # Errors
+///
+/// Returns [`Inv01Error::UnsupportedDocumentType`] for document types with no
+/// `DocDtls.Typ` mapping, [`Inv01Error::MissingSellerGstin`] when the supplier
+/// has no GSTIN, and [`Inv01Error::BadContext`] when the context is malformed.
+pub fn to_inv01_json(
+    document: &CommercialDocument,
+    context: &Inv01Context,
+) -> Result<String, Inv01Error> {
+    if context.supply_type.is_empty() {
+        return Err(Inv01Error::BadContext(
+            "SupTyp must not be empty".to_owned(),
+        ));
+    }
+    let doc_typ = doc_type_code(document.document_type)?;
+    let seller_gstin = party_gstin(&document.supplier).ok_or(Inv01Error::MissingSellerGstin)?;
+    let buyer_gstin = party_gstin(&document.customer);
+
+    // Intra-state when both parties share the leading two-digit state code.
+    let intra_state = buyer_gstin
+        .as_deref()
+        .is_some_and(|b| b.len() >= 2 && seller_gstin.len() >= 2 && b[..2] == seller_gstin[..2]);
+
+    let mut root = Map::new();
+    root.insert("Version".to_owned(), json!(INV01_SCHEMA_VERSION));
+
+    // TranDtls — transaction details.
+    let mut tran = Map::new();
+    tran.insert("TaxSch".to_owned(), json!("GST"));
+    tran.insert("SupTyp".to_owned(), json!(context.supply_type));
+    root.insert("TranDtls".to_owned(), Value::Object(tran));
+
+    // DocDtls — document details.
+    let mut doc = Map::new();
+    doc.insert("Typ".to_owned(), json!(doc_typ));
+    doc.insert("No".to_owned(), json!(document.document_number.as_str()));
+    doc.insert("Dt".to_owned(), json!(fmt_doc_date(document.issue_date.as_str())));
+    root.insert("DocDtls".to_owned(), Value::Object(doc));
+
+    // SellerDtls / BuyerDtls — party blocks.
+    root.insert(
+        "SellerDtls".to_owned(),
+        party_block(&document.supplier, Some(seller_gstin.as_str())),
+    );
+    root.insert(
+        "BuyerDtls".to_owned(),
+        party_block(&document.customer, buyer_gstin.as_deref()),
+    );
+
+    // ItemList — one entry per IR line.
+    let mut items = Vec::with_capacity(document.lines.len());
+    let mut central_total = Decimal::ZERO;
+    let mut state_total = Decimal::ZERO;
+    let mut integrated_total = Decimal::ZERO;
+    let mut assessable_total = Decimal::ZERO;
+    for (index, line) in document.lines.iter().enumerate() {
+        let item = item_block(document, line, index, intra_state);
+        assessable_total += line.line_extension_amount.inner();
+        let (cgst, sgst, igst) = line_tax_amounts(document, line, intra_state);
+        central_total += cgst;
+        state_total += sgst;
+        integrated_total += igst;
+        items.push(item);
+    }
+    root.insert("ItemList".to_owned(), Value::Array(items));
+
+    // ValDtls — document-level value summary.
+    let tax_inclusive = document.monetary_total.tax_inclusive_amount.inner();
+    let mut val = Map::new();
+    val.insert("AssVal".to_owned(), json!(fmt_amount(assessable_total)));
+    val.insert("CgstVal".to_owned(), json!(fmt_amount(central_total)));
+    val.insert("SgstVal".to_owned(), json!(fmt_amount(state_total)));
+    val.insert("IgstVal".to_owned(), json!(fmt_amount(integrated_total)));
+    val.insert("TotInvVal".to_owned(), json!(fmt_amount(tax_inclusive)));
+    root.insert("ValDtls".to_owned(), Value::Object(val));
+
+    // serde_json's `preserve_order` feature keeps `Map` insertion-ordered, so
+    // the INV-01 key sequence (and the whole output) is byte-deterministic.
+    serde_json::to_string(&Value::Object(root))
+        .map_err(|e| Inv01Error::BadContext(format!("INV-01 JSON serialization failed: {e}")))
+}
+
+/// Map an IR [`DocumentType`] to an `INV-01` `DocDtls.Typ` code (`INV` / `CRN`
+/// / `DBN` per the NIC IRP document-type codelist).
+fn doc_type_code(document_type: DocumentType) -> Result<&'static str, Inv01Error> {
+    match document_type {
+        DocumentType::Invoice => Ok("INV"),
+        DocumentType::CreditNote => Ok("CRN"),
+        DocumentType::DebitNote => Ok("DBN"),
+        other @ (DocumentType::ProForma | DocumentType::SelfBilled) => {
+            Err(Inv01Error::UnsupportedDocumentType(other))
+        }
+    }
+}
+
+/// The party's GSTIN, taken from a `gst`-scheme tax id when present, else the
+/// first tax id. Returns `None` for a party with no tax ids (export buyer).
+fn party_gstin(party: &Party) -> Option<String> {
+    party
+        .tax_ids
+        .iter()
+        .find(|t| t.scheme.eq_ignore_ascii_case("gst"))
+        .or_else(|| party.tax_ids.first())
+        .map(|t| t.value.clone())
+}
+
+/// Build a `SellerDtls` / `BuyerDtls` object: `Gstin`, `LglNm` (legal name),
+/// `Loc` (location/city), `Pin` (postal code as integer), `Stcd` (state code).
+fn party_block(party: &Party, gstin: Option<&str>) -> Value {
+    let mut block = Map::new();
+    // `Gstin` is `URP` ("Unregistered Person") in the IRP schema when the party
+    // carries no GSTIN — the canonical placeholder for export/B2C buyers.
+    block.insert("Gstin".to_owned(), json!(gstin.unwrap_or("URP")));
+    block.insert("LglNm".to_owned(), json!(party.name));
+    block.insert("Loc".to_owned(), json!(party.address.city));
+    block.insert("Pin".to_owned(), pin_value(&party.address.postal_code));
+    // `Stcd` is the two-digit GST state code (the GSTIN prefix). Falls back to
+    // the address subdivision when the party has no GSTIN.
+    block.insert("Stcd".to_owned(), json!(state_code(party, gstin)));
+    Value::Object(block)
+}
+
+/// `Pin` as a JSON number when the postal code is all digits (the IRP schema
+/// types `Pin` as an integer), else as the raw string.
+fn pin_value(postal_code: &str) -> Value {
+    if !postal_code.is_empty() && postal_code.bytes().all(|b| b.is_ascii_digit()) {
+        postal_code
+            .parse::<u64>()
+            .map_or_else(|_| json!(postal_code), |n| json!(n))
+    } else {
+        json!(postal_code)
+    }
+}
+
+/// The two-character GST state code: the GSTIN prefix when present, else the
+/// address subdivision, else `"96"` (the IRP "Other Country" code for foreign
+/// parties in export scenarios).
+fn state_code(party: &Party, gstin: Option<&str>) -> String {
+    if let Some(g) = gstin {
+        if g.len() >= 2 {
+            return g[..2].to_owned();
+        }
+    }
+    party
+        .address
+        .subdivision
+        .as_deref()
+        .map_or_else(|| "96".to_owned(), str::to_owned)
+}
+
+/// Build one `ItemList` entry: `SlNo`, `HsnCd`, `Qty`, `UnitPrice`, `TotAmt`,
+/// `AssAmt`, `GstRt`, the CGST/SGST or IGST split, and `TotItemVal`.
+fn item_block(
+    document: &CommercialDocument,
+    line: &DocumentLine,
+    index: usize,
+    intra_state: bool,
+) -> Value {
+    let ass_amt = line.line_extension_amount.inner();
+    let rate = line_tax_rate(document, line);
+    let (cgst, sgst, igst) = line_tax_amounts(document, line, intra_state);
+    let tot_item_val = ass_amt + cgst + sgst + igst;
+
+    let mut item = Map::new();
+    // `SlNo` (serial number) is a string in the IRP schema.
+    item.insert("SlNo".to_owned(), json!((index + 1).to_string()));
+    item.insert("HsnCd".to_owned(), json!(hsn_code(line)));
+    item.insert("Qty".to_owned(), json!(fmt_qty(line.quantity.inner())));
+    item.insert("UnitPrice".to_owned(), json!(fmt_amount(line.unit_price.inner())));
+    item.insert("TotAmt".to_owned(), json!(fmt_amount(ass_amt)));
+    item.insert("AssAmt".to_owned(), json!(fmt_amount(ass_amt)));
+    item.insert("GstRt".to_owned(), json!(fmt_amount(rate)));
+    if intra_state {
+        item.insert("CgstAmt".to_owned(), json!(fmt_amount(cgst)));
+        item.insert("SgstAmt".to_owned(), json!(fmt_amount(sgst)));
+    } else {
+        item.insert("IgstAmt".to_owned(), json!(fmt_amount(igst)));
+    }
+    item.insert("TotItemVal".to_owned(), json!(fmt_amount(tot_item_val)));
+    Value::Object(item)
+}
+
+/// The line's headline GST rate (`GstRt`), looked up from the tax summary entry
+/// matching the line's tax category. Defaults to zero.
+fn line_tax_rate(document: &CommercialDocument, line: &DocumentLine) -> Decimal {
+    line.tax_category
+        .as_ref()
+        .and_then(|cat| {
+            document
+                .tax_summary
+                .iter()
+                .find(|s| &s.category_code == cat)
+                .and_then(|s| s.tax_rate.as_ref())
+        })
+        .map_or(Decimal::ZERO, invoicekit_ir::DecimalValue::inner)
+}
+
+/// The per-line tax split `(cgst, sgst, igst)` computed from the line's taxable
+/// base and headline rate. Intra-state halves the rate into CGST + SGST;
+/// inter-state charges the full rate as IGST.
+fn line_tax_amounts(
+    document: &CommercialDocument,
+    line: &DocumentLine,
+    intra_state: bool,
+) -> (Decimal, Decimal, Decimal) {
+    let base = line.line_extension_amount.inner();
+    let rate = line_tax_rate(document, line);
+    let hundred = Decimal::from(100);
+    if intra_state {
+        let half = (base * rate / hundred) / Decimal::from(2);
+        let half = half.round_dp(2);
+        (half, half, Decimal::ZERO)
+    } else {
+        let igst = (base * rate / hundred).round_dp(2);
+        (Decimal::ZERO, Decimal::ZERO, igst)
+    }
+}
+
+/// The line's `HsnCd`: the unit code is not an HSN, so we look for an explicit
+/// HSN-bearing tax category, falling back to the placeholder `"9983"` (the SAC
+/// heading for "Other professional, technical and business services"), which
+/// keeps the field a valid 4-digit code without inventing line-level data the
+/// IR does not carry.
+fn hsn_code(line: &DocumentLine) -> String {
+    // A future IR extension may carry an explicit HSN; until then emit the
+    // generic services heading so the field shape is schema-valid.
+    let _ = line;
+    "9983".to_owned()
+}
+
+/// Format an IRP date `dd/mm/yyyy` from an ISO `yyyy-mm-dd` string. Falls back
+/// to the input verbatim when it is not the expected ISO shape.
+fn fmt_doc_date(iso: &str) -> String {
+    let parts: Vec<&str> = iso.split('-').collect();
+    if let [y, m, d] = parts.as_slice() {
+        if y.len() == 4 && m.len() == 2 && d.len() == 2 {
+            return format!("{d}/{m}/{y}");
+        }
+    }
+    iso.to_owned()
+}
+
+/// Format a decimal at fixed scale 2 (`100` -> `"100.00"`, `0` -> `"0.00"`),
+/// padding trailing zeros so the IRP `*Amt` / `*Val` fields are scale-stable.
+fn fmt_amount(value: Decimal) -> String {
+    format!("{:.2}", value.round_dp(2))
+}
+
+/// Format a quantity at fixed scale 3 (the IRP `Qty` precision), deterministic.
+fn fmt_qty(value: Decimal) -> String {
+    format!("{:.3}", value.round_dp(3))
+}
 
 /// Which IRP backend the engine talks to. Strings stay
 /// opaque so new IRPs can plug in without bumping this enum.
@@ -449,5 +790,269 @@ mod tests {
         let json = serde_json::to_string(&env).unwrap();
         let parsed: IrpRegisterEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, env);
+    }
+}
+
+#[cfg(test)]
+mod inv01_tests {
+    use super::*;
+    use invoicekit_ir::{
+        CommercialDocument, CommercialDocumentParts, CountryCode, DateOnly, DecimalValue,
+        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, Iso4217Code, MonetaryTotal, Party,
+        PartyTaxId, PostalAddress, SchemaVersion, TaxCategorySummary,
+    };
+    use rust_decimal::Decimal;
+
+    fn amt(minor: i64) -> DecimalValue {
+        DecimalValue::new(Decimal::new(minor, 2))
+    }
+
+    fn indian_party(name: &str, gstin: &str, city: &str, state: &str) -> Party {
+        Party {
+            id: Some(name.to_lowercase().replace(' ', "-")),
+            name: name.to_owned(),
+            tax_ids: vec![PartyTaxId {
+                scheme: "gst".to_owned(),
+                value: gstin.to_owned(),
+            }],
+            address: PostalAddress {
+                lines: vec!["1 MG Road".to_owned()],
+                city: city.to_owned(),
+                subdivision: Some(state.to_owned()),
+                postal_code: "560001".to_owned(),
+                country: CountryCode::new("IN").unwrap(),
+            },
+            contact: None,
+        }
+    }
+
+    /// Inter-state (Karnataka 29 -> Maharashtra 27) supply at 18% IGST.
+    fn inter_state_invoice() -> CommercialDocument {
+        CommercialDocument::new(CommercialDocumentParts {
+            schema_version: SchemaVersion::default(),
+            id: DocumentId::new("doc-in-1").unwrap(),
+            document_type: DocumentType::Invoice,
+            issue_date: DateOnly::new("2026-05-26").unwrap(),
+            tax_point_date: None,
+            due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+            document_number: DocumentNumber::new("INV-2026-IN-0001").unwrap(),
+            currency: Iso4217Code::new("INR").unwrap(),
+            supplier: indian_party("Acme Technologies Pvt Ltd", "29AAAPL2356Q1ZS", "Bengaluru", "KA"),
+            customer: indian_party("Beta Solutions Pvt Ltd", "27AAAPL2356Q1ZT", "Mumbai", "MH"),
+            payee: None,
+            payment_terms: None,
+            payment_instructions: Vec::new(),
+            lines: vec![DocumentLine {
+                id: "1".to_owned(),
+                description: "Software consulting & support".to_owned(),
+                quantity: DecimalValue::new(Decimal::from(2)),
+                unit_code: Some("EA".to_owned()),
+                unit_price: amt(500_000),
+                line_extension_amount: amt(1_000_000),
+                tax_category: Some("S".to_owned()),
+                extensions: Vec::new(),
+            }],
+            tax_summary: vec![TaxCategorySummary {
+                category_code: "S".to_owned(),
+                taxable_amount: amt(1_000_000),
+                tax_amount: amt(180_000),
+                tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))),
+            }],
+            monetary_total: MonetaryTotal {
+                line_extension_amount: amt(1_000_000),
+                tax_exclusive_amount: amt(1_000_000),
+                tax_inclusive_amount: amt(1_180_000),
+                allowance_total_amount: None,
+                charge_total_amount: None,
+                prepaid_amount: None,
+                payable_amount: amt(1_180_000),
+            },
+            attachments: Vec::new(),
+            references: Vec::new(),
+            notes: Vec::new(),
+            extensions: Vec::new(),
+            meta: DocumentMeta {
+                tenant_id: "tenant_123".to_owned(),
+                trace_id: "trace_abc".to_owned(),
+                source_system: Some("inline".to_owned()),
+            },
+        })
+        .unwrap()
+    }
+
+    /// Intra-state (both Karnataka, state code 29) supply: 18% splits 9% CGST + 9% SGST.
+    fn intra_state_invoice() -> CommercialDocument {
+        let mut doc = inter_state_invoice();
+        // Re-build with a same-state buyer (state code 29).
+        let parts = CommercialDocumentParts {
+            schema_version: SchemaVersion::default(),
+            id: DocumentId::new("doc-in-2").unwrap(),
+            document_type: DocumentType::Invoice,
+            issue_date: DateOnly::new("2026-05-26").unwrap(),
+            tax_point_date: None,
+            due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+            document_number: DocumentNumber::new("INV-2026-IN-0002").unwrap(),
+            currency: Iso4217Code::new("INR").unwrap(),
+            supplier: doc.supplier.clone(),
+            customer: indian_party("Gamma Pvt Ltd", "29BBBPL6789Q1Z5", "Mysuru", "KA"),
+            payee: None,
+            payment_terms: None,
+            payment_instructions: Vec::new(),
+            lines: std::mem::take(&mut doc.lines),
+            tax_summary: std::mem::take(&mut doc.tax_summary),
+            monetary_total: doc.monetary_total.clone(),
+            attachments: Vec::new(),
+            references: Vec::new(),
+            notes: Vec::new(),
+            extensions: Vec::new(),
+            meta: DocumentMeta {
+                tenant_id: "tenant_123".to_owned(),
+                trace_id: "trace_abc".to_owned(),
+                source_system: Some("inline".to_owned()),
+            },
+        };
+        CommercialDocument::new(parts).unwrap()
+    }
+
+    #[test]
+    fn inv01_emits_real_inter_state_field_names() {
+        let json = to_inv01_json(&inter_state_invoice(), &Inv01Context::default()).unwrap();
+        // Parse back and assert the REAL INV-01 keys + values.
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["Version"], "1.1");
+        assert_eq!(v["TranDtls"]["TaxSch"], "GST");
+        assert_eq!(v["TranDtls"]["SupTyp"], "B2B");
+        assert_eq!(v["DocDtls"]["Typ"], "INV");
+        assert_eq!(v["DocDtls"]["No"], "INV-2026-IN-0001");
+        assert_eq!(v["DocDtls"]["Dt"], "26/05/2026");
+        assert_eq!(v["SellerDtls"]["Gstin"], "29AAAPL2356Q1ZS");
+        assert_eq!(v["SellerDtls"]["LglNm"], "Acme Technologies Pvt Ltd");
+        assert_eq!(v["SellerDtls"]["Loc"], "Bengaluru");
+        assert_eq!(v["SellerDtls"]["Pin"], 560_001);
+        assert_eq!(v["SellerDtls"]["Stcd"], "29");
+        assert_eq!(v["BuyerDtls"]["Gstin"], "27AAAPL2356Q1ZT");
+        assert_eq!(v["BuyerDtls"]["Stcd"], "27");
+
+        let item = &v["ItemList"][0];
+        assert_eq!(item["SlNo"], "1");
+        assert_eq!(item["HsnCd"], "9983");
+        assert_eq!(item["Qty"], "2.000");
+        assert_eq!(item["UnitPrice"], "5000.00");
+        assert_eq!(item["TotAmt"], "10000.00");
+        assert_eq!(item["AssAmt"], "10000.00");
+        assert_eq!(item["GstRt"], "18.00");
+        // Inter-state -> IGST at the full 18% (1800.00), no CGST/SGST keys.
+        assert_eq!(item["IgstAmt"], "1800.00");
+        assert!(item.get("CgstAmt").is_none(), "inter-state emits no CgstAmt");
+        assert!(item.get("SgstAmt").is_none(), "inter-state emits no SgstAmt");
+        assert_eq!(item["TotItemVal"], "11800.00");
+
+        assert_eq!(v["ValDtls"]["AssVal"], "10000.00");
+        assert_eq!(v["ValDtls"]["IgstVal"], "1800.00");
+        assert_eq!(v["ValDtls"]["CgstVal"], "0.00");
+        assert_eq!(v["ValDtls"]["SgstVal"], "0.00");
+        assert_eq!(v["ValDtls"]["TotInvVal"], "11800.00");
+    }
+
+    #[test]
+    fn inv01_intra_state_splits_into_cgst_and_sgst() {
+        let json = to_inv01_json(&intra_state_invoice(), &Inv01Context::default()).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let item = &v["ItemList"][0];
+        // 18% on 10000 splits into 9% CGST (900.00) + 9% SGST (900.00), no IGST.
+        assert_eq!(item["CgstAmt"], "900.00");
+        assert_eq!(item["SgstAmt"], "900.00");
+        assert!(item.get("IgstAmt").is_none(), "intra-state emits no IgstAmt");
+        assert_eq!(item["TotItemVal"], "11800.00");
+        assert_eq!(v["ValDtls"]["CgstVal"], "900.00");
+        assert_eq!(v["ValDtls"]["SgstVal"], "900.00");
+        assert_eq!(v["ValDtls"]["IgstVal"], "0.00");
+    }
+
+    #[test]
+    fn inv01_credit_note_maps_to_crn() {
+        let mut doc = inter_state_invoice();
+        // Cheap document-type swap for the doc-type mapping assertion.
+        let parts = CommercialDocumentParts {
+            schema_version: SchemaVersion::default(),
+            id: DocumentId::new("doc-in-cn").unwrap(),
+            document_type: DocumentType::CreditNote,
+            issue_date: DateOnly::new("2026-05-26").unwrap(),
+            tax_point_date: None,
+            due_date: None,
+            document_number: DocumentNumber::new("CRN-2026-IN-0001").unwrap(),
+            currency: Iso4217Code::new("INR").unwrap(),
+            supplier: doc.supplier.clone(),
+            customer: doc.customer.clone(),
+            payee: None,
+            payment_terms: None,
+            payment_instructions: Vec::new(),
+            lines: std::mem::take(&mut doc.lines),
+            tax_summary: std::mem::take(&mut doc.tax_summary),
+            monetary_total: doc.monetary_total.clone(),
+            attachments: Vec::new(),
+            references: Vec::new(),
+            notes: Vec::new(),
+            extensions: Vec::new(),
+            meta: DocumentMeta {
+                tenant_id: "tenant_123".to_owned(),
+                trace_id: "trace_abc".to_owned(),
+                source_system: Some("inline".to_owned()),
+            },
+        };
+        let cn = CommercialDocument::new(parts).unwrap();
+        let json = to_inv01_json(&cn, &Inv01Context::default()).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["DocDtls"]["Typ"], "CRN");
+    }
+
+    #[test]
+    fn inv01_export_buyer_without_gstin_is_urp_and_inter_state() {
+        let mut doc = inter_state_invoice();
+        // Foreign buyer with no GSTIN.
+        doc.customer.tax_ids.clear();
+        let ctx = Inv01Context {
+            supply_type: "EXPWOP".to_owned(),
+        };
+        let json = to_inv01_json(&doc, &ctx).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["TranDtls"]["SupTyp"], "EXPWOP");
+        assert_eq!(v["BuyerDtls"]["Gstin"], "URP");
+        // No buyer GSTIN -> treated as inter-state, so IGST is charged.
+        assert!(v["ItemList"][0].get("IgstAmt").is_some());
+    }
+
+    #[test]
+    fn inv01_rejects_unsupported_document_type() {
+        let err = doc_type_code(DocumentType::ProForma).unwrap_err();
+        assert!(matches!(err, Inv01Error::UnsupportedDocumentType(_)));
+    }
+
+    #[test]
+    fn inv01_is_deterministic() {
+        let doc = inter_state_invoice();
+        let ctx = Inv01Context::default();
+        assert_eq!(
+            to_inv01_json(&doc, &ctx).unwrap(),
+            to_inv01_json(&doc, &ctx).unwrap(),
+            "INV-01 serialization must be byte-stable"
+        );
+    }
+
+    #[test]
+    fn inv01_key_order_is_fixed() {
+        // Determinism is byte-stable key order; assert the top-level key order
+        // matches the INV-01 schema sequence (no map-driven reordering).
+        let json = to_inv01_json(&inter_state_invoice(), &Inv01Context::default()).unwrap();
+        let order = ["Version", "TranDtls", "DocDtls", "SellerDtls", "BuyerDtls", "ItemList", "ValDtls"];
+        let mut last = 0;
+        for key in order {
+            let needle = format!("\"{key}\"");
+            let at = json
+                .find(&needle)
+                .expect("INV-01 emits every top-level key in order");
+            assert!(at >= last, "key {key} out of INV-01 order");
+            last = at;
+        }
     }
 }

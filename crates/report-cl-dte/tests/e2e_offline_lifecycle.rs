@@ -56,8 +56,8 @@ use invoicekit_ir::{
     MonetaryTotal, Party, PartyTaxId, PostalAddress, SchemaVersion, TaxCategorySummary,
 };
 use invoicekit_report_cl_dte::{
-    DteKind, MockSiiProvider, SiiEnvironment, SiiError, SiiProvider, SiiStatus, SiiSubmitEnvelope,
-    SiiSubmitRequest,
+    to_dte_xml, DteContext, DteKind, MockSiiProvider, SiiEnvironment, SiiError, SiiProvider,
+    SiiStatus, SiiSubmitEnvelope, SiiSubmitRequest,
 };
 use invoicekit_verify::{verify_packed, VerifyOptions};
 use rust_decimal::Decimal;
@@ -501,6 +501,144 @@ fn pack_bundle(doc: &CommercialDocument, ubl_bytes: &[u8], envelope: &SiiSubmitE
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
     let bundle = EvidenceBundle { manifest, artefacts };
     pack(&bundle).unwrap()
+}
+
+/// Pack a bundle whose national artifact is the **SII DTE** XML (not UBL). The
+/// `formats/dte.xml` member carries Chile's real `DTE`/`Documento` tree, and the
+/// receipt + canonical document round out the audit trail.
+fn pack_bundle_dte(
+    doc: &CommercialDocument,
+    dte_bytes: &[u8],
+    envelope: &SiiSubmitEnvelope,
+) -> Vec<u8> {
+    let canonical = canonicalize_value(&doc.to_value().unwrap())
+        .unwrap()
+        .into_bytes();
+    let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    artefacts.insert("canonical.json".to_owned(), canonical);
+    artefacts.insert("formats/dte.xml".to_owned(), dte_bytes.to_vec());
+    artefacts.insert(
+        "receipt.json".to_owned(),
+        serde_json::to_vec(envelope).unwrap(),
+    );
+    let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
+    let bundle = EvidenceBundle { manifest, artefacts };
+    pack(&bundle).unwrap()
+}
+
+/// Native-format end-to-end lifecycle: serialize the IR document to the **real**
+/// SII DTE (`Documento Tributario Electrónico`) XML via [`to_dte_xml`] (NOT UBL),
+/// structurally validate the national spine, submit those bytes through the
+/// existing `MockSiiProvider` (real RUT + folio validators), then bundle and
+/// verify.
+///
+/// This mirrors Italy's `to_fattura_pa_xml` -> validate -> mock-transmit ->
+/// evidence -> verify chain, but emits Chile's national tree with its actual
+/// SII element names (`Encabezado`, `IdDoc`, `TipoDTE`, `Emisor`, `RUTEmisor`,
+/// `Totales`, `Detalle`, ...), per the SII "Formato de Documentos Tributarios
+/// Electrónicos": <https://www.sii.cl/factura_electronica/formato_dte.pdf>.
+#[test]
+fn cl_native_dte_lifecycle_produces_verifiable_evidence() {
+    // 1. build
+    let doc = chilean_invoice();
+
+    // 2. serialize -> SII DTE national XML (the real Chilean format).
+    let ctx = DteContext {
+        folio: FOLIO,
+        giro_emisor: "Servicios de consultoría e ingeniería".to_owned(),
+    };
+    let dte_xml = to_dte_xml(&doc, &ctx).unwrap();
+    let dte_bytes = dte_xml.clone().into_bytes();
+
+    // 3. validate (local, structural): the national artifact must carry the
+    //    mandatory SII DTE spine with its actual element names — proving this is
+    //    the real DTE tree, not UBL relabeled. (`amt(10000)` is CLP 100.00; the
+    //    SII serializer renders pesos as integers, so 10000 minor -> "100".)
+    for needle in [
+        "<DTE xmlns=\"http://www.sii.cl/SiiDte\" version=\"1.0\">",
+        "<Documento ID=\"T33F4242\">",
+        "<Encabezado>",
+        "<TipoDTE>33</TipoDTE>",
+        "<Folio>4242</Folio>",
+        "<RUTEmisor>76192083-9</RUTEmisor>",
+        "<RUTRecep>77654321-0</RUTRecep>",
+        "<Totales>",
+        "<MntNeto>100</MntNeto>",
+        "<TasaIVA>19</TasaIVA>",
+        "<IVA>19</IVA>",
+        "<MntTotal>119</MntTotal>",
+        "<Detalle>",
+        "<NroLinDet>1</NroLinDet>",
+        "<MontoItem>100</MontoItem>",
+    ] {
+        assert!(dte_xml.contains(needle), "SII DTE missing {needle}");
+    }
+    // It must NOT be the UBL surface.
+    assert!(
+        !dte_xml.contains("cac:AccountingSupplierParty") && !dte_xml.contains("<Invoice"),
+        "the native DTE artifact must not be UBL relabeled"
+    );
+
+    // 4. transmit via the existing mock (real RUT + folio validators).
+    let provider = MockSiiProvider::new();
+    let envelope = provider
+        .submit_dte(&submit_request(dte_bytes.clone()))
+        .unwrap();
+    assert_eq!(envelope.status, SiiStatus::Recibido);
+    assert!(envelope.track_id.starts_with("SII-"));
+
+    // 5. evidence bundle (DTE XML as the national artifact) -> verify.
+    let ikb = pack_bundle_dte(&doc, &dte_bytes, &envelope);
+    let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
+    assert!(report.ok, "native-DTE evidence bundle must verify");
+
+    // 6. determinism: the whole native chain is byte-stable.
+    let dte_xml_again = to_dte_xml(&doc, &ctx).unwrap();
+    assert_eq!(dte_xml, dte_xml_again, "DTE serialization must be stable");
+    let ikb_again = pack_bundle_dte(&doc, &dte_xml_again.into_bytes(), &envelope);
+    assert_eq!(ikb, ikb_again, "the native-DTE lifecycle must be byte-stable");
+}
+
+/// Native-format Nota de Crédito (tipo 61): the IR credit note serializes to SII
+/// DTE XML with `TipoDTE` 61 (NOT 33), submits under the credit-note tipo code,
+/// and the bundle verifies. SII tipo 61 per the DTE format spec:
+/// <https://www.sii.cl/factura_electronica/formato_dte.pdf>.
+#[test]
+fn cl_native_dte_credit_note_maps_to_tipo_61() {
+    let doc = chilean_credit_note();
+    let ctx = DteContext {
+        folio: 7001,
+        giro_emisor: "Servicios de consultoría".to_owned(),
+    };
+    let dte_xml = to_dte_xml(&doc, &ctx).unwrap();
+
+    assert!(
+        dte_xml.contains("<TipoDTE>61</TipoDTE>"),
+        "a Nota de Crédito must serialize as SII TipoDTE 61, got:\n{dte_xml}"
+    );
+    assert!(
+        !dte_xml.contains("<TipoDTE>33</TipoDTE>"),
+        "a credit note must not carry the factura tipo 33"
+    );
+    assert!(dte_xml.contains("<Documento ID=\"T61F7001\">"));
+    // Half the original IVA line reversed: CLP 50.00 net, 19% -> IVA 9.50 -> 10
+    // pesos (rounded), MntTotal 59.50 -> 60. (amt() carries scale-2 minor units.)
+    assert!(dte_xml.contains("<MntNeto>50</MntNeto>"));
+
+    let provider = MockSiiProvider::new();
+    let envelope = provider
+        .submit_dte(&submit_request_kind(
+            dte_xml.clone().into_bytes(),
+            DteKind::NotaCredito,
+            7001,
+        ))
+        .unwrap();
+    assert_eq!(envelope.status, SiiStatus::Recibido);
+    assert_eq!(DteKind::NotaCredito.code(), 61);
+
+    let ikb = pack_bundle_dte(&doc, &dte_xml.into_bytes(), &envelope);
+    let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
+    assert!(report.ok, "native-DTE credit-note bundle must verify");
 }
 
 /// Nota de Crédito (tipo 61): the corrective document serializes as a UBL

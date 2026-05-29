@@ -7,18 +7,25 @@
 //!
 //! 1. build a canonical `CommercialDocument` (IR) with a Hungarian supplier +
 //!    customer and the forint (HUF) currency
-//! 2. serialize -> UBL 2.1 XML (the EN 16931 family path; NAV's wire payload is
-//!    a typed `manageInvoiceRequest` wrapper around the invoice, and this crate
-//!    exposes no national serializer, so we ship the UBL bytes as the payload)
-//! 3. submit those bytes to the existing offline `MockNavProvider`
+//! 2. serialize -> NAV Online Számla `InvoiceData` (RTIR) XML, the REAL
+//!    national document defined by the Online Számla Interface Specification
+//!    v3.0 (`invoiceData.xsd`); these bytes ARE the `manageInvoiceRequest`
+//!    payload NAV ingests (base64-wrapped on the live wire). A UBL rendering is
+//!    bundled alongside as a portable EN 16931 artifact, but it is NOT the wire
+//!    payload.
+//! 3. validate the national artifact's structure (the mandatory `InvoiceData`
+//!    spine: `invoiceNumber`, `supplierTaxNumber`, `invoiceLines/line`,
+//!    `invoiceSummary/summaryNormal`)
+//! 4. submit the `InvoiceData` bytes to the existing offline `MockNavProvider`
 //!    (`manage_invoice`), asserting NAV's country-specific receipt fields:
 //!    the `NAV-` transaction id, `Received` status, and the recorded timestamp
-//! 4. poll `query_transaction` to reach the terminal `Done` status — the real
+//! 5. poll `query_transaction` to reach the terminal `Done` status — the real
 //!    two-step NAV async lifecycle (submit -> Received, poll -> Done)
-//! 5. assemble a `.ikb` evidence bundle (canonical.json + formats/ubl.xml +
-//!    receipt.json) and `verify_packed(content_only).ok == true` (exit 0)
-//! 6. determinism: run the whole lifecycle twice -> byte-identical `.ikb`
-//! 7. refusal paths: NAV's mock refuses an empty payload (`BadXml`) and a
+//! 6. assemble a `.ikb` evidence bundle (canonical.json + formats/invoice-data.xml
+//!    + formats/ubl.xml + receipt.json) and `verify_packed(content_only).ok ==
+//!    true` (exit 0)
+//! 7. determinism: run the whole lifecycle twice -> byte-identical `.ikb`
+//! 8. refusal paths: NAV's mock refuses an empty payload (`BadXml`) and a
 //!    malformed adóazonosító (`BadTaxId`) as typed `Err`s before the wire
 //!
 //! Goldens are hand-rolled (no `insta`/`pretty_assertions`, which would mutate
@@ -35,7 +42,8 @@ use invoicekit_ir::{
     PartyTaxId, PostalAddress, SchemaVersion, TaxCategorySummary,
 };
 use invoicekit_report_hu_nav::{
-    MockNavProvider, NavEnvironment, NavManageRequest, NavOperation, NavProvider, NavStatus,
+    to_invoice_data_xml, MockNavProvider, NavEnvironment, NavManageRequest, NavOperation,
+    NavProvider, NavStatus,
 };
 use invoicekit_verify::{verify_packed, VerifyOptions};
 use rust_decimal::Decimal;
@@ -146,40 +154,72 @@ fn run_lifecycle() -> (
     // 1. build the canonical IR document.
     let doc = hungarian_invoice();
 
-    // 2. serialize -> UBL 2.1 (EN 16931 family path). NAV's manageInvoiceRequest
-    //    wraps the invoice; this crate exposes no national serializer, so the UBL
-    //    bytes ARE the payload we submit.
+    // 2. serialize -> NAV Online Számla `InvoiceData` (RTIR) XML. This is the
+    //    REAL national document (invoiceData.xsd); its bytes ARE the
+    //    manageInvoiceRequest payload NAV ingests.
+    let invoice_data_xml = to_invoice_data_xml(&doc).unwrap();
+
+    // 3. validate the national artifact's structure: the mandatory InvoiceData
+    //    spine with NAV's actual element names (not UBL).
+    for needle in [
+        "<InvoiceData xmlns=\"http://schemas.nav.gov.hu/OSA/3.0/data\"",
+        "<invoiceNumber>INV-2026-HU-0001</invoiceNumber>",
+        "<invoiceIssueDate>2026-05-26</invoiceIssueDate>",
+        "<supplierInfo>",
+        "<supplierTaxNumber>",
+        "<base:taxpayerId>12345678</base:taxpayerId>",
+        "<customerInfo>",
+        "<invoiceLines>",
+        "<line>",
+        "<lineNumber>1</lineNumber>",
+        "<lineNetAmount>100.00</lineNetAmount>",
+        "<vatPercentage>0.27</vatPercentage>",
+        "<lineVatData>",
+        "<lineVatAmount>27.00</lineVatAmount>",
+        "<invoiceSummary>",
+        "<summaryNormal>",
+        "<invoiceNetAmount>100.00</invoiceNetAmount>",
+        "<invoiceVatAmount>27.00</invoiceVatAmount>",
+    ] {
+        assert!(
+            invoice_data_xml.contains(needle),
+            "NAV InvoiceData missing {needle}\n{invoice_data_xml}"
+        );
+    }
+    let invoice_data_bytes = invoice_data_xml.into_bytes();
+
+    // A portable UBL rendering rides along in the bundle (EN 16931 family path),
+    // but it is NOT the NAV wire payload.
     let ubl_xml = to_xml(&doc).unwrap();
-    // Structural spot-check on the canonical UBL. Namespace declarations render
-    // inline on the canonicalized open tags (`<cac:... xmlns:cac="...">`), so
-    // match the element-name prefix, not the bare `<name>` form.
     for needle in [
         "<Invoice",
         "<cac:AccountingSupplierParty",
-        "<cac:AccountingCustomerParty",
-        ">HUF<",
         "currencyID=\"HUF\"",
     ] {
         assert!(ubl_xml.contains(needle), "UBL missing {needle}");
     }
     let ubl_bytes = ubl_xml.into_bytes();
 
-    // 3. submit to the offline NAV mock; NAV returns a Received envelope with a
-    //    NAV-assigned transaction id.
+    // 4. submit the NATIONAL InvoiceData bytes to the offline NAV mock; NAV
+    //    returns a Received envelope with a NAV-assigned transaction id.
     let provider = MockNavProvider::with_fixed_recorded_at(FIXED_RECORDED_AT);
-    let received = provider.manage_invoice(&manage_request(ubl_bytes.clone())).unwrap();
+    let received = provider
+        .manage_invoice(&manage_request(invoice_data_bytes.clone()))
+        .unwrap();
 
-    // 4. poll the same transaction; NAV resolves it to the terminal Done status.
+    // 5. poll the same transaction; NAV resolves it to the terminal Done status.
     let done = provider
         .query_transaction(NavEnvironment::Test, &received.transaction_id)
         .unwrap();
 
-    // 5. evidence bundle: canonical IR + national-wire UBL + the final receipt.
+    // 6. evidence bundle: canonical IR + national InvoiceData + portable UBL +
+    //    the final receipt.
     let canonical = canonicalize_value(&doc.to_value().unwrap())
         .unwrap()
         .into_bytes();
     let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     artefacts.insert("canonical.json".to_owned(), canonical);
+    artefacts.insert("formats/invoice-data.xml".to_owned(), invoice_data_bytes);
     artefacts.insert("formats/ubl.xml".to_owned(), ubl_bytes);
     artefacts.insert(
         "receipt.json".to_owned(),
@@ -221,6 +261,187 @@ fn hungary_lifecycle_is_byte_deterministic() {
     let (a, _, _) = run_lifecycle();
     let (b, _, _) = run_lifecycle();
     assert_eq!(a, b, "the whole offline lifecycle must be byte-stable");
+}
+
+#[test]
+fn hungary_native_invoice_data_is_the_wire_payload_and_not_ubl() {
+    // Prove the wire payload submitted to NAV is the REAL national InvoiceData
+    // document (invoiceData.xsd), not a UBL relabelling: it carries NAV's own
+    // element names and the 8+1+2 taxNumber split, and carries NONE of the UBL
+    // element names. A buyer with a full 8-2-2 adószám exercises all three
+    // taxNumber sub-elements (taxpayerId/vatCode/countyCode).
+    let doc = hungarian_invoice();
+    let invoice_data = to_invoice_data_xml(&doc).unwrap();
+
+    // Real NAV InvoiceData spine.
+    for needle in [
+        "<InvoiceData xmlns=\"http://schemas.nav.gov.hu/OSA/3.0/data\"",
+        "xmlns:base=\"http://schemas.nav.gov.hu/OSA/3.0/base\"",
+        "<invoiceNumber>INV-2026-HU-0001</invoiceNumber>",
+        "<invoiceIssueDate>2026-05-26</invoiceIssueDate>",
+        "<invoiceMain>",
+        "<invoiceHead>",
+        "<supplierInfo>",
+        "<supplierTaxNumber>",
+        "<base:taxpayerId>12345678</base:taxpayerId>",
+        "<customerInfo>",
+        "<invoiceCategory>NORMAL</invoiceCategory>",
+        "<currencyCode>HUF</currencyCode>",
+        "<invoiceLines>",
+        "<lineNumber>1</lineNumber>",
+        "<lineNetAmount>100.00</lineNetAmount>",
+        "<vatPercentage>0.27</vatPercentage>",
+        "<lineVatAmount>27.00</lineVatAmount>",
+        "<invoiceSummary>",
+        "<summaryNormal>",
+        "<invoiceNetAmount>100.00</invoiceNetAmount>",
+        "<invoiceVatAmount>27.00</invoiceVatAmount>",
+        "<invoiceGrossAmount>127.00</invoiceGrossAmount>",
+    ] {
+        assert!(
+            invoice_data.contains(needle),
+            "InvoiceData missing {needle}\n{invoice_data}"
+        );
+    }
+
+    // It must be the national format, NOT UBL relabelled: no UBL element names.
+    for forbidden in [
+        "<cbc:",
+        "<cac:",
+        "InvoiceTypeCode",
+        "AccountingSupplierParty",
+        "TaxSubtotal",
+    ] {
+        assert!(
+            !invoice_data.contains(forbidden),
+            "NAV InvoiceData must not carry the UBL element {forbidden}"
+        );
+    }
+
+    // The exact bytes submitted to NAV's mock are the InvoiceData bytes.
+    let provider = MockNavProvider::with_fixed_recorded_at(FIXED_RECORDED_AT);
+    let received = provider
+        .manage_invoice(&manage_request(invoice_data.into_bytes()))
+        .unwrap();
+    assert_eq!(received.status, NavStatus::Received);
+    assert!(received.transaction_id.starts_with("NAV-"));
+}
+
+#[test]
+fn hungary_native_invoice_data_emits_full_8_1_2_tax_number() {
+    // A supplier whose adószám is the full 8-1-2 shape (`12345678-2-41`) must
+    // render all three NAV taxNumber sub-elements in order.
+    let mut doc = hungarian_invoice();
+    doc.supplier = hungarian_party("Acme Kft", "HU12345678-2-41", "Budapest");
+    let invoice_data = to_invoice_data_xml(&doc).unwrap();
+
+    assert!(invoice_data.contains("<base:taxpayerId>12345678</base:taxpayerId>"));
+    assert!(invoice_data.contains("<base:vatCode>2</base:vatCode>"));
+    assert!(invoice_data.contains("<base:countyCode>41</base:countyCode>"));
+
+    // taxpayerId precedes vatCode precedes countyCode (schema element order).
+    let pid = invoice_data.find("<base:taxpayerId>").unwrap();
+    let vat = invoice_data.find("<base:vatCode>").unwrap();
+    let county = invoice_data.find("<base:countyCode>").unwrap();
+    assert!(pid < vat && vat < county, "taxNumber sub-elements out of order");
+}
+
+#[test]
+fn hungary_native_invoice_data_multiline_aggregates_summary() {
+    // A two-line invoice (27% + 5%) must emit one `line` per IR line in document
+    // order and aggregate the net/VAT totals into summaryNormal. NAV reports
+    // per-line VAT (lineVatData/lineVatAmount) and the document-level
+    // invoiceNetAmount/invoiceVatAmount.
+    //   L1: 100.00 @ 27% -> VAT 27.00
+    //   L2:  30.00 @  5% -> VAT  1.50
+    //   net 130.00 ; VAT 28.50 ; gross 158.50
+    let doc = CommercialDocument::new(CommercialDocumentParts {
+        schema_version: SchemaVersion::default(),
+        id: DocumentId::new("doc-hu-e2e-nav-mix").unwrap(),
+        document_type: DocumentType::Invoice,
+        issue_date: DateOnly::new("2026-05-26").unwrap(),
+        tax_point_date: None,
+        due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+        document_number: DocumentNumber::new("INV-2026-HU-NAV-MIX").unwrap(),
+        currency: Iso4217Code::new("HUF").unwrap(),
+        supplier: hungarian_party("Acme Kft", "HU12345678-2-41", "Budapest"),
+        customer: hungarian_party("Beta Zrt", "HU98765432", "Szeged"),
+        payee: None,
+        payment_terms: None,
+        payment_instructions: Vec::new(),
+        lines: vec![
+            DocumentLine {
+                id: "1".to_owned(),
+                description: "Tanácsadás (27%)".to_owned(),
+                quantity: DecimalValue::new(Decimal::from(2)),
+                unit_code: Some("EA".to_owned()),
+                unit_price: amt(5000),
+                line_extension_amount: amt(10000),
+                tax_category: Some("S".to_owned()),
+                extensions: Vec::new(),
+            },
+            DocumentLine {
+                id: "2".to_owned(),
+                description: "Élelmiszer (5%)".to_owned(),
+                quantity: DecimalValue::new(Decimal::from(3)),
+                unit_code: Some("EA".to_owned()),
+                unit_price: amt(1000),
+                line_extension_amount: amt(3000),
+                tax_category: Some("R5".to_owned()),
+                extensions: Vec::new(),
+            },
+        ],
+        tax_summary: vec![
+            TaxCategorySummary {
+                category_code: "S".to_owned(),
+                taxable_amount: amt(10000),
+                tax_amount: amt(2700),
+                tax_rate: Some(DecimalValue::new(Decimal::new(2700, 2))),
+            },
+            TaxCategorySummary {
+                category_code: "R5".to_owned(),
+                taxable_amount: amt(3000),
+                tax_amount: amt(150),
+                tax_rate: Some(DecimalValue::new(Decimal::new(500, 2))),
+            },
+        ],
+        monetary_total: MonetaryTotal {
+            line_extension_amount: amt(13000),
+            tax_exclusive_amount: amt(13000),
+            tax_inclusive_amount: amt(15850),
+            allowance_total_amount: None,
+            charge_total_amount: None,
+            prepaid_amount: None,
+            payable_amount: amt(15850),
+        },
+        attachments: Vec::new(),
+        references: Vec::new(),
+        notes: Vec::new(),
+        extensions: Vec::new(),
+        meta: DocumentMeta {
+            tenant_id: TENANT.to_owned(),
+            trace_id: TRACE.to_owned(),
+            source_system: Some("e2e".to_owned()),
+        },
+    })
+    .unwrap();
+
+    let invoice_data = to_invoice_data_xml(&doc).unwrap();
+
+    // One `line` per IR line, in document order.
+    assert_eq!(invoice_data.matches("<line>").count(), 2);
+    assert!(invoice_data.contains("<lineNumber>1</lineNumber>"));
+    assert!(invoice_data.contains("<lineNumber>2</lineNumber>"));
+    // Per-line VAT rates render as NAV fractions.
+    assert!(invoice_data.contains("<vatPercentage>0.27</vatPercentage>"));
+    assert!(invoice_data.contains("<vatPercentage>0.05</vatPercentage>"));
+    // Aggregated document totals: net 130.00, VAT 28.50, gross 158.50.
+    assert!(invoice_data.contains("<invoiceNetAmount>130.00</invoiceNetAmount>"));
+    assert!(invoice_data.contains("<invoiceVatAmount>28.50</invoiceVatAmount>"));
+    assert!(invoice_data.contains("<invoiceGrossAmount>158.50</invoiceGrossAmount>"));
+
+    // Determinism on the multi-line national document.
+    assert_eq!(invoice_data, to_invoice_data_xml(&doc).unwrap());
 }
 
 #[test]

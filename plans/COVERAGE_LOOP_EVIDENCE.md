@@ -597,3 +597,28 @@ performance** skills and closes the residuals.
   normalization) remain as the next triage pass.
 - **Skills used:** `multi-pass-bug-hunting` (the audit), `systematic-debugging`, `verification-before-completion`.
 
+
+### Turn 19 — 2026-05-29 — L8 native serializers (batch 1): 4 real, 1 fabricated→reverted
+- **Workflow:** `coverage-p3-l8-native-serializers` (10 agents, implement→adversarial review) for GR/HU/IN/CL/KR.
+  The adversarial review earned its keep — it caught real fidelity problems I did NOT blindly commit:
+  - **GR myDATA** ✅ — real AADE `InvoicesDoc` element names (`issuer`/`counterpart`/`invoiceDetails`/`invoiceSummary`);
+    minor fidelity notes (vatExemptionCategory hardcoded) acceptable. Committed.
+  - **HU NAV** ✅ — real NAV `InvoiceData` names (`invoiceLines`/`invoiceSummary`); minor bare-0 vatPercentage note. Committed.
+  - **CL DTE** ✅ after fix — real SII `DTE`/`Documento`/`Encabezado`/`Totales` names, but had a **real encoding bug**
+    (declared ISO-8859-1 while returning a UTF-8 String → mojibake on accented Spanish). Fixed to UTF-8 + documented
+    the wire-transcode follow-up. Committed.
+  - **IN GST** ✅ partial — real IRP `INV-01` JSON spine (`TranDtls`/`DocDtls`/`SellerDtls`/`ItemList`/`ValDtls`), but
+    omits several IRP-mandatory fields (`PrdDesc`/`IsServc`/`Addr1`/`Pos`, real `HsnCd`). Committed with an honest
+    partial-coverage doc note; full INV-01 completion is a follow-up.
+  - **KR NTS** ❌ REVERTED — **fabricated**: invented namespace `urn:kr:gov:nts:etaxinvoice` (not the real KEC URN)
+    + guessed CII-flavored element names, not confirmed KEC ASD tags. Committing fabricated format names = slop, so
+    `git stash`ed (recoverable) pending a verified KEC schema; **KR stays on UBL** (honest).
+- **Evidence:** the 4 committed crates green (CL 21, GR 15, IN 15 + e2e each); `cargo test --workspace` = **2383
+  passed, 0 failed** (after KR revert); clippy clean; UBS criticals 0 (fixed a test `panic!`→`.expect()` in IN).
+- **Decisions:** D18 — native serializers land ONLY when the format is verifiably real (cited spec + review confirms
+  real element names). Unverifiable/fabricated formats (KR KEC) are reverted, not committed — honest UBL beats fake
+  native. L8 at scale is slop-prone for obscure formats and must stay review-gated.
+- **L8 status:** IT/MX/BR/PL (flagships) + now GR/HU/CL + IN(partial) have real native serializers; KR reverted;
+  the remaining ~11 (AR/EC/CR/DO/ID/TH/TW/VN/CN/EG/IL + KR) stay on the EN16931/UBL representation pending verified specs.
+- **Next:** capability-matrix format update for the new native formats (central step: add myDATA/NAV/DTE/GST to the
+  schema enum + entries); remaining medium/low audit findings; further L8 batches where specs are verifiable.

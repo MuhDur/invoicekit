@@ -22,8 +22,360 @@
 
 #![allow(clippy::doc_markdown)]
 
+use invoicekit_ir::{CommercialDocument, DocumentType, Party};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+// ---------------------------------------------------------------------------
+// myDATA InvoicesDoc serialization (IR -> national AADE myDATA XML)
+// ---------------------------------------------------------------------------
+
+/// myDATA `InvoicesDoc` transmission context: the document-level header fields
+/// that live in the AADE `invoiceHeader` but are not part of the
+/// jurisdiction-agnostic IR.
+///
+/// Reference: AADE myDATA REST API / `InvoicesDoc` XSD, namespace
+/// `http://www.aade.gr/myDATA/invoice/v1.0`
+/// (<https://www.aade.gr/en/mydata/technical-specifications-versions-mydata>).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MyDataDocContext {
+    /// `series` — the invoice series the issuer assigns (e.g. `"A"`). The XSD
+    /// element is named `series`.
+    pub series: String,
+    /// `branch` — the issuer establishment branch number. `0` is the head
+    /// office. Carried on both `issuer` and `counterpart`.
+    pub issuer_branch: u32,
+    /// `branch` — the counterpart (buyer) establishment branch number.
+    pub counterpart_branch: u32,
+}
+
+impl Default for MyDataDocContext {
+    fn default() -> Self {
+        Self {
+            series: "A".to_owned(),
+            issuer_branch: 0,
+            counterpart_branch: 0,
+        }
+    }
+}
+
+/// Errors raised while serializing an IR document to a myDATA `InvoicesDoc`.
+#[derive(Debug, Error)]
+pub enum MyDataXmlError {
+    /// The IR `document_type` has no myDATA `invoiceType` mapping.
+    #[error("document type {0:?} is not representable as a myDATA invoiceType")]
+    UnsupportedDocumentType(DocumentType),
+    /// The issuer carries no usable VAT number for the `issuer/vatNumber`.
+    #[error("issuer has no tax id usable as issuer/vatNumber")]
+    MissingIssuerVatNumber,
+    /// The counterpart carries no usable VAT number for `counterpart/vatNumber`.
+    #[error("counterpart has no tax id usable as counterpart/vatNumber")]
+    MissingCounterpartVatNumber,
+    /// The transmission context was malformed (e.g. a blank `series`).
+    #[error("invalid myDATA document context: {0}")]
+    BadContext(String),
+}
+
+/// Serialize an InvoiceKit [`CommercialDocument`] to a deterministic AADE
+/// **myDATA** `InvoicesDoc` XML document.
+///
+/// This is the REAL Greek national reporting format, not UBL relabelled. The
+/// element names and nesting follow the AADE myDATA `InvoicesDoc` XSD
+/// (namespace `http://www.aade.gr/myDATA/invoice/v1.0`): an `InvoicesDoc` root
+/// wrapping one `invoice`, whose children are — in XSD order — `issuer`,
+/// `counterpart`, `invoiceHeader`, one `invoiceDetails` per line, and a single
+/// `invoiceSummary`. Reference: AADE myDATA REST API documentation,
+/// <https://www.aade.gr/en/mydata/technical-specifications-versions-mydata>.
+///
+/// * `issuer` / `counterpart` carry `vatNumber`, `country`, `branch`. The
+///   `EL` EU-VAT prefix is stripped so `vatNumber` is the bare nine-digit AFM,
+///   per the myDATA convention.
+/// * `invoiceHeader` carries `series`, `aa` (the document number), `issueDate`,
+///   and `invoiceType` (the AADE classification code, e.g. `1.1`).
+/// * Each `invoiceDetails` row carries `lineNumber`, `netValue`, `vatAmount`,
+///   `vatCategory` (the integer myDATA code), and — only when `vatCategory` is
+///   `7` (excluding VAT) — a mandatory `vatExemptionCategory`.
+/// * `invoiceSummary` carries `totalNetValue`, `totalVatAmount`, and
+///   `totalGrossValue`.
+///
+/// Output is byte-stable by construction: a fixed element order with no maps
+/// and amounts formatted at fixed scale 2.
+///
+/// # Errors
+///
+/// Returns [`MyDataXmlError::UnsupportedDocumentType`] for document types with
+/// no `invoiceType` mapping, [`MyDataXmlError::MissingIssuerVatNumber`] /
+/// [`MyDataXmlError::MissingCounterpartVatNumber`] when a party has no VAT
+/// number, and [`MyDataXmlError::BadContext`] when the context is malformed.
+pub fn to_invoices_doc_xml(
+    document: &CommercialDocument,
+    context: &MyDataDocContext,
+) -> Result<String, MyDataXmlError> {
+    if context.series.trim().is_empty() {
+        return Err(MyDataXmlError::BadContext(
+            "series must not be empty".to_owned(),
+        ));
+    }
+    let invoice_type = invoice_type_code(document.document_type)?;
+    let issuer = party_vat(&document.supplier).ok_or(MyDataXmlError::MissingIssuerVatNumber)?;
+    let counterpart =
+        party_vat(&document.customer).ok_or(MyDataXmlError::MissingCounterpartVatNumber)?;
+
+    let mut out = String::with_capacity(2048);
+    out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    out.push_str(
+        "<InvoicesDoc xmlns=\"http://www.aade.gr/myDATA/invoice/v1.0\">\n",
+    );
+    open(&mut out, 1, "invoice");
+
+    // --- issuer ---
+    open(&mut out, 2, "issuer");
+    el(&mut out, 3, "vatNumber", &issuer.vat_number);
+    el(&mut out, 3, "country", &issuer.country);
+    el(&mut out, 3, "branch", &context.issuer_branch.to_string());
+    close(&mut out, 2, "issuer");
+
+    // --- counterpart ---
+    open(&mut out, 2, "counterpart");
+    el(&mut out, 3, "vatNumber", &counterpart.vat_number);
+    el(&mut out, 3, "country", &counterpart.country);
+    el(&mut out, 3, "branch", &context.counterpart_branch.to_string());
+    close(&mut out, 2, "counterpart");
+
+    // --- invoiceHeader ---
+    open(&mut out, 2, "invoiceHeader");
+    el(&mut out, 3, "series", &context.series);
+    el(&mut out, 3, "aa", document.document_number.as_str());
+    el(&mut out, 3, "issueDate", document.issue_date.as_str());
+    el(&mut out, 3, "invoiceType", invoice_type.code());
+    close(&mut out, 2, "invoiceHeader");
+
+    // --- invoiceDetails (one row per line) ---
+    let mut total_net = Decimal::ZERO;
+    let mut total_vat = Decimal::ZERO;
+    for (index, line) in document.lines.iter().enumerate() {
+        let net = line.line_extension_amount.inner();
+        let (vat_amount, vat_category, exemption) = line_vat(document, line);
+        total_net += net;
+        total_vat += vat_amount;
+        open(&mut out, 2, "invoiceDetails");
+        el(&mut out, 3, "lineNumber", &(index + 1).to_string());
+        el(&mut out, 3, "netValue", &fmt_amount(net));
+        el(&mut out, 3, "vatAmount", &fmt_amount(vat_amount));
+        el(&mut out, 3, "vatCategory", &vat_category.to_string());
+        // `vatExemptionCategory` is mandatory exactly when vatCategory == 7
+        // (excluding VAT) per the myDATA XSD; emitted only then.
+        if vat_category == VAT_CATEGORY_EXCLUDING {
+            if let Some(exemption_code) = exemption {
+                el(
+                    &mut out,
+                    3,
+                    "vatExemptionCategory",
+                    &exemption_code.to_string(),
+                );
+            }
+        }
+        close(&mut out, 2, "invoiceDetails");
+    }
+
+    // --- invoiceSummary ---
+    let total_gross = total_net + total_vat;
+    open(&mut out, 2, "invoiceSummary");
+    el(&mut out, 3, "totalNetValue", &fmt_amount(total_net));
+    el(&mut out, 3, "totalVatAmount", &fmt_amount(total_vat));
+    el(&mut out, 3, "totalGrossValue", &fmt_amount(total_gross));
+    close(&mut out, 2, "invoiceSummary");
+
+    close(&mut out, 1, "invoice");
+    out.push_str("</InvoicesDoc>\n");
+    Ok(out)
+}
+
+/// myDATA `invoiceType` classification code derived from the IR document type.
+///
+/// The AADE `invoiceType` element takes a code from the myDATA classification
+/// (`1.1` sales of goods, `2.1` services, `5.1` associated credit note, ...).
+/// We map the structural IR [`DocumentType`] to a sensible default code; the
+/// caller can target a finer sub-code through [`MyDataInvoiceCategory`] on the
+/// report request. Reference: AADE myDATA `invoiceType` codelist.
+fn invoice_type_code(document_type: DocumentType) -> Result<MyDataInvoiceCategory, MyDataXmlError> {
+    match document_type {
+        DocumentType::Invoice => Ok(MyDataInvoiceCategory::SalesGoods {
+            code: "1.1".to_owned(),
+        }),
+        DocumentType::CreditNote => Ok(MyDataInvoiceCategory::CreditNote {
+            code: "5.1".to_owned(),
+        }),
+        DocumentType::SelfBilled => Ok(MyDataInvoiceCategory::SelfBilling {
+            code: "3.1".to_owned(),
+        }),
+        other @ (DocumentType::DebitNote | DocumentType::ProForma) => {
+            Err(MyDataXmlError::UnsupportedDocumentType(other))
+        }
+    }
+}
+
+/// An issuer / counterpart VAT projection: the bare nine-digit AFM plus the
+/// ISO country code.
+struct PartyVat {
+    vat_number: String,
+    country: String,
+}
+
+/// Extract `(vatNumber, country)` from a party: prefer a `vat` scheme id, else
+/// the first tax id. The two-letter country prefix (e.g. `EL`) is stripped so
+/// `vatNumber` is the bare AFM the myDATA endpoints expect.
+fn party_vat(party: &Party) -> Option<PartyVat> {
+    let chosen = party
+        .tax_ids
+        .iter()
+        .find(|t| t.scheme.eq_ignore_ascii_case("vat"))
+        .or_else(|| party.tax_ids.first())?;
+    let country = party.address.country.as_str().to_owned();
+    let vat_number = strip_vat_country_prefix(&chosen.value);
+    Some(PartyVat {
+        vat_number,
+        country,
+    })
+}
+
+/// Strip a leading two-letter VAT country prefix from a VAT value
+/// (`"EL123456789"` -> `"123456789"`). Greek EU-VAT ids prefix the AFM with
+/// `EL`; the myDATA `vatNumber` field wants the bare AFM.
+fn strip_vat_country_prefix(value: &str) -> String {
+    let bytes = value.as_bytes();
+    if bytes.len() > 2 && bytes[..2].iter().all(u8::is_ascii_alphabetic) {
+        value[2..].to_owned()
+    } else {
+        value.to_owned()
+    }
+}
+
+/// The myDATA `vatCategory` integer code for "excluding VAT" (0% / exempt). The
+/// XSD makes `vatExemptionCategory` mandatory exactly for this category.
+const VAT_CATEGORY_EXCLUDING: u8 = 7;
+
+/// Resolve a line's `(vatAmount, vatCategory, vatExemptionCategory?)` from the
+/// matching tax-summary entry.
+///
+/// `vatCategory` is the myDATA integer code derived from the percentage rate
+/// (`1` = 24% standard, `2` = 13%, `3` = 6%, `7` = 0% / excluding VAT) per the
+/// AADE myDATA `vatCategory` codelist. The line's share of the band VAT is the
+/// band tax pro-rated by the line's net over the band's taxable base.
+fn line_vat(
+    document: &CommercialDocument,
+    line: &invoicekit_ir::DocumentLine,
+) -> (Decimal, u8, Option<u8>) {
+    let Some(cat) = line.tax_category.as_ref() else {
+        return (Decimal::ZERO, VAT_CATEGORY_EXCLUDING, Some(1));
+    };
+    let Some(summary) = document
+        .tax_summary
+        .iter()
+        .find(|s| &s.category_code == cat)
+    else {
+        return (Decimal::ZERO, VAT_CATEGORY_EXCLUDING, Some(1));
+    };
+    let rate = summary
+        .tax_rate
+        .as_ref()
+        .map_or(Decimal::ZERO, invoicekit_ir::DecimalValue::inner);
+    let vat_category = vat_category_for_rate(rate);
+    // Pro-rate the band VAT onto this line by its net share of the band base.
+    let band_base = summary.taxable_amount.inner();
+    let line_net = line.line_extension_amount.inner();
+    let vat_amount = if band_base.is_zero() {
+        Decimal::ZERO
+    } else {
+        (summary.tax_amount.inner() * line_net / band_base).round_dp(2)
+    };
+    let exemption =
+        (vat_category == VAT_CATEGORY_EXCLUDING).then_some(1_u8);
+    (vat_amount, vat_category, exemption)
+}
+
+/// Map a VAT percentage to the myDATA `vatCategory` integer code.
+///
+/// AADE myDATA `vatCategory` codelist: `1` = 24% (standard), `2` = 13%,
+/// `3` = 6%, `4` = 17%, `5` = 9%, `6` = 4%, `7` = 0% / records excluding VAT.
+fn vat_category_for_rate(rate: Decimal) -> u8 {
+    // Compare on whole-percent values to stay robust to scale (24.00 vs 24).
+    let whole = rate.round_dp(0).normalize();
+    if whole == Decimal::from(24) {
+        1
+    } else if whole == Decimal::from(13) {
+        2
+    } else if whole == Decimal::from(6) {
+        3
+    } else if whole == Decimal::from(17) {
+        4
+    } else if whole == Decimal::from(9) {
+        5
+    } else if whole == Decimal::from(4) {
+        6
+    } else {
+        // Zero / unknown -> "excluding VAT" (7); requires vatExemptionCategory.
+        VAT_CATEGORY_EXCLUDING
+    }
+}
+
+/// Format a decimal at fixed scale 2 (`100` -> `"100.00"`, `0` -> `"0.00"`),
+/// deterministic. Rounds to two places then pins the scale so trailing zeros
+/// always render.
+fn fmt_amount(value: Decimal) -> String {
+    let mut rounded = value.round_dp(2);
+    rounded.rescale(2);
+    rounded.to_string()
+}
+
+/// Append `<tag>escaped-text</tag>` at the given indent depth.
+fn el(out: &mut String, depth: usize, tag: &str, text: &str) {
+    indent(out, depth);
+    out.push('<');
+    out.push_str(tag);
+    out.push('>');
+    push_escaped(out, text);
+    out.push_str("</");
+    out.push_str(tag);
+    out.push_str(">\n");
+}
+
+/// Append an opening `<tag>` at the given indent depth.
+fn open(out: &mut String, depth: usize, tag: &str) {
+    indent(out, depth);
+    out.push('<');
+    out.push_str(tag);
+    out.push_str(">\n");
+}
+
+/// Append a closing `</tag>` at the given indent depth.
+fn close(out: &mut String, depth: usize, tag: &str) {
+    indent(out, depth);
+    out.push_str("</");
+    out.push_str(tag);
+    out.push_str(">\n");
+}
+
+fn indent(out: &mut String, depth: usize) {
+    for _ in 0..depth {
+        out.push_str("  ");
+    }
+}
+
+/// Append XML-escaped text content.
+fn push_escaped(out: &mut String, text: &str) {
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            other => out.push(other),
+        }
+    }
+}
 
 /// Environment selector for the IAPR transport. Operators
 /// pick at engine-construction time.
@@ -344,6 +696,235 @@ pub const fn crate_name() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use invoicekit_ir::{
+        CommercialDocument, CommercialDocumentParts, CountryCode, DateOnly, DecimalValue,
+        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentType, Iso4217Code,
+        MonetaryTotal, Party, PartyTaxId, PostalAddress, SchemaVersion, TaxCategorySummary,
+    };
+
+    fn amt(minor: i64) -> DecimalValue {
+        DecimalValue::new(Decimal::new(minor, 2))
+    }
+
+    fn greek_party(name: &str, vat: &str, city: &str) -> Party {
+        Party {
+            id: Some(name.to_lowercase().replace(' ', "-")),
+            name: name.to_owned(),
+            tax_ids: vec![PartyTaxId {
+                scheme: "vat".to_owned(),
+                value: vat.to_owned(),
+            }],
+            address: PostalAddress {
+                lines: vec!["Leoforos Kifisias 1".to_owned()],
+                city: city.to_owned(),
+                subdivision: None,
+                postal_code: "11523".to_owned(),
+                country: CountryCode::new("GR").unwrap(),
+            },
+            contact: None,
+        }
+    }
+
+    fn sample_invoice() -> CommercialDocument {
+        CommercialDocument::new(CommercialDocumentParts {
+            schema_version: SchemaVersion::default(),
+            id: DocumentId::new("doc-gr-1").unwrap(),
+            document_type: DocumentType::Invoice,
+            issue_date: DateOnly::new("2026-05-26").unwrap(),
+            tax_point_date: None,
+            due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+            document_number: DocumentNumber::new("INV-2026-GR-0001").unwrap(),
+            currency: Iso4217Code::new("EUR").unwrap(),
+            supplier: greek_party("Acme Hellas AE", "EL123456789", "Athina"),
+            customer: greek_party("Beta EPE", "EL987654321", "Thessaloniki"),
+            payee: None,
+            payment_terms: None,
+            payment_instructions: Vec::new(),
+            lines: vec![DocumentLine {
+                id: "1".to_owned(),
+                description: "Symvouleftikes ypiresies".to_owned(),
+                quantity: DecimalValue::new(Decimal::from(2)),
+                unit_code: Some("EA".to_owned()),
+                unit_price: amt(5000),
+                line_extension_amount: amt(10000),
+                tax_category: Some("S".to_owned()),
+                extensions: Vec::new(),
+            }],
+            // Greek standard VAT rate is 24% -> myDATA vatCategory 1.
+            tax_summary: vec![TaxCategorySummary {
+                category_code: "S".to_owned(),
+                taxable_amount: amt(10000),
+                tax_amount: amt(2400),
+                tax_rate: Some(DecimalValue::new(Decimal::new(2400, 2))),
+            }],
+            monetary_total: MonetaryTotal {
+                line_extension_amount: amt(10000),
+                tax_exclusive_amount: amt(10000),
+                tax_inclusive_amount: amt(12400),
+                allowance_total_amount: None,
+                charge_total_amount: None,
+                prepaid_amount: None,
+                payable_amount: amt(12400),
+            },
+            attachments: Vec::new(),
+            references: Vec::new(),
+            notes: Vec::new(),
+            extensions: Vec::new(),
+            meta: DocumentMeta {
+                tenant_id: "tenant_gr".to_owned(),
+                trace_id: "trace_gr".to_owned(),
+                source_system: Some("unit".to_owned()),
+            },
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn invoices_doc_contains_mandatory_mydata_structure() {
+        let xml = to_invoices_doc_xml(&sample_invoice(), &MyDataDocContext::default()).unwrap();
+        for needle in [
+            "<InvoicesDoc xmlns=\"http://www.aade.gr/myDATA/invoice/v1.0\">",
+            "<invoice>",
+            "<issuer>",
+            "<vatNumber>123456789</vatNumber>",
+            "<country>GR</country>",
+            "<branch>0</branch>",
+            "<counterpart>",
+            "<vatNumber>987654321</vatNumber>",
+            "<invoiceHeader>",
+            "<series>A</series>",
+            "<aa>INV-2026-GR-0001</aa>",
+            "<issueDate>2026-05-26</issueDate>",
+            "<invoiceType>1.1</invoiceType>",
+            "<invoiceDetails>",
+            "<lineNumber>1</lineNumber>",
+            "<netValue>100.00</netValue>",
+            "<vatAmount>24.00</vatAmount>",
+            "<vatCategory>1</vatCategory>",
+            "<invoiceSummary>",
+            "<totalNetValue>100.00</totalNetValue>",
+            "<totalVatAmount>24.00</totalVatAmount>",
+            "<totalGrossValue>124.00</totalGrossValue>",
+        ] {
+            assert!(xml.contains(needle), "InvoicesDoc missing {needle:?}:\n{xml}");
+        }
+    }
+
+    #[test]
+    fn invoices_doc_is_deterministic() {
+        let doc = sample_invoice();
+        let ctx = MyDataDocContext::default();
+        assert_eq!(
+            to_invoices_doc_xml(&doc, &ctx).unwrap(),
+            to_invoices_doc_xml(&doc, &ctx).unwrap()
+        );
+    }
+
+    #[test]
+    fn invoices_doc_escapes_xml_special_chars() {
+        let mut doc = sample_invoice();
+        doc.lines[0].description = "A & B <co>".to_owned();
+        // Description is not emitted in the InvoicesDoc summary form, but the
+        // counterpart name path / escaping helper must be exercised; assert the
+        // escaper itself on a value-bearing field by routing through series.
+        let ctx = MyDataDocContext {
+            series: "A&B".to_owned(),
+            issuer_branch: 0,
+            counterpart_branch: 0,
+        };
+        let xml = to_invoices_doc_xml(&doc, &ctx).unwrap();
+        assert!(xml.contains("<series>A&amp;B</series>"));
+    }
+
+    #[test]
+    fn invoices_doc_strips_el_prefix_to_bare_afm() {
+        let xml = to_invoices_doc_xml(&sample_invoice(), &MyDataDocContext::default()).unwrap();
+        assert!(xml.contains("<vatNumber>123456789</vatNumber>"));
+        assert!(
+            !xml.contains("EL123456789"),
+            "the EL EU-VAT prefix must be stripped for myDATA vatNumber"
+        );
+    }
+
+    #[test]
+    fn invoices_doc_credit_note_maps_to_invoice_type_5_1() {
+        let mut doc = sample_invoice();
+        // Rebuild as a credit note to exercise the invoiceType mapping.
+        let cn = CommercialDocument::new(CommercialDocumentParts {
+            schema_version: SchemaVersion::default(),
+            id: DocumentId::new("doc-gr-cn-1").unwrap(),
+            document_type: DocumentType::CreditNote,
+            issue_date: DateOnly::new("2026-06-02").unwrap(),
+            tax_point_date: None,
+            due_date: None,
+            document_number: DocumentNumber::new("CN-2026-GR-0001").unwrap(),
+            currency: Iso4217Code::new("EUR").unwrap(),
+            supplier: greek_party("Acme Hellas AE", "EL123456789", "Athina"),
+            customer: greek_party("Beta EPE", "EL987654321", "Thessaloniki"),
+            payee: None,
+            payment_terms: None,
+            payment_instructions: Vec::new(),
+            lines: std::mem::take(&mut doc.lines),
+            tax_summary: doc.tax_summary.clone(),
+            monetary_total: doc.monetary_total.clone(),
+            attachments: Vec::new(),
+            references: Vec::new(),
+            notes: Vec::new(),
+            extensions: Vec::new(),
+            meta: DocumentMeta {
+                tenant_id: "tenant_gr".to_owned(),
+                trace_id: "trace_gr".to_owned(),
+                source_system: Some("unit".to_owned()),
+            },
+        })
+        .unwrap();
+        let xml = to_invoices_doc_xml(&cn, &MyDataDocContext::default()).unwrap();
+        assert!(xml.contains("<invoiceType>5.1</invoiceType>"));
+    }
+
+    #[test]
+    fn invoices_doc_exempt_line_emits_vat_category_7_with_exemption() {
+        let mut doc = sample_invoice();
+        doc.lines[0].tax_category = Some("E".to_owned());
+        doc.tax_summary = vec![TaxCategorySummary {
+            category_code: "E".to_owned(),
+            taxable_amount: amt(10000),
+            tax_amount: amt(0),
+            tax_rate: Some(DecimalValue::new(Decimal::new(0, 2))),
+        }];
+        let xml = to_invoices_doc_xml(&doc, &MyDataDocContext::default()).unwrap();
+        assert!(xml.contains("<vatCategory>7</vatCategory>"));
+        assert!(
+            xml.contains("<vatExemptionCategory>1</vatExemptionCategory>"),
+            "vatCategory 7 requires a vatExemptionCategory per the myDATA XSD:\n{xml}"
+        );
+        assert!(xml.contains("<vatAmount>0.00</vatAmount>"));
+    }
+
+    #[test]
+    fn invoices_doc_rejects_unsupported_document_type() {
+        let err = invoice_type_code(DocumentType::DebitNote).unwrap_err();
+        assert!(matches!(err, MyDataXmlError::UnsupportedDocumentType(_)));
+    }
+
+    #[test]
+    fn invoices_doc_rejects_blank_series() {
+        let ctx = MyDataDocContext {
+            series: "  ".to_owned(),
+            issuer_branch: 0,
+            counterpart_branch: 0,
+        };
+        let err = to_invoices_doc_xml(&sample_invoice(), &ctx).unwrap_err();
+        assert!(matches!(err, MyDataXmlError::BadContext(_)));
+    }
+
+    #[test]
+    fn vat_category_codes_follow_the_mydata_codelist() {
+        assert_eq!(vat_category_for_rate(Decimal::new(2400, 2)), 1); // 24%
+        assert_eq!(vat_category_for_rate(Decimal::new(1300, 2)), 2); // 13%
+        assert_eq!(vat_category_for_rate(Decimal::new(600, 2)), 3); // 6%
+        assert_eq!(vat_category_for_rate(Decimal::new(0, 2)), 7); // exempt
+    }
 
     fn sample_request(category: MyDataInvoiceCategory) -> MyDataReportRequest {
         MyDataReportRequest {

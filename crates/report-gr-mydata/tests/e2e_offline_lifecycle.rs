@@ -39,9 +39,9 @@ use invoicekit_ir::{
     MonetaryTotal, Party, PartyTaxId, PostalAddress, SchemaVersion, TaxCategorySummary,
 };
 use invoicekit_report_gr_mydata::{
-    qr_payload, validate_afm, MockMyDataProvider, MyDataEnvironment, MyDataError,
-    MyDataInvoiceCategory, MyDataMark, MyDataProvider, MyDataReportEnvelope, MyDataReportRequest,
-    MyDataStatus, MyDataUid,
+    qr_payload, to_invoices_doc_xml, validate_afm, MockMyDataProvider, MyDataDocContext,
+    MyDataEnvironment, MyDataError, MyDataInvoiceCategory, MyDataMark, MyDataProvider,
+    MyDataReportEnvelope, MyDataReportRequest, MyDataStatus, MyDataUid,
 };
 use invoicekit_verify::{verify_packed, VerifyOptions};
 use rust_decimal::Decimal;
@@ -767,4 +767,234 @@ fn greece_credit_note_lifecycle_is_byte_deterministic() {
         pack_bundle(&doc, ubl_bytes, &envelope)
     };
     assert_eq!(run(), run(), "credit-note lifecycle must be byte-stable");
+}
+
+// ---------------------------------------------------------------------------
+// Native myDATA InvoicesDoc lifecycle (the REAL Greek national format).
+//
+// The scenarios above serialize via the EN 16931 / UBL family path; the
+// scenarios below drive the lifecycle over `to_invoices_doc_xml`, the native
+// AADE myDATA `InvoicesDoc` serializer (namespace
+// `http://www.aade.gr/myDATA/invoice/v1.0`). They serialize -> validate the
+// real element/field names against the myDATA XSD shape -> mock transmit ->
+// pack a `.ikb` evidence bundle (carrying `formats/invoices_doc.xml`) -> verify.
+// Reference: AADE myDATA REST API / XSD,
+// <https://www.aade.gr/en/mydata/technical-specifications-versions-mydata>.
+// ---------------------------------------------------------------------------
+
+const SERIES: &str = "A";
+
+/// Pack a document + native myDATA `InvoicesDoc` bytes + authority envelope into
+/// a `.ikb` evidence bundle. Mirrors [`pack_bundle`] but lands the national
+/// `formats/invoices_doc.xml` artefact instead of the UBL family one.
+fn pack_native_bundle(
+    doc: &CommercialDocument,
+    invoices_doc_bytes: Vec<u8>,
+    envelope: &MyDataReportEnvelope,
+) -> Vec<u8> {
+    let canonical = canonicalize_value(&doc.to_value().unwrap())
+        .unwrap()
+        .into_bytes();
+    let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    artefacts.insert("canonical.json".to_owned(), canonical);
+    artefacts.insert("formats/invoices_doc.xml".to_owned(), invoices_doc_bytes);
+    artefacts.insert(
+        "receipt.json".to_owned(),
+        serde_json::to_vec(envelope).unwrap(),
+    );
+    let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
+    let bundle = EvidenceBundle { manifest, artefacts };
+    pack(&bundle).unwrap()
+}
+
+/// Structural validation of a native myDATA `InvoicesDoc`: the mandatory spine
+/// the AADE XSD requires (issuer/counterpart VAT, invoiceHeader, per-line
+/// invoiceDetails, invoiceSummary totals). Reference Schematron/XSD validation
+/// stays an external (JVM) backend; this is the local structural gate.
+fn assert_invoices_doc_structure(xml: &str) {
+    for needle in [
+        "<InvoicesDoc xmlns=\"http://www.aade.gr/myDATA/invoice/v1.0\">",
+        "<invoice>",
+        "<issuer>",
+        "<counterpart>",
+        "<invoiceHeader>",
+        "<series>",
+        "<aa>",
+        "<issueDate>",
+        "<invoiceType>",
+        "<invoiceDetails>",
+        "<lineNumber>",
+        "<netValue>",
+        "<vatAmount>",
+        "<vatCategory>",
+        "<invoiceSummary>",
+        "<totalNetValue>",
+        "<totalVatAmount>",
+        "<totalGrossValue>",
+    ] {
+        assert!(xml.contains(needle), "native InvoicesDoc missing {needle}");
+    }
+}
+
+/// Steps 1-4 over the NATIVE myDATA `InvoicesDoc`: build -> serialize (native)
+/// -> validate structure -> report (mock IAPR) -> evidence bundle.
+fn run_native_lifecycle() -> (Vec<u8>, String, MyDataReportEnvelope) {
+    let doc = greek_invoice();
+    let ctx = MyDataDocContext {
+        series: SERIES.to_owned(),
+        issuer_branch: 0,
+        counterpart_branch: 0,
+    };
+    let xml = to_invoices_doc_xml(&doc, &ctx).unwrap();
+    assert_invoices_doc_structure(&xml);
+
+    let provider = MockMyDataProvider::with_fixed_reported_at(PINNED_REPORTED_AT);
+    let envelope = provider
+        .report_invoice(&report_request(xml.clone().into_bytes()))
+        .unwrap();
+
+    let ikb = pack_native_bundle(&doc, xml.clone().into_bytes(), &envelope);
+    (ikb, xml, envelope)
+}
+
+#[test]
+fn greece_native_invoices_doc_lifecycle_produces_verifiable_evidence() {
+    let (ikb, xml, envelope) = run_native_lifecycle();
+
+    // The native artefact carries the REAL myDATA element/field names with the
+    // 24% standard rate mapped to vatCategory 1 and the per-line + summary
+    // totals computed from the IR.
+    assert!(xml.contains("<vatNumber>123456789</vatNumber>")); // EL prefix stripped
+    assert!(xml.contains("<country>GR</country>"));
+    assert!(xml.contains("<invoiceType>1.1</invoiceType>"));
+    assert!(xml.contains("<vatCategory>1</vatCategory>"));
+    assert!(xml.contains("<netValue>100.00</netValue>"));
+    assert!(xml.contains("<vatAmount>24.00</vatAmount>"));
+    assert!(xml.contains("<totalNetValue>100.00</totalNetValue>"));
+    assert!(xml.contains("<totalVatAmount>24.00</totalVatAmount>"));
+    assert!(xml.contains("<totalGrossValue>124.00</totalGrossValue>"));
+
+    // The IAPR accepted and assigned a MARK + UID.
+    assert_eq!(envelope.status, MyDataStatus::Accepted);
+    let mark = envelope.mark.as_ref().expect("accepted invoice carries a MARK");
+    assert!(mark.as_str().starts_with("4000"));
+
+    // The bundle verifies (exit 0 == report.ok).
+    let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
+    assert!(report.ok, "native InvoicesDoc evidence bundle must verify");
+}
+
+#[test]
+fn greece_native_lifecycle_is_byte_deterministic() {
+    let (a, xml_a, _) = run_native_lifecycle();
+    let (b, xml_b, _) = run_native_lifecycle();
+    assert_eq!(xml_a, xml_b, "native InvoicesDoc serialization must be stable");
+    assert_eq!(a, b, "the whole native offline lifecycle must be byte-stable");
+}
+
+#[test]
+fn greece_native_multiline_emits_one_invoice_details_per_line() {
+    let doc = greek_multiline_invoice();
+    let ctx = MyDataDocContext {
+        series: SERIES.to_owned(),
+        issuer_branch: 0,
+        counterpart_branch: 0,
+    };
+    let xml = to_invoices_doc_xml(&doc, &ctx).unwrap();
+    assert_invoices_doc_structure(&xml);
+
+    // One invoiceDetails row per IR line, in document order.
+    assert_eq!(
+        xml.matches("<invoiceDetails>").count(),
+        2,
+        "a two-line invoice must emit two invoiceDetails rows, got:\n{xml}"
+    );
+    assert!(xml.contains("<lineNumber>1</lineNumber>"));
+    assert!(xml.contains("<lineNumber>2</lineNumber>"));
+    // Standard 24% (vatCategory 1) and reduced 13% (vatCategory 2) both reach
+    // the wire on their respective rows.
+    assert!(xml.contains("<vatCategory>1</vatCategory>"));
+    assert!(xml.contains("<vatCategory>2</vatCategory>"));
+    // Summary totals: net 150.00, vat 24.00 + 6.50 = 30.50, gross 180.50.
+    assert!(xml.contains("<totalNetValue>150.00</totalNetValue>"));
+    assert!(xml.contains("<totalVatAmount>30.50</totalVatAmount>"));
+    assert!(xml.contains("<totalGrossValue>180.50</totalGrossValue>"));
+
+    let provider = MockMyDataProvider::with_fixed_reported_at(PINNED_REPORTED_AT);
+    let envelope = provider
+        .report_invoice(&report_request(xml.clone().into_bytes()))
+        .unwrap();
+    assert_eq!(envelope.status, MyDataStatus::Accepted);
+    let ikb = pack_native_bundle(&doc, xml.into_bytes(), &envelope);
+    let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
+    assert!(report.ok, "native multi-line evidence bundle must verify");
+}
+
+#[test]
+fn greece_native_exempt_line_emits_vat_category_7_and_exemption() {
+    let doc = greek_exempt_invoice();
+    let ctx = MyDataDocContext {
+        series: SERIES.to_owned(),
+        issuer_branch: 0,
+        counterpart_branch: 0,
+    };
+    let xml = to_invoices_doc_xml(&doc, &ctx).unwrap();
+    assert_invoices_doc_structure(&xml);
+
+    // An exempt line maps to myDATA vatCategory 7 (excluding VAT) and the XSD
+    // makes vatExemptionCategory mandatory for that category.
+    assert!(
+        xml.contains("<vatCategory>7</vatCategory>"),
+        "an exempt line must map to vatCategory 7, got:\n{xml}"
+    );
+    assert!(
+        xml.contains("<vatExemptionCategory>"),
+        "vatCategory 7 requires a vatExemptionCategory per the myDATA XSD"
+    );
+    assert!(xml.contains("<vatAmount>0.00</vatAmount>"));
+    // No VAT charged: gross equals net.
+    assert!(xml.contains("<totalNetValue>200.00</totalNetValue>"));
+    assert!(xml.contains("<totalVatAmount>0.00</totalVatAmount>"));
+    assert!(xml.contains("<totalGrossValue>200.00</totalGrossValue>"));
+
+    let provider = MockMyDataProvider::with_fixed_reported_at(PINNED_REPORTED_AT);
+    let mut req = report_request(xml.clone().into_bytes());
+    req.category = MyDataInvoiceCategory::Services {
+        code: "2.1".to_owned(),
+    };
+    let envelope = provider.report_invoice(&req).unwrap();
+    assert_eq!(envelope.status, MyDataStatus::Accepted);
+    let ikb = pack_native_bundle(&doc, xml.into_bytes(), &envelope);
+    let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
+    assert!(report.ok, "native exempt-invoice evidence bundle must verify");
+}
+
+#[test]
+fn greece_native_credit_note_maps_to_invoice_type_5_1_and_bundles() {
+    let doc = greek_credit_note();
+    let ctx = MyDataDocContext {
+        series: SERIES.to_owned(),
+        issuer_branch: 0,
+        counterpart_branch: 0,
+    };
+    let xml = to_invoices_doc_xml(&doc, &ctx).unwrap();
+    assert_invoices_doc_structure(&xml);
+
+    // A credit note maps to the myDATA associated-credit-note invoiceType 5.1.
+    assert!(
+        xml.contains("<invoiceType>5.1</invoiceType>"),
+        "a credit note must map to myDATA invoiceType 5.1, got:\n{xml}"
+    );
+    assert!(xml.contains("<aa>CN-2026-GR-0001</aa>"));
+
+    let provider = MockMyDataProvider::with_fixed_reported_at(PINNED_REPORTED_AT);
+    let mut req = report_request(xml.clone().into_bytes());
+    req.category = MyDataInvoiceCategory::CreditNote {
+        code: "5.1".to_owned(),
+    };
+    let envelope = provider.report_invoice(&req).unwrap();
+    assert_eq!(envelope.status, MyDataStatus::Accepted);
+    let ikb = pack_native_bundle(&doc, xml.into_bytes(), &envelope);
+    let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
+    assert!(report.ok, "native credit-note evidence bundle must verify");
 }

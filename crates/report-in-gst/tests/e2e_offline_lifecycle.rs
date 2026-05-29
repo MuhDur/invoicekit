@@ -32,8 +32,8 @@ use invoicekit_ir::{
     PartyTaxId, PostalAddress, SchemaVersion, TaxCategorySummary,
 };
 use invoicekit_report_in_gst::{
-    validate_hsn_sac, IrpBackend, IrpEnvironment, IrpError, IrpProvider, IrpRegisterEnvelope,
-    IrpRegisterRequest, IrpStatus, MockIrpProvider,
+    to_inv01_json, validate_hsn_sac, Inv01Context, IrpBackend, IrpEnvironment, IrpError,
+    IrpProvider, IrpRegisterEnvelope, IrpRegisterRequest, IrpStatus, MockIrpProvider,
 };
 use invoicekit_verify::{verify_packed, VerifyOptions};
 use rust_decimal::Decimal;
@@ -241,6 +241,205 @@ fn india_refuses_malformed_gstin_before_the_wire() {
     bad.issuer_gstin = "TOO-SHORT".to_owned();
     let err = provider.register_invoice(&bad).unwrap_err();
     assert!(matches!(err, IrpError::BadGstin(_)), "got {err:?}");
+}
+
+// ===========================================================================
+// Native national-format lifecycle: serialize the REAL IRP INV-01 JSON (NOT
+// the UBL family XML), validate its structure, transmit via the existing mock
+// IRP, bundle, and verify. This is the country-format spine the IRP actually
+// accepts; the UBL path above is the family-format spine.
+//
+// Authority: GSTN / NIC e-Invoice JSON schema `INV-01` (schema version 1.1).
+// Spec: <https://einvoice1.gst.gov.in/Others/BulkGenerationTools>
+// ===========================================================================
+
+/// Build a packed `.ikb` bundle whose national artefact is the INV-01 JSON
+/// (under `formats/inv01.json`) rather than the UBL XML.
+fn pack_inv01_bundle(
+    doc: &CommercialDocument,
+    inv01_bytes: &[u8],
+    envelope: &IrpRegisterEnvelope,
+) -> Vec<u8> {
+    let canonical = canonicalize_value(&doc.to_value().unwrap())
+        .unwrap()
+        .into_bytes();
+    let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    artefacts.insert("canonical.json".to_owned(), canonical);
+    artefacts.insert("formats/inv01.json".to_owned(), inv01_bytes.to_vec());
+    artefacts.insert(
+        "receipt.json".to_owned(),
+        serde_json::to_vec(envelope).unwrap(),
+    );
+    let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
+    let bundle = EvidenceBundle { manifest, artefacts };
+    pack(&bundle).unwrap()
+}
+
+/// Serialize -> structurally validate -> transmit -> bundle, over the native
+/// INV-01 JSON. Returns `(ikb, inv01_json_string, envelope)`.
+fn run_inv01_lifecycle(
+    doc: &CommercialDocument,
+) -> (Vec<u8>, String, IrpRegisterEnvelope) {
+    // 1. serialize -> REAL national INV-01 JSON (NOT UBL).
+    let inv01 = to_inv01_json(doc, &Inv01Context::default()).unwrap();
+
+    // 2. validate structure: parse the JSON and assert the mandatory INV-01
+    //    spine with the schema's actual abbreviated field names.
+    let v: serde_json::Value = serde_json::from_str(&inv01).unwrap();
+    assert_eq!(v["Version"], "1.1", "INV-01 schema version pin");
+    assert_eq!(v["TranDtls"]["TaxSch"], "GST", "TranDtls.TaxSch must be GST");
+    assert!(v["DocDtls"]["Typ"].is_string(), "DocDtls.Typ present");
+    assert!(v["DocDtls"]["No"].is_string(), "DocDtls.No present");
+    assert!(v["SellerDtls"]["Gstin"].is_string(), "SellerDtls.Gstin present");
+    assert!(v["BuyerDtls"]["Gstin"].is_string(), "BuyerDtls.Gstin present");
+    assert!(v["ItemList"].is_array(), "ItemList is an array");
+    assert!(v["ValDtls"]["TotInvVal"].is_string(), "ValDtls.TotInvVal present");
+    // Each item carries the mandatory per-line fields.
+    for item in v["ItemList"].as_array().unwrap() {
+        for key in ["SlNo", "HsnCd", "Qty", "UnitPrice", "TotAmt", "AssAmt", "GstRt", "TotItemVal"] {
+            assert!(item.get(key).is_some(), "ItemList entry missing {key}");
+        }
+    }
+
+    let inv01_bytes = inv01.clone().into_bytes();
+
+    // 3. transmit via the existing mock IRP (signs + assigns IRN).
+    let provider = MockIrpProvider::with_fixed_ack_dt(PINNED_CREATED_AT);
+    let envelope = provider
+        .register_invoice(&register_request(inv01_bytes.clone()))
+        .unwrap();
+
+    // 4. evidence bundle.
+    let ikb = pack_inv01_bundle(doc, &inv01_bytes, &envelope);
+    (ikb, inv01, envelope)
+}
+
+#[test]
+fn india_native_inv01_lifecycle_produces_verifiable_evidence() {
+    // Inter-state supply (Karnataka 29 -> Maharashtra 27): the native INV-01
+    // charges IGST at the full headline rate (no CGST/SGST split).
+    let doc = indian_invoice();
+    let (ikb, inv01, envelope) = run_inv01_lifecycle(&doc);
+
+    // The serialized national artefact is JSON with INV-01 IGST fields.
+    let v: serde_json::Value = serde_json::from_str(&inv01).unwrap();
+    assert_eq!(v["SellerDtls"]["Stcd"], "29", "Karnataka state code");
+    assert_eq!(v["BuyerDtls"]["Stcd"], "27", "Maharashtra state code");
+    let item = &v["ItemList"][0];
+    assert_eq!(item["IgstAmt"], "1800.00", "18% IGST on 10000.00 inter-state");
+    assert!(item.get("CgstAmt").is_none(), "inter-state carries no CgstAmt");
+    assert_eq!(v["ValDtls"]["IgstVal"], "1800.00");
+    assert_eq!(v["ValDtls"]["TotInvVal"], "11800.00");
+
+    // The IRP registered the native payload and returned an IRN.
+    assert_eq!(envelope.status, IrpStatus::Accepted);
+    assert!(envelope.irn.as_ref().is_some_and(|s| s.len() == 64));
+
+    // The evidence bundle over the native INV-01 artefact verifies.
+    let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
+    assert!(report.ok, "INV-01 evidence bundle must verify");
+}
+
+#[test]
+fn india_native_inv01_intra_state_splits_cgst_sgst() {
+    // Intra-state supply (both Karnataka, state code 29): the headline 18%
+    // splits into 9% CGST + 9% SGST per item (CGST/IGST Acts 2017). NIC error
+    // 2172 fires when IGST is wrongly used intra-state, so the split matters.
+    let supplier = indian_party("Acme Technologies Pvt Ltd", ISSUER_GSTIN, "Bengaluru", "KA");
+    let buyer = indian_party("Gamma Pvt Ltd", "29BBBPL6789Q1Z5", "Mysuru", "KA");
+    let doc = CommercialDocument::new(CommercialDocumentParts {
+        schema_version: SchemaVersion::default(),
+        id: DocumentId::new("doc-in-inv01-intra").unwrap(),
+        document_type: DocumentType::Invoice,
+        issue_date: DateOnly::new("2026-05-26").unwrap(),
+        tax_point_date: None,
+        due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+        document_number: DocumentNumber::new("INV-2026-IN-INTRA1").unwrap(),
+        currency: Iso4217Code::new("INR").unwrap(),
+        supplier,
+        customer: buyer,
+        payee: None,
+        payment_terms: None,
+        payment_instructions: Vec::new(),
+        lines: vec![DocumentLine {
+            id: "1".to_owned(),
+            description: "Local IT support (SAC 998314)".to_owned(),
+            quantity: DecimalValue::new(Decimal::from(1)),
+            unit_code: Some("EA".to_owned()),
+            unit_price: amt(1_000_000),
+            line_extension_amount: amt(1_000_000),
+            tax_category: Some("S".to_owned()),
+            extensions: Vec::new(),
+        }],
+        tax_summary: vec![TaxCategorySummary {
+            category_code: "S".to_owned(),
+            taxable_amount: amt(1_000_000),
+            tax_amount: amt(180_000),
+            tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))),
+        }],
+        monetary_total: MonetaryTotal {
+            line_extension_amount: amt(1_000_000),
+            tax_exclusive_amount: amt(1_000_000),
+            tax_inclusive_amount: amt(1_180_000),
+            allowance_total_amount: None,
+            charge_total_amount: None,
+            prepaid_amount: None,
+            payable_amount: amt(1_180_000),
+        },
+        attachments: Vec::new(),
+        references: Vec::new(),
+        notes: Vec::new(),
+        extensions: Vec::new(),
+        meta: DocumentMeta {
+            tenant_id: TENANT.to_owned(),
+            trace_id: TRACE.to_owned(),
+            source_system: Some("e2e".to_owned()),
+        },
+    })
+    .unwrap();
+
+    let (ikb, inv01, envelope) = run_inv01_lifecycle(&doc);
+    let v: serde_json::Value = serde_json::from_str(&inv01).unwrap();
+    let item = &v["ItemList"][0];
+    assert_eq!(item["CgstAmt"], "900.00", "9% CGST on 10000.00");
+    assert_eq!(item["SgstAmt"], "900.00", "9% SGST on 10000.00");
+    assert!(item.get("IgstAmt").is_none(), "intra-state carries no IgstAmt");
+    assert_eq!(v["ValDtls"]["CgstVal"], "900.00");
+    assert_eq!(v["ValDtls"]["SgstVal"], "900.00");
+    assert_eq!(v["ValDtls"]["IgstVal"], "0.00");
+    assert_eq!(v["ValDtls"]["TotInvVal"], "11800.00");
+
+    assert_eq!(envelope.status, IrpStatus::Accepted);
+    let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
+    assert!(report.ok, "intra-state INV-01 bundle must verify");
+}
+
+#[test]
+fn india_native_inv01_lifecycle_is_byte_deterministic() {
+    // The whole native-format lifecycle (serialize -> transmit -> bundle) must
+    // be byte-identical across runs: the evidence bundle's content address
+    // depends on it. INV-01 key order is fixed (no map-driven reordering).
+    let doc = indian_invoice();
+    let (a, json_a, env_a) = run_inv01_lifecycle(&doc);
+    let (b, json_b, env_b) = run_inv01_lifecycle(&doc);
+    assert_eq!(json_a, json_b, "INV-01 serialization must be byte-stable");
+    assert_eq!(a, b, "the whole native-format lifecycle must be byte-stable");
+    assert_eq!(env_a.irn, env_b.irn, "IRN derivation is deterministic");
+}
+
+#[test]
+fn india_native_inv01_credit_note_maps_to_crn() {
+    // A GST credit note serializes to native INV-01 with DocDtls.Typ = CRN
+    // (CGST Act 2017 s.34), not the UBL CreditNoteTypeCode 381. The lifecycle
+    // still registers and the bundle verifies.
+    let doc = indian_credit_note();
+    let (ikb, inv01, envelope) = run_inv01_lifecycle(&doc);
+    let v: serde_json::Value = serde_json::from_str(&inv01).unwrap();
+    assert_eq!(v["DocDtls"]["Typ"], "CRN", "credit note maps to INV-01 Typ CRN");
+    assert_eq!(v["DocDtls"]["No"], "CRN-2026-IN-0001");
+    assert_eq!(envelope.status, IrpStatus::Accepted);
+    let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
+    assert!(report.ok, "CRN INV-01 bundle must verify");
 }
 
 // ===========================================================================
