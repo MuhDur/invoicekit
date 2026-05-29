@@ -335,6 +335,31 @@ fn one_line(
     }
 }
 
+/// Set `monetary_total` and `tax_summary` for a single standard-rate
+/// (`S` @ 19%) bucket whose taxable base equals the line-extension
+/// amount. Tax is rounded to two decimal places; the tax-inclusive
+/// and payable amounts are `base + tax`. Used by every scenario whose
+/// only tax bucket is one full-rate `S` line.
+fn set_standard_rate_totals(parts: &mut CommercialDocumentParts, base: Decimal) {
+    let tax = (base * Decimal::new(19, 2)).round_dp(2);
+    let inclusive = base + tax;
+    parts.monetary_total = MonetaryTotal {
+        line_extension_amount: DecimalValue::new(base),
+        tax_exclusive_amount: DecimalValue::new(base),
+        tax_inclusive_amount: DecimalValue::new(inclusive),
+        allowance_total_amount: None,
+        charge_total_amount: None,
+        prepaid_amount: None,
+        payable_amount: DecimalValue::new(inclusive),
+    };
+    parts.tax_summary = vec![TaxCategorySummary {
+        category_code: "S".to_owned(),
+        taxable_amount: DecimalValue::new(base),
+        tax_amount: DecimalValue::new(tax),
+        tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+    }];
+}
+
 fn zero_amount_parts() -> CommercialDocumentParts {
     let mut parts = base_parts("zero-amount");
     parts.lines = vec![one_line(
@@ -365,18 +390,7 @@ fn negative_amount_parts() -> CommercialDocumentParts {
         unit_price,
         Some("S"),
     )];
-    parts.monetary_total.line_extension_amount = DecimalValue::new(unit_price);
-    parts.monetary_total.tax_exclusive_amount = DecimalValue::new(unit_price);
-    let tax_amount = (unit_price * Decimal::new(19, 2)).round_dp(2);
-    let inclusive = unit_price + tax_amount;
-    parts.monetary_total.tax_inclusive_amount = DecimalValue::new(inclusive);
-    parts.monetary_total.payable_amount = DecimalValue::new(inclusive);
-    parts.tax_summary = vec![TaxCategorySummary {
-        category_code: "S".to_owned(),
-        taxable_amount: DecimalValue::new(unit_price),
-        tax_amount: DecimalValue::new(tax_amount),
-        tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
-    }];
+    set_standard_rate_totals(&mut parts, unit_price);
     parts
 }
 
@@ -468,23 +482,7 @@ fn single_line_parts() -> CommercialDocumentParts {
     let mut parts = base_parts("single-line");
     let unit = Decimal::new(5000, 2); // 50.00
     parts.lines = vec![one_line("L1", "Single line item", 1, unit, unit, Some("S"))];
-    let tax = (unit * Decimal::new(19, 2)).round_dp(2);
-    let inclusive = unit + tax;
-    parts.monetary_total = MonetaryTotal {
-        line_extension_amount: DecimalValue::new(unit),
-        tax_exclusive_amount: DecimalValue::new(unit),
-        tax_inclusive_amount: DecimalValue::new(inclusive),
-        allowance_total_amount: None,
-        charge_total_amount: None,
-        prepaid_amount: None,
-        payable_amount: DecimalValue::new(inclusive),
-    };
-    parts.tax_summary = vec![TaxCategorySummary {
-        category_code: "S".to_owned(),
-        taxable_amount: DecimalValue::new(unit),
-        tax_amount: DecimalValue::new(tax),
-        tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
-    }];
+    set_standard_rate_totals(&mut parts, unit);
     parts
 }
 
@@ -504,23 +502,7 @@ fn high_line_count_parts() -> CommercialDocumentParts {
         ));
         total += per_line;
     }
-    let tax = (total * Decimal::new(19, 2)).round_dp(2);
-    let inclusive = total + tax;
-    parts.monetary_total = MonetaryTotal {
-        line_extension_amount: DecimalValue::new(total),
-        tax_exclusive_amount: DecimalValue::new(total),
-        tax_inclusive_amount: DecimalValue::new(inclusive),
-        allowance_total_amount: None,
-        charge_total_amount: None,
-        prepaid_amount: None,
-        payable_amount: DecimalValue::new(inclusive),
-    };
-    parts.tax_summary = vec![TaxCategorySummary {
-        category_code: "S".to_owned(),
-        taxable_amount: DecimalValue::new(total),
-        tax_amount: DecimalValue::new(tax),
-        tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
-    }];
+    set_standard_rate_totals(&mut parts, total);
     parts
 }
 
@@ -536,23 +518,7 @@ fn unicode_stress_parts() -> CommercialDocumentParts {
         unit,
         Some("S"),
     )];
-    let tax = (unit * Decimal::new(19, 2)).round_dp(2);
-    let inclusive = unit + tax;
-    parts.monetary_total = MonetaryTotal {
-        line_extension_amount: DecimalValue::new(unit),
-        tax_exclusive_amount: DecimalValue::new(unit),
-        tax_inclusive_amount: DecimalValue::new(inclusive),
-        allowance_total_amount: None,
-        charge_total_amount: None,
-        prepaid_amount: None,
-        payable_amount: DecimalValue::new(inclusive),
-    };
-    parts.tax_summary = vec![TaxCategorySummary {
-        category_code: "S".to_owned(),
-        taxable_amount: DecimalValue::new(unit),
-        tax_amount: DecimalValue::new(tax),
-        tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
-    }];
+    set_standard_rate_totals(&mut parts, unit);
     parts
 }
 

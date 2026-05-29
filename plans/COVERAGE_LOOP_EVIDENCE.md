@@ -468,3 +468,29 @@ convergence. Maintain skill matrix + per-turn skill usage. Dynamic workflows thr
   `testing-real-service-e2e-no-mocks`, `verification-before-completion`, `ubs`, `gh-cli`.
 - **Next:** foundation/format/signer/transmit isomorphic-quality waves (dependency-careful) over the
   remaining ~75 non-country crates, to honor "on each crate."
+
+### Turn 14 — 2026-05-29 — Quality Wave QA: verified, scrubbed, committed (caught 2 side effects)
+- **Workflow:** `coverage-p2-quality-wave-qa` (~35 leaf/adapter crates, isomorphic simplify+review). Stopped it
+  (stalled ~50 min, 0-byte result, no recent edits) and verified its output myself — caught TWO issues the
+  workflow introduced that I did NOT commit:
+  1. **Out-of-scope corpus regeneration:** an agent ran the adversarial-generator and rewrote **1345**
+     `conformance-corpus/synthetic/adversarial-v0-5/` fixture files (the committed corpus was stale vs the
+     current generator; the generator refactor itself is isomorphic and touches only 2 scenarios). A golden
+     re-bless must be deliberate + reviewed, not a quality side effect → **`git stash`ed** (recoverable;
+     `git restore` is dcg-blocked, stash is AGENTS.md's listed safe tool).
+  2. **UBS false-positive growth:** my refactors took UBS criticals 13→14; the +1 is a false positive — UBS's
+     JWT-bypass heuristic matched `.decode(bytes)` (base64 of a DSSE payload) in `evidence-dsse`. **`git
+     stash`ed** the evidence-dsse refactor so criticals stay at the pre-existing 13 (no growth). The 13 are all
+     pre-existing placeholder-crypto/decode/panic false-positives in these crypto crates (verified via
+     HEAD-vs-working ubs comparison) — a separate hardening matter, not introduced here.
+- **Committed (16 crates):** isomorphic simplifications across adversarial-generator, archive, envelope-encryption,
+  format-detect (collapsed 4 duplicate corpus-detect tests into `assert_corpus`), format-gobl, managed-api,
+  render-html (dropped 2 unused deps), render-pdf-postproc, render-verify, signer-france-ctc, signer-ksef,
+  transmit-mock, transmit-peppol-byok/native-as4/partner. **Net -179 LOC.**
+- **Verified:** `cargo test --workspace` = **2337 passed, 0 failed** (identical to pre-wave → pure isomorphic);
+  `clippy --workspace -D warnings` clean; UBS criticals = 13 (no growth vs HEAD); format-detect kept all 4 test fns.
+- **Skills used:** `simplify-and-refactor-code-isomorphically`, `ubs`, `verification-before-completion`, `git-stash-janitor` discipline.
+- **Decisions:** D16 — workflow side-effects outside the declared edit scope (corpus regen) and any net-new
+  UBS critical (even a false positive) are stashed, not committed; only verified-isomorphic, no-growth changes land.
+- **Next:** core-foundation quality Wave QB (ir/canonical/format-*/validate/evidence/verify/engine — dependency-careful);
+  decide deliberately whether to re-bless the stashed adversarial corpus.

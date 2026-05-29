@@ -264,39 +264,13 @@ impl<S> S3ObjectLockArchive<S> {
             store,
         }
     }
-
-    fn key_for_hash(&self, hash: &str) -> String {
-        object_key(&self.key_prefix, hash)
-    }
-
-    fn archive_id(&self, key: &str, version_id: Option<&str>) -> ArchiveId {
-        version_id.map_or_else(
-            || ArchiveId::new(format!("s3://{}/{key}", self.bucket)),
-            |version_id| {
-                ArchiveId::new(format!("s3://{}/{key}#versionId={version_id}", self.bucket))
-            },
-        )
-    }
-
-    fn key_from_id(&self, id: &ArchiveId) -> Result<String, ArchiveError> {
-        let prefix = format!("s3://{}/", self.bucket);
-        let rest = id
-            .as_str()
-            .strip_prefix(&prefix)
-            .ok_or_else(|| ArchiveError::InvalidId(id.as_str().to_owned()))?;
-        let key = rest.split_once("#versionId=").map_or(rest, |(key, _)| key);
-        if key.is_empty() {
-            return Err(ArchiveError::InvalidId(id.as_str().to_owned()));
-        }
-        Ok(key.to_owned())
-    }
 }
 
 impl<S: ObjectLockStore> Archive for S3ObjectLockArchive<S> {
     fn store(&self, bundle: &EvidenceBundle) -> Result<ArchiveId, ArchiveError> {
         let bytes = pack(bundle)?;
         let hash = invoicekit_evidence::blake3_hex(&bytes);
-        let key = self.key_for_hash(&hash);
+        let key = object_key(&self.key_prefix, &hash);
         let receipt = self.store.put_locked_object(ObjectLockPut {
             backend: ObjectLockBackend::S3ObjectLock,
             namespace: self.bucket.clone(),
@@ -305,17 +279,22 @@ impl<S: ObjectLockStore> Archive for S3ObjectLockArchive<S> {
             content_hash: hash,
             retention: self.retention.clone(),
         })?;
-        Ok(self.archive_id(&key, receipt.version_id.as_deref()))
+        Ok(scheme_archive_id(
+            "s3",
+            &self.bucket,
+            &key,
+            receipt.version_id.as_deref(),
+        ))
     }
 
     fn retrieve(&self, id: &ArchiveId) -> Result<EvidenceBundle, ArchiveError> {
-        let key = self.key_from_id(id)?;
+        let key = object_from_scheme_id("s3", &self.bucket, id)?;
         let bytes = self.store.get_locked_object(&self.bucket, &key)?;
         unpack(&bytes).map_err(|err| ArchiveError::Drift(err.to_string()))
     }
 
     fn exists(&self, id: &ArchiveId) -> bool {
-        self.key_from_id(id)
+        object_from_scheme_id("s3", &self.bucket, id)
             .is_ok_and(|key| self.store.locked_object_exists(&self.bucket, &key))
     }
 }
@@ -350,44 +329,13 @@ impl<S> AzureWormArchive<S> {
             store,
         }
     }
-
-    fn blob_for_hash(&self, hash: &str) -> String {
-        object_key(&self.blob_prefix, hash)
-    }
-
-    fn archive_id(&self, blob: &str, version_id: Option<&str>) -> ArchiveId {
-        version_id.map_or_else(
-            || ArchiveId::new(format!("azure://{}/{blob}", self.container)),
-            |version_id| {
-                ArchiveId::new(format!(
-                    "azure://{}/{blob}#versionId={version_id}",
-                    self.container
-                ))
-            },
-        )
-    }
-
-    fn blob_from_id(&self, id: &ArchiveId) -> Result<String, ArchiveError> {
-        let prefix = format!("azure://{}/", self.container);
-        let rest = id
-            .as_str()
-            .strip_prefix(&prefix)
-            .ok_or_else(|| ArchiveError::InvalidId(id.as_str().to_owned()))?;
-        let blob = rest
-            .split_once("#versionId=")
-            .map_or(rest, |(blob, _)| blob);
-        if blob.is_empty() {
-            return Err(ArchiveError::InvalidId(id.as_str().to_owned()));
-        }
-        Ok(blob.to_owned())
-    }
 }
 
 impl<S: ObjectLockStore> Archive for AzureWormArchive<S> {
     fn store(&self, bundle: &EvidenceBundle) -> Result<ArchiveId, ArchiveError> {
         let bytes = pack(bundle)?;
         let hash = invoicekit_evidence::blake3_hex(&bytes);
-        let blob = self.blob_for_hash(&hash);
+        let blob = object_key(&self.blob_prefix, &hash);
         let receipt = self.store.put_locked_object(ObjectLockPut {
             backend: ObjectLockBackend::AzureWorm,
             namespace: self.container.clone(),
@@ -396,17 +344,22 @@ impl<S: ObjectLockStore> Archive for AzureWormArchive<S> {
             content_hash: hash,
             retention: self.retention.clone(),
         })?;
-        Ok(self.archive_id(&blob, receipt.version_id.as_deref()))
+        Ok(scheme_archive_id(
+            "azure",
+            &self.container,
+            &blob,
+            receipt.version_id.as_deref(),
+        ))
     }
 
     fn retrieve(&self, id: &ArchiveId) -> Result<EvidenceBundle, ArchiveError> {
-        let blob = self.blob_from_id(id)?;
+        let blob = object_from_scheme_id("azure", &self.container, id)?;
         let bytes = self.store.get_locked_object(&self.container, &blob)?;
         unpack(&bytes).map_err(|err| ArchiveError::Drift(err.to_string()))
     }
 
     fn exists(&self, id: &ArchiveId) -> bool {
-        self.blob_from_id(id)
+        object_from_scheme_id("azure", &self.container, id)
             .is_ok_and(|blob| self.store.locked_object_exists(&self.container, &blob))
     }
 }
@@ -421,6 +374,43 @@ fn object_key(prefix: &str, hash: &str) -> String {
     } else {
         format!("{prefix}/{hash}.ikb")
     }
+}
+
+/// Build a `<scheme>://<namespace>/<object>` archive id, appending
+/// `#versionId=<version>` when the backend returned a version id.
+fn scheme_archive_id(
+    scheme: &str,
+    namespace: &str,
+    object: &str,
+    version_id: Option<&str>,
+) -> ArchiveId {
+    version_id.map_or_else(
+        || ArchiveId::new(format!("{scheme}://{namespace}/{object}")),
+        |version_id| {
+            ArchiveId::new(format!("{scheme}://{namespace}/{object}#versionId={version_id}"))
+        },
+    )
+}
+
+/// Parse the object key/blob name out of a `<scheme>://<namespace>/…`
+/// archive id, rejecting ids that belong to another namespace.
+fn object_from_scheme_id(
+    scheme: &str,
+    namespace: &str,
+    id: &ArchiveId,
+) -> Result<String, ArchiveError> {
+    let prefix = format!("{scheme}://{namespace}/");
+    let rest = id
+        .as_str()
+        .strip_prefix(&prefix)
+        .ok_or_else(|| ArchiveError::InvalidId(id.as_str().to_owned()))?;
+    let object = rest
+        .split_once("#versionId=")
+        .map_or(rest, |(object, _)| object);
+    if object.is_empty() {
+        return Err(ArchiveError::InvalidId(id.as_str().to_owned()));
+    }
+    Ok(object.to_owned())
 }
 
 /// Content-addressable archive backed by a directory on disk.
@@ -936,7 +926,7 @@ mod tests {
         assert!(archive.exists(&id));
         assert_eq!(archive.retrieve(&id).unwrap(), bundle);
 
-        let key = archive.key_from_id(&id).unwrap();
+        let key = object_from_scheme_id("s3", "invoicekit-archive", &id).unwrap();
         let object = store.object("invoicekit-archive", &key).unwrap();
         assert_eq!(object.backend, ObjectLockBackend::S3ObjectLock);
         assert_eq!(object.retention.mode, RetentionMode::Compliance);
@@ -1005,7 +995,7 @@ mod tests {
         assert!(archive.exists(&id));
         assert_eq!(archive.retrieve(&id).unwrap(), bundle);
 
-        let blob = archive.blob_from_id(&id).unwrap();
+        let blob = object_from_scheme_id("azure", "invoicekit-container", &id).unwrap();
         let object = store.object("invoicekit-container", &blob).unwrap();
         assert_eq!(object.backend, ObjectLockBackend::AzureWorm);
         assert_eq!(object.retention.mode, RetentionMode::Governance);

@@ -252,7 +252,7 @@ fn write_address_block(out: &mut String, addr: &PostalAddress) {
         parts.push(escape_text(sub));
     }
     parts.push(escape_text(&addr.postal_code));
-    parts.push(escape_attr(&transparent_str(&addr.country)));
+    parts.push(escape_attr(addr.country.as_str()));
     out.push_str(&parts.join("<br>"));
 }
 
@@ -302,39 +302,39 @@ fn write_totals(
     out.push_str(
         "<section aria-labelledby=\"totals-heading\" class=\"totals\">\n<h2 id=\"totals-heading\">Totals</h2>\n",
     );
-    let currency = transparent_str(&doc.currency);
+    let currency = doc.currency.as_str();
     out.push_str("<dl>\n");
     write_money_row(
         out,
         "Sum of line amounts",
         &decimal_str(&totals.line_extension_amount),
-        &currency,
+        currency,
     );
     write_money_row(
         out,
         "Tax-exclusive total",
         &decimal_str(&totals.tax_exclusive_amount),
-        &currency,
+        currency,
     );
     for s in tax {
         let label = format!("Tax ({})", s.category_code);
-        write_money_row(out, &label, &decimal_str(&s.tax_amount), &currency);
+        write_money_row(out, &label, &decimal_str(&s.tax_amount), currency);
     }
     write_money_row(
         out,
         "Tax-inclusive total",
         &decimal_str(&totals.tax_inclusive_amount),
-        &currency,
+        currency,
     );
     if let Some(p) = &totals.prepaid_amount {
-        write_money_row(out, "Prepaid", &decimal_str(p), &currency);
+        write_money_row(out, "Prepaid", &decimal_str(p), currency);
     }
     out.push_str(r#"<dt class="grand">Amount due</dt>"#);
     let _ = writeln!(
         out,
         r#"<dd class="grand">{} {}</dd>"#,
         escape_text(&decimal_str(&totals.payable_amount)),
-        escape_text(&currency)
+        escape_text(currency)
     );
     out.push_str("</dl>\n</section>\n");
 }
@@ -419,13 +419,6 @@ fn doc_kind_label(doc: &CommercialDocument) -> &'static str {
 
 fn decimal_str(v: &invoicekit_ir::DecimalValue) -> String {
     v.inner().to_string()
-}
-
-fn transparent_str<T: serde::Serialize>(v: &T) -> String {
-    serde_json::to_value(v)
-        .ok()
-        .and_then(|val| val.as_str().map(str::to_owned))
-        .unwrap_or_default()
 }
 
 fn escape_text(s: &str) -> String {

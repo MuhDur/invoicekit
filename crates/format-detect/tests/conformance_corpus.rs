@@ -56,99 +56,78 @@ fn walk_extension<'a>(
     hits.into_iter()
 }
 
-#[test]
-fn ubl_corpus_is_detected_as_ubl_21() {
-    let dir = repo_root().join("conformance-corpus/synthetic/ubl-2-1");
+/// Walk one corpus subdirectory and assert every `extension` fixture
+/// detects as `expect`, with at least `min` fixtures present.
+///
+/// `label` is the human token used in skip/assert messages (e.g.
+/// "UBL"); `skip` lowercases to the slug used in the "skipping … check"
+/// breadcrumb. The `coverage-matrix.json` round-trip snapshot is always
+/// excluded — it is a result file, not a fixture.
+fn assert_corpus(subdir: &str, extension: &str, expect: FormatId, min: usize, label: &str) {
+    let dir = repo_root().join(subdir);
     if !dir.is_dir() {
-        eprintln!("skipping ubl corpus check: {} not present", dir.display());
+        eprintln!(
+            "skipping {} corpus check: {} not present",
+            label.to_lowercase(),
+            dir.display()
+        );
         return;
     }
     let mut checked = 0;
     let mut wrong: Vec<String> = Vec::new();
-    for path in walk_extension(&dir, "xml", &[]) {
+    for path in walk_extension(&dir, extension, &[]) {
+        if path.file_name().and_then(|n| n.to_str()) == Some("coverage-matrix.json") {
+            continue;
+        }
         let bytes = fs::read(&path).expect("read fixture");
         let detected = detect_format(&bytes);
-        if detected != FormatId::Ubl21 {
+        if detected != expect {
             wrong.push(format!("{}: detected {detected:?}", path.display()));
         }
         checked += 1;
     }
     assert!(
-        checked >= 20,
-        "expected at least 20 UBL fixtures, got {checked}"
+        checked >= min,
+        "expected at least {min} {label} fixtures, got {checked}"
     );
     assert!(
         wrong.is_empty(),
-        "UBL fixtures misclassified ({} of {checked}):\n  - {}",
+        "{label} fixtures misclassified ({} of {checked}):\n  - {}",
         wrong.len(),
         wrong.join("\n  - "),
+    );
+}
+
+#[test]
+fn ubl_corpus_is_detected_as_ubl_21() {
+    assert_corpus(
+        "conformance-corpus/synthetic/ubl-2-1",
+        "xml",
+        FormatId::Ubl21,
+        20,
+        "UBL",
     );
 }
 
 #[test]
 fn cii_corpus_is_detected_as_cii_d16b() {
-    let dir = repo_root().join("conformance-corpus/synthetic/cii-d16b");
-    if !dir.is_dir() {
-        eprintln!("skipping cii corpus check: {} not present", dir.display());
-        return;
-    }
-    let mut checked = 0;
-    let mut wrong: Vec<String> = Vec::new();
-    for path in walk_extension(&dir, "xml", &[]) {
-        let bytes = fs::read(&path).expect("read fixture");
-        let detected = detect_format(&bytes);
-        if detected != FormatId::CiiD16B {
-            wrong.push(format!("{}: detected {detected:?}", path.display()));
-        }
-        checked += 1;
-    }
-    assert!(
-        checked >= 5,
-        "expected at least 5 CII fixtures, got {checked}"
-    );
-    assert!(
-        wrong.is_empty(),
-        "CII fixtures misclassified ({} of {checked}):\n  - {}",
-        wrong.len(),
-        wrong.join("\n  - "),
+    assert_corpus(
+        "conformance-corpus/synthetic/cii-d16b",
+        "xml",
+        FormatId::CiiD16B,
+        5,
+        "CII",
     );
 }
 
 #[test]
 fn gobl_upstream_corpus_is_detected_as_envelope() {
-    let dir = repo_root().join("conformance-corpus/gobl-upstream");
-    if !dir.is_dir() {
-        eprintln!("skipping gobl corpus check: {} not present", dir.display());
-        return;
-    }
-    let mut checked = 0;
-    let mut wrong: Vec<String> = Vec::new();
-    for path in walk_extension(&dir, "json", &[]) {
-        // Skip the coverage-matrix snapshot — that file is the
-        // round-trip result, not a fixture.
-        if path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|s| s == "coverage-matrix.json")
-        {
-            continue;
-        }
-        let bytes = fs::read(&path).expect("read fixture");
-        let detected = detect_format(&bytes);
-        if detected != FormatId::GoblEnvelope {
-            wrong.push(format!("{}: detected {detected:?}", path.display()));
-        }
-        checked += 1;
-    }
-    assert!(
-        checked >= 10,
-        "expected at least 10 GOBL upstream fixtures, got {checked}",
-    );
-    assert!(
-        wrong.is_empty(),
-        "GOBL fixtures misclassified ({} of {checked}):\n  - {}",
-        wrong.len(),
-        wrong.join("\n  - "),
+    assert_corpus(
+        "conformance-corpus/gobl-upstream",
+        "json",
+        FormatId::GoblEnvelope,
+        10,
+        "GOBL upstream",
     );
 }
 

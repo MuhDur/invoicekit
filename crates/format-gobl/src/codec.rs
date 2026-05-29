@@ -239,9 +239,8 @@ pub fn to_gobl(doc: &CommercialDocument) -> Result<GoblEnvelope, GoblError> {
     Ok(GoblEnvelope {
         document: Value::Object(payload),
         ledger: LossinessLedger {
-            preserved: Vec::new(),
             lost,
-            warnings: Vec::new(),
+            ..Default::default()
         },
     })
 }
@@ -310,30 +309,17 @@ pub fn from_gobl(payload: &Value) -> Result<GoblEnvelope, GoblError> {
     }
 
     let totals = obj.get("totals").and_then(Value::as_object);
-    let line_extension_amount = decimal_from(
-        totals.and_then(|t| t.get("sum")).and_then(Value::as_str),
-        "/totals/sum",
-        "0",
-    )?;
-    let tax_exclusive_amount = decimal_from(
-        totals.and_then(|t| t.get("total")).and_then(Value::as_str),
-        "/totals/total",
-        "0",
-    )?;
-    let tax_inclusive_amount = decimal_from(
-        totals
-            .and_then(|t| t.get("total_with_tax"))
-            .and_then(Value::as_str),
-        "/totals/total_with_tax",
-        "0",
-    )?;
-    let payable_amount = decimal_from(
-        totals
-            .and_then(|t| t.get("payable"))
-            .and_then(Value::as_str),
-        "/totals/payable",
-        "0",
-    )?;
+    let total_decimal = |key: &str, path: &str| {
+        decimal_from(
+            totals.and_then(|t| t.get(key)).and_then(Value::as_str),
+            path,
+            "0",
+        )
+    };
+    let line_extension_amount = total_decimal("sum", "/totals/sum")?;
+    let tax_exclusive_amount = total_decimal("total", "/totals/total")?;
+    let tax_inclusive_amount = total_decimal("total_with_tax", "/totals/total_with_tax")?;
+    let payable_amount = total_decimal("payable", "/totals/payable")?;
 
     let tax_summary = totals
         .and_then(|t| t.get("tax"))
@@ -346,17 +332,7 @@ pub fn from_gobl(payload: &Value) -> Result<GoblEnvelope, GoblError> {
         .map(|arr| arr.iter().filter_map(reference_from_gobl).collect())
         .unwrap_or_default();
 
-    let extensions: Vec<JurisdictionExtension> = obj
-        .get("ext")
-        .and_then(Value::as_object)
-        .map(|map| {
-            map.iter()
-                .filter_map(|(urn, payload)| {
-                    JurisdictionExtension::new(urn.clone(), payload.clone()).ok()
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let extensions = extensions_from_gobl(obj);
 
     let notes = obj
         .get("notes")
@@ -503,9 +479,8 @@ pub fn from_gobl(payload: &Value) -> Result<GoblEnvelope, GoblError> {
     Ok(GoblEnvelope {
         document: doc.to_value()?,
         ledger: LossinessLedger {
-            preserved: Vec::new(),
             lost,
-            warnings: Vec::new(),
+            ..Default::default()
         },
     })
 }
@@ -733,15 +708,7 @@ fn line_from_gobl(value: &Value, idx: usize) -> Result<DocumentLine, GoblError> 
         .and_then(|t| t.get("rate"))
         .and_then(Value::as_str)
         .map(str::to_owned);
-    let extensions = obj
-        .get("ext")
-        .and_then(Value::as_object)
-        .map(|m| {
-            m.iter()
-                .filter_map(|(urn, p)| JurisdictionExtension::new(urn.clone(), p.clone()).ok())
-                .collect()
-        })
-        .unwrap_or_default();
+    let extensions = extensions_from_gobl(obj);
     Ok(DocumentLine {
         id,
         description,
@@ -921,6 +888,22 @@ fn decimal_from(
             path: path.to_owned(),
             value: raw.to_owned(),
         })
+}
+
+/// Parse a GOBL `ext` URN->payload map (read from `parent["ext"]`) into
+/// the IR jurisdiction-extension list, dropping entries the IR rejects.
+fn extensions_from_gobl(parent: &Map<String, Value>) -> Vec<JurisdictionExtension> {
+    parent
+        .get("ext")
+        .and_then(Value::as_object)
+        .map(|map| {
+            map.iter()
+                .filter_map(|(urn, payload)| {
+                    JurisdictionExtension::new(urn.clone(), payload.clone()).ok()
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Serialize a `#[serde(transparent)]` newtype that wraps a String into

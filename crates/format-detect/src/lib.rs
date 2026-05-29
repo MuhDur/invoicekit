@@ -95,10 +95,7 @@ pub struct Detection {
 
 impl Detection {
     fn known(format: FormatId) -> Self {
-        Self {
-            format,
-            notes: String::new(),
-        }
+        Self::with_notes(format, "")
     }
 
     fn with_notes(format: FormatId, notes: impl Into<String>) -> Self {
@@ -219,7 +216,7 @@ fn contains_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
 }
 
 fn sniff_json(prefix: &[u8]) -> Option<Detection> {
-    let trimmed = ltrim_ascii_whitespace(prefix);
+    let trimmed = prefix.trim_ascii_start();
     if !trimmed.starts_with(b"{") {
         return None;
     }
@@ -292,16 +289,8 @@ fn sniff_json_value(value: &serde_json::Value) -> Option<FormatId> {
     None
 }
 
-fn ltrim_ascii_whitespace(input: &[u8]) -> &[u8] {
-    let mut idx = 0;
-    while idx < input.len() && input[idx].is_ascii_whitespace() {
-        idx += 1;
-    }
-    &input[idx..]
-}
-
 fn sniff_xml(prefix: &[u8]) -> Option<Detection> {
-    let trimmed = ltrim_ascii_whitespace(prefix);
+    let trimmed = prefix.trim_ascii_start();
     let starts_with_xml_prolog = trimmed.starts_with(b"<?xml");
     let looks_xml = starts_with_xml_prolog || trimmed.starts_with(b"<");
     if !looks_xml {

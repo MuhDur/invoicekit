@@ -328,10 +328,18 @@ impl PartnerPeppolAdapter {
             }
         }
     }
-}
 
-impl GatewayAdapter for PartnerPeppolAdapter {
-    fn submit(&self, request: SubmitRequest) -> GatewayFuture<'_, GatewayReceipt> {
+    /// Submit a document to the partner's submit endpoint. Shared by
+    /// [`GatewayAdapter::submit`] and [`GatewayAdapter::correct`]
+    /// (a correction is a fresh submit); `operation` distinguishes
+    /// which surfaced the call so the [`GatewayError`] / receipt
+    /// envelope carry the right [`GatewayOperation`].
+    fn submit_document(
+        &self,
+        operation: GatewayOperation,
+        document: invoicekit_ir::CommercialDocument,
+        context: GatewayContext,
+    ) -> GatewayFuture<'_, GatewayReceipt> {
         let url = self.submit_url();
         let bearer = self.secrets.api_key();
         let vendor = self.config.vendor;
@@ -342,10 +350,10 @@ impl GatewayAdapter for PartnerPeppolAdapter {
             // load-bearing serializer; errors propagate as
             // InvalidRequest because they happen before any
             // partner-side decision.
-            let xml = invoicekit_format_ubl::to_xml(&request.document).map_err(|e| {
+            let xml = invoicekit_format_ubl::to_xml(&document).map_err(|e| {
                 GatewayError::new(
                     GatewayErrorKind::InvalidRequest,
-                    GatewayOperation::Submit,
+                    operation,
                     format!("partner adapter: UBL serialisation failed: {e}"),
                     "fix the IR document so format-ubl can serialise it",
                 )
@@ -354,13 +362,19 @@ impl GatewayAdapter for PartnerPeppolAdapter {
             let response = self.http.post_json(url, bearer, body).await.map_err(|e| {
                 GatewayError::new(
                     GatewayErrorKind::NetworkFailure,
-                    GatewayOperation::Submit,
+                    operation,
                     format!("partner adapter HTTP transport error: {e}"),
                     "check INVOICEKIT_PEPPOL_API_BASE reachability + the partner's status page",
                 )
             })?;
-            decode_submit_response(&request.context, &response)
+            decode_submit_response(&context, &response)
         })
+    }
+}
+
+impl GatewayAdapter for PartnerPeppolAdapter {
+    fn submit(&self, request: SubmitRequest) -> GatewayFuture<'_, GatewayReceipt> {
+        self.submit_document(GatewayOperation::Submit, request.document, request.context)
     }
 
     fn poll(&self, request: PollRequest) -> GatewayFuture<'_, GatewayReceipt> {
@@ -394,30 +408,11 @@ impl GatewayAdapter for PartnerPeppolAdapter {
     fn correct(&self, request: CorrectRequest) -> GatewayFuture<'_, GatewayReceipt> {
         // Correction is a fresh submit with a reference to the
         // prior submission. We delegate to submit + tag the route.
-        let url = self.submit_url();
-        let bearer = self.secrets.api_key();
-        let vendor = self.config.vendor;
-        let legal_entity_id = self.config.legal_entity_id.clone();
-        Box::pin(async move {
-            let xml = invoicekit_format_ubl::to_xml(&request.corrected_document).map_err(|e| {
-                GatewayError::new(
-                    GatewayErrorKind::InvalidRequest,
-                    GatewayOperation::Correct,
-                    format!("partner adapter: UBL serialisation failed: {e}"),
-                    "fix the IR document so format-ubl can serialise it",
-                )
-            })?;
-            let body = render_submit_body(vendor, &legal_entity_id, &xml);
-            let response = self.http.post_json(url, bearer, body).await.map_err(|e| {
-                GatewayError::new(
-                    GatewayErrorKind::NetworkFailure,
-                    GatewayOperation::Correct,
-                    format!("partner adapter HTTP transport error: {e}"),
-                    "check INVOICEKIT_PEPPOL_API_BASE reachability + the partner's status page",
-                )
-            })?;
-            decode_submit_response(&request.context, &response)
-        })
+        self.submit_document(
+            GatewayOperation::Correct,
+            request.corrected_document,
+            request.context,
+        )
     }
 }
 

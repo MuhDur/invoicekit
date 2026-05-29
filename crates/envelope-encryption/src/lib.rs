@@ -302,6 +302,18 @@ fn residency_compatible(served: Region, requested: Region) -> bool {
     matches!(served, Region::Global) || served == requested
 }
 
+/// XOR two 32-byte buffers byte-for-byte. The `InMemoryKms` test
+/// adapter uses XOR(DEK, master) as its deterministic (and
+/// cryptographically meaningless) wrap; both wrap and unwrap run the
+/// same operation, so they share this helper.
+fn xor32(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    for (o, (x, y)) in out.iter_mut().zip(a.iter().zip(b.iter())) {
+        *o = x ^ y;
+    }
+    out
+}
+
 /// In-memory KMS adapter for tests. Each tenant gets a deterministic
 /// per-tenant master key derived from `domain_secret` via BLAKE3.
 /// Wrapping is XOR(DEK, master); not cryptographically meaningful,
@@ -398,12 +410,8 @@ impl KmsAdapter for InMemoryKms {
     fn wrap_data_key(&self, tenant: &TenantId, dek: &PlaintextDek) -> Result<WrappedDek, KmsError> {
         let version = self.current_for(tenant);
         let master = self.derive_master(tenant, version);
-        let mut wrapped = [0u8; 32];
-        for i in 0..32 {
-            wrapped[i] = dek.0[i] ^ master[i];
-        }
         Ok(WrappedDek {
-            bytes: wrapped.to_vec(),
+            bytes: xor32(&dek.0, &master).to_vec(),
             key_version: version,
         })
     }
@@ -422,14 +430,10 @@ impl KmsAdapter for InMemoryKms {
                 tenant: tenant.clone(),
                 version: wrapped.key_version,
             })?;
-        if wrapped.bytes.len() != 32 {
-            return Err(KmsError::Aead("wrapped DEK is not 32 bytes".into()));
-        }
-        let mut plaintext = [0u8; 32];
-        for i in 0..32 {
-            plaintext[i] = wrapped.bytes[i] ^ master[i];
-        }
-        Ok(PlaintextDek(plaintext))
+        let bytes: [u8; 32] = wrapped.bytes.as_slice().try_into().map_err(|_| {
+            KmsError::Aead("wrapped DEK is not 32 bytes".into())
+        })?;
+        Ok(PlaintextDek(xor32(&bytes, &master)))
     }
 }
 
@@ -445,6 +449,17 @@ pub struct AwsKmsScaffold {
     pub served_regions: Vec<Region>,
 }
 
+impl AwsKmsScaffold {
+    /// The single error every scaffold call returns until the
+    /// `aws-kms` feature ships the real AWS SDK integration.
+    const fn not_built() -> KmsError {
+        KmsError::AdapterNotBuilt {
+            adapter: "AwsKmsScaffold",
+            feature: "aws-kms",
+        }
+    }
+}
+
 impl KmsAdapter for AwsKmsScaffold {
     fn served_regions(&self) -> &[Region] {
         &self.served_regions
@@ -455,10 +470,7 @@ impl KmsAdapter for AwsKmsScaffold {
         _tenant: &TenantId,
         _dek: &PlaintextDek,
     ) -> Result<WrappedDek, KmsError> {
-        Err(KmsError::AdapterNotBuilt {
-            adapter: "AwsKmsScaffold",
-            feature: "aws-kms",
-        })
+        Err(Self::not_built())
     }
 
     fn unwrap_data_key(
@@ -466,10 +478,7 @@ impl KmsAdapter for AwsKmsScaffold {
         _tenant: &TenantId,
         _wrapped: &WrappedDek,
     ) -> Result<PlaintextDek, KmsError> {
-        Err(KmsError::AdapterNotBuilt {
-            adapter: "AwsKmsScaffold",
-            feature: "aws-kms",
-        })
+        Err(Self::not_built())
     }
 }
 

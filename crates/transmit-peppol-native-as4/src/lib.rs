@@ -88,20 +88,17 @@ pub enum SignerError {
     SigningFailed(String),
 }
 
+/// Boxed future returned by [`Transport::push`].
+pub type PushFuture<'a> =
+    Pin<Box<dyn std::future::Future<Output = Result<TransportResponse, TransportError>> + Send + 'a>>;
+
 /// HTTPS transport abstraction.
 pub trait Transport: Send + Sync {
     /// Push the signed envelope to the recipient AP. Returns the
     /// receipt `MDN` bytes + HTTP status. The status mirrors what
     /// the partner adapter consumes so failure mapping is uniform
     /// across both T-091 and T-094.
-    fn push(
-        &self,
-        envelope: &As4Envelope,
-    ) -> Pin<
-        Box<
-            dyn std::future::Future<Output = Result<TransportResponse, TransportError>> + Send + '_,
-        >,
-    >;
+    fn push(&self, envelope: &As4Envelope) -> PushFuture<'_>;
 }
 
 /// Response shape returned by [`Transport::push`].
@@ -233,13 +230,60 @@ impl NativeAs4Adapter {
             |t| format!("iso6523-actorid-upis::{}", t.value),
         )
     }
+
+    /// Shared outbound pipeline: SMP lookup → envelope build → sign →
+    /// push → decode. Both [`GatewayAdapter::submit`] and
+    /// [`GatewayAdapter::correct`] run this with a per-operation
+    /// participant + message id; the error mapping is identical bar
+    /// the [`GatewayOperation`] tag.
+    async fn dispatch(
+        &self,
+        context: &GatewayContext,
+        operation: GatewayOperation,
+        participant: &str,
+        message_id: String,
+        xml: &str,
+    ) -> Result<GatewayReceipt, GatewayError> {
+        let recipient = self
+            .smp
+            .resolve(participant, "peppol-bis-billing-3")
+            .map_err(|e| {
+                GatewayError::new(
+                    GatewayErrorKind::NotFound,
+                    operation,
+                    format!("native-as4 adapter: SMP lookup failed: {e}"),
+                    "verify the recipient participant identifier is registered on the Peppol SML",
+                )
+            })?;
+        let mut envelope = As4Envelope {
+            soap_body: build_as4_envelope_bytes(message_id.as_bytes(), xml.as_bytes()),
+            message_id,
+            recipient,
+        };
+        self.signer.sign(&mut envelope).map_err(|e| {
+            GatewayError::new(
+                GatewayErrorKind::CertificateRejected,
+                operation,
+                format!("native-as4 adapter: `XMLDSig` signing failed: {e}"),
+                "verify the AP certificate is current and the signer has access to its private key",
+            )
+        })?;
+        let response = self.transport.push(&envelope).await.map_err(|e| {
+            GatewayError::new(
+                GatewayErrorKind::NetworkFailure,
+                operation,
+                format!("native-as4 adapter: transport failed: {e}"),
+                "check recipient AP endpoint reachability + your firewall rules",
+            )
+        })?;
+        decode_response(context, &response, operation, &envelope.message_id)
+    }
 }
 
 impl GatewayAdapter for NativeAs4Adapter {
     fn submit(&self, request: SubmitRequest) -> GatewayFuture<'_, GatewayReceipt> {
         let participant = Self::recipient_participant_for(&request);
         Box::pin(async move {
-            // 1. UBL serialisation
             let xml = invoicekit_format_ubl::to_xml(&request.document).map_err(|e| {
                 GatewayError::new(
                     GatewayErrorKind::InvalidRequest,
@@ -248,53 +292,19 @@ impl GatewayAdapter for NativeAs4Adapter {
                     "fix the IR document so format-ubl can serialise it",
                 )
             })?;
-            // 2. SMP lookup
-            let recipient = self
-                .smp
-                .resolve(&participant, "peppol-bis-billing-3")
-                .map_err(|e| {
-                    GatewayError::new(
-                    GatewayErrorKind::NotFound,
-                    GatewayOperation::Submit,
-                    format!("native-as4 adapter: SMP lookup failed: {e}"),
-                    "verify the recipient participant identifier is registered on the Peppol SML",
-                )
-                })?;
-            // 3. Build envelope
             let message_id = format!(
                 "ik:{}-{}",
                 request.context.tenant_id.as_str(),
                 request.context.gateway_attempt_id.as_str()
             );
-            let mut envelope = As4Envelope {
-                soap_body: build_as4_envelope_bytes(message_id.as_bytes(), xml.as_bytes()),
-                message_id,
-                recipient,
-            };
-            // 4. Sign
-            self.signer.sign(&mut envelope).map_err(|e| {
-                GatewayError::new(
-                GatewayErrorKind::CertificateRejected,
-                GatewayOperation::Submit,
-                format!("native-as4 adapter: `XMLDSig` signing failed: {e}"),
-                "verify the AP certificate is current and the signer has access to its private key",
-            )
-            })?;
-            // 5. Push
-            let response = self.transport.push(&envelope).await.map_err(|e| {
-                GatewayError::new(
-                    GatewayErrorKind::NetworkFailure,
-                    GatewayOperation::Submit,
-                    format!("native-as4 adapter: transport failed: {e}"),
-                    "check recipient AP endpoint reachability + your firewall rules",
-                )
-            })?;
-            decode_response(
+            self.dispatch(
                 &request.context,
-                &response,
                 GatewayOperation::Submit,
-                &envelope.message_id,
+                &participant,
+                message_id,
+                &xml,
             )
+            .await
         })
     }
 
@@ -357,49 +367,19 @@ impl GatewayAdapter for NativeAs4Adapter {
                     || format!("iso6523-actorid-upis::{participant_owner}"),
                     |t| format!("iso6523-actorid-upis::{}", t.value),
                 );
-            let recipient = self
-                .smp
-                .resolve(&recipient_participant, "peppol-bis-billing-3")
-                .map_err(|e| {
-                    GatewayError::new(
-                    GatewayErrorKind::NotFound,
-                    GatewayOperation::Correct,
-                    format!("native-as4 adapter: SMP lookup failed: {e}"),
-                    "verify the recipient participant identifier is registered on the Peppol SML",
-                )
-                })?;
             let message_id = format!(
                 "ik:{}-{}-correct",
                 request.context.tenant_id.as_str(),
                 request.context.gateway_attempt_id.as_str()
             );
-            let mut envelope = As4Envelope {
-                soap_body: build_as4_envelope_bytes(message_id.as_bytes(), xml.as_bytes()),
-                message_id: message_id.clone(),
-                recipient,
-            };
-            self.signer.sign(&mut envelope).map_err(|e| {
-                GatewayError::new(
-                GatewayErrorKind::CertificateRejected,
-                GatewayOperation::Correct,
-                format!("native-as4 adapter: `XMLDSig` signing failed: {e}"),
-                "verify the AP certificate is current and the signer has access to its private key",
-            )
-            })?;
-            let response = self.transport.push(&envelope).await.map_err(|e| {
-                GatewayError::new(
-                    GatewayErrorKind::NetworkFailure,
-                    GatewayOperation::Correct,
-                    format!("native-as4 adapter: transport failed: {e}"),
-                    "check recipient AP endpoint reachability + your firewall rules",
-                )
-            })?;
-            decode_response(
+            self.dispatch(
                 &request.context,
-                &response,
                 GatewayOperation::Correct,
-                &message_id,
+                &recipient_participant,
+                message_id,
+                &xml,
             )
+            .await
         })
     }
 }
@@ -543,14 +523,7 @@ impl MockTransport {
 }
 
 impl Transport for MockTransport {
-    fn push(
-        &self,
-        envelope: &As4Envelope,
-    ) -> Pin<
-        Box<
-            dyn std::future::Future<Output = Result<TransportResponse, TransportError>> + Send + '_,
-        >,
-    > {
+    fn push(&self, envelope: &As4Envelope) -> PushFuture<'_> {
         self.pushed.lock().unwrap().push(envelope.clone());
         let response = self
             .queued

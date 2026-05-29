@@ -310,7 +310,7 @@ impl AuditEventStore for InMemoryAuditStore {
         });
 
         let start = match &query.cursor {
-            Some(c) => decode_cursor(c)?.0,
+            Some(c) => decode_cursor(c)?,
             None => 0,
         };
         let end = (start + query.page_size).min(filtered.len());
@@ -582,14 +582,13 @@ fn encode_cursor(offset: usize) -> String {
     format!("v1.{offset:x}")
 }
 
-fn decode_cursor(s: &str) -> Result<(usize, ()), AuditQueryError> {
+fn decode_cursor(s: &str) -> Result<usize, AuditQueryError> {
     let rest = s.strip_prefix("v1.").ok_or(AuditQueryError::BadCursor {
         cursor: s.to_owned(),
     })?;
-    let offset = usize::from_str_radix(rest, 16).map_err(|_| AuditQueryError::BadCursor {
+    usize::from_str_radix(rest, 16).map_err(|_| AuditQueryError::BadCursor {
         cursor: s.to_owned(),
-    })?;
-    Ok((offset, ()))
+    })
 }
 
 #[cfg(test)]

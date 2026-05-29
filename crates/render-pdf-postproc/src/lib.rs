@@ -113,16 +113,11 @@ impl ZugferdProfile {
     }
 
     /// Operator-readable identifier used by tracing + tests.
+    ///
+    /// Identical to [`Self::xmp_conformance_level`] for every profile.
     #[must_use]
     pub const fn name(self) -> &'static str {
-        match self {
-            Self::Minimum => "MINIMUM",
-            Self::BasicWl => "BASIC WL",
-            Self::Basic => "BASIC",
-            Self::En16931 => "EN 16931",
-            Self::Extended => "EXTENDED",
-            Self::Xrechnung => "XRECHNUNG",
-        }
+        self.xmp_conformance_level()
     }
 }
 
@@ -216,18 +211,15 @@ pub fn embed_factur_x(
 }
 
 fn catalog_id(doc: &Document) -> Option<lopdf::ObjectId> {
-    doc.trailer.get(b"Root").ok().and_then(|root| match root {
-        Object::Reference(id) => Some(*id),
-        _ => None,
-    })
+    doc.trailer
+        .get(b"Root")
+        .ok()
+        .and_then(|root| root.as_reference().ok())
 }
 
 fn catalog_metadata_xmp(doc: &Document, catalog_id: lopdf::ObjectId) -> Option<String> {
     let catalog = doc.get_object(catalog_id).ok()?.as_dict().ok()?;
-    let metadata_id = match catalog.get(b"Metadata").ok()? {
-        Object::Reference(id) => *id,
-        _ => return None,
-    };
+    let metadata_id = catalog.get(b"Metadata").ok()?.as_reference().ok()?;
     let metadata = doc.get_object(metadata_id).ok()?.as_stream().ok()?;
     let content = metadata.get_plain_content().ok()?;
     std::str::from_utf8(&content).ok().map(ToOwned::to_owned)

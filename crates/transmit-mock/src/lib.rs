@@ -262,6 +262,16 @@ impl MockGatewayAdapter {
         recorded_gateway_request(GatewayOperation::Correct, "POST", MOCK_CORRECT_PATH, body)
     }
 
+    fn replay_future(
+        &self,
+        operation: GatewayOperation,
+        recorded: Result<RecordedRequest, GatewayError>,
+        context: GatewayContext,
+    ) -> GatewayFuture<'_, GatewayReceipt> {
+        let result = recorded.and_then(|recorded| self.replay(operation, &recorded, context));
+        Box::pin(std::future::ready(result))
+    }
+
     fn replay(
         &self,
         operation: GatewayOperation,
@@ -315,34 +325,22 @@ impl MockGatewayAdapter {
 impl GatewayAdapter for MockGatewayAdapter {
     fn submit(&self, request: SubmitRequest) -> GatewayFuture<'_, GatewayReceipt> {
         let recorded = Self::recorded_submit_request(&request);
-        let context = request.context;
-        let result =
-            recorded.and_then(|recorded| self.replay(GatewayOperation::Submit, &recorded, context));
-        Box::pin(std::future::ready(result))
+        self.replay_future(GatewayOperation::Submit, recorded, request.context)
     }
 
     fn poll(&self, request: PollRequest) -> GatewayFuture<'_, GatewayReceipt> {
         let recorded = Self::recorded_poll_request(&request);
-        let context = request.context;
-        let result =
-            recorded.and_then(|recorded| self.replay(GatewayOperation::Poll, &recorded, context));
-        Box::pin(std::future::ready(result))
+        self.replay_future(GatewayOperation::Poll, recorded, request.context)
     }
 
     fn cancel(&self, request: CancelRequest) -> GatewayFuture<'_, GatewayReceipt> {
         let recorded = Self::recorded_cancel_request(&request);
-        let context = request.context;
-        let result =
-            recorded.and_then(|recorded| self.replay(GatewayOperation::Cancel, &recorded, context));
-        Box::pin(std::future::ready(result))
+        self.replay_future(GatewayOperation::Cancel, recorded, request.context)
     }
 
     fn correct(&self, request: CorrectRequest) -> GatewayFuture<'_, GatewayReceipt> {
         let recorded = Self::recorded_correct_request(&request);
-        let context = request.context;
-        let result = recorded
-            .and_then(|recorded| self.replay(GatewayOperation::Correct, &recorded, context));
-        Box::pin(std::future::ready(result))
+        self.replay_future(GatewayOperation::Correct, recorded, request.context)
     }
 }
 

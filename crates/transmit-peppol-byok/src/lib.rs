@@ -367,39 +367,22 @@ impl<'a> PeppolDoctor<'a> {
                 CheckStatus::Failed(format!("{prefix} pem not found: {}", path.display()))
             },
         });
-        let bytes = if exists {
-            match self.fs.read(path) {
-                Ok(b) => Some(b),
-                Err(e) => {
-                    rows.push(CheckRow {
-                        id: format!("{prefix}.readable"),
-                        status: CheckStatus::Failed(format!("read failed: {e}")),
-                    });
-                    None
-                }
-            }
-        } else {
-            rows.push(CheckRow {
-                id: format!("{prefix}.readable"),
-                status: CheckStatus::Skipped(format!("{prefix} missing")),
-            });
-            None
+        let (readable, bytes) = match exists.then(|| self.fs.read(path)) {
+            Some(Ok(b)) => (CheckStatus::Ok, Some(b)),
+            Some(Err(e)) => (CheckStatus::Failed(format!("read failed: {e}")), None),
+            None => (CheckStatus::Skipped(format!("{prefix} missing")), None),
         };
-        if let Some(bytes) = &bytes {
-            rows.push(CheckRow {
-                id: format!("{prefix}.readable"),
-                status: CheckStatus::Ok,
-            });
-            rows.push(CheckRow {
-                id: format!("{prefix}.pem-shaped"),
-                status: kind.validate_pem(bytes),
-            });
-        } else {
-            rows.push(CheckRow {
-                id: format!("{prefix}.pem-shaped"),
-                status: CheckStatus::Skipped(format!("{prefix} unreadable")),
-            });
-        }
+        rows.push(CheckRow {
+            id: format!("{prefix}.readable"),
+            status: readable,
+        });
+        rows.push(CheckRow {
+            id: format!("{prefix}.pem-shaped"),
+            status: bytes.as_ref().map_or_else(
+                || CheckStatus::Skipped(format!("{prefix} unreadable")),
+                |bytes| kind.validate_pem(bytes),
+            ),
+        });
     }
 }
 
@@ -432,12 +415,9 @@ fn is_pem_block(bytes: &[u8], label: &str) -> bool {
 }
 
 fn is_any_key_pem(bytes: &[u8]) -> bool {
-    for label in ["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY"] {
-        if is_pem_block(bytes, label) {
-            return true;
-        }
-    }
-    false
+    ["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY"]
+        .iter()
+        .any(|label| is_pem_block(bytes, label))
 }
 
 fn validate_endpoint_url(url: &str) -> CheckStatus {

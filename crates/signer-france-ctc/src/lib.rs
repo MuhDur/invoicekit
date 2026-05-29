@@ -251,15 +251,8 @@ impl FrCtcProvider for MockFrCtcProvider {
         let trimmed_starts_with_lt = request
             .xml
             .iter()
-            .find(|b| {
-                !b.is_ascii_whitespace()
-                    && **b != 0xfe
-                    && **b != 0xff
-                    && **b != 0xef
-                    && **b != 0xbb
-                    && **b != 0xbf
-            })
-            .is_some_and(|b| *b == b'<');
+            .find(|&&b| !b.is_ascii_whitespace() && !matches!(b, 0xfe | 0xff | 0xef | 0xbb | 0xbf))
+            .is_some_and(|&b| b == b'<');
         if !trimmed_starts_with_lt {
             return Err(FrCtcError::BadXml(
                 "payload does not look like XML (first non-whitespace byte is not `<`)".to_owned(),

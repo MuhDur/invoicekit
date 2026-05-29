@@ -264,19 +264,15 @@ impl MockKsefProvider {
         self.submissions.lock().unwrap().clone()
     }
 
-    fn next_session_value(&self) -> u64 {
-        let mut g = self.next_session_id.lock().expect("mutex poisoned");
-        let n = *g;
-        *g += 1;
-        n
-    }
+}
 
-    fn next_invoice_value(&self) -> u64 {
-        let mut g = self.next_invoice_id.lock().expect("mutex poisoned");
-        let n = *g;
-        *g += 1;
-        n
-    }
+/// Read a monotonic counter and post-increment it, returning the
+/// pre-increment value.
+fn next_counter(counter: &Mutex<u64>) -> u64 {
+    let mut g = counter.lock().expect("mutex poisoned");
+    let n = *g;
+    *g += 1;
+    n
 }
 
 impl KsefProvider for MockKsefProvider {
@@ -292,7 +288,7 @@ impl KsefProvider for MockKsefProvider {
         if nip.is_empty() {
             return Err(KsefError::InvoiceRejected("empty NIP".to_owned()));
         }
-        let n = self.next_session_value();
+        let n = next_counter(&self.next_session_id);
         let token = SessionToken {
             session_token: format!("sess-{n:08}"),
             reference_number: format!("ref-{nip}-{n:06}"),
@@ -332,7 +328,7 @@ impl KsefProvider for MockKsefProvider {
             })
             .map_err(KsefError::Signer)?;
         self.submissions.lock().unwrap().push(request.clone());
-        let id = self.next_invoice_value();
+        let id = next_counter(&self.next_invoice_id);
         Ok(KsefStampEnvelope {
             signature,
             numer_ksef: format!("{nip}-20260528-{id:08}-AA", nip = request.nip),

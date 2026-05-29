@@ -18,8 +18,6 @@
 //! as a test failure.
 
 #![allow(
-    clippy::option_if_let_else,
-    clippy::doc_markdown,
     clippy::too_long_first_doc_paragraph,
     clippy::redundant_closure_for_method_calls
 )]
