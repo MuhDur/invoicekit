@@ -35,6 +35,12 @@ confidence-threshold = 0.8
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Intra-workspace crates are referenced by `path` and are not (yet) published to
+# crates.io, so they legitimately carry no version requirement. Allow wildcard
+# *path* dependencies while still denying wildcards on registry crates. Most
+# crates additionally pin `version = "0.1.0"` on path deps for future crates.io
+# readiness; this keeps the gate green for the country crates that do not.
+allow-wildcard-paths = true
 deny = []
 
 [sources]

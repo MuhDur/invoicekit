@@ -314,3 +314,19 @@ where parallelism is safe (distinct crate dirs; no shared-file edits; central `c
   per-file edits (no sed) with cargo as the correctness gate.
 - **Next:** commit + push release prep; tag `v0.1.0`; monitor `release.yml`; finalize GitHub release (artifacts
   + checksums + evidence) so L1 closes and the loop reaches **release DONE**.
+
+### Turn 7 — 2026-05-29 — Release CI triage (cargo-deny wildcard fix)
+- **Skills used:** `release-preparations` (CI failure triage), `gh-cli`, `verification-before-completion`.
+- **Did:** Polled `release.yml` (run 26637007489): **REST OpenAPI ✓, veraPDF PDF/A-3 gate (3b+3u) ✓**, but the
+  3 cross-platform binary jobs FAILED at `cargo deny` — `error[wildcard]`: the new country crates reference
+  internal crates by `path` with no `version`, which `wildcards = "deny"` rejects. The GitHub release v0.1.0
+  was created (not draft) but carries only the OpenAPI assets.
+- **Fix:** added `allow-wildcard-paths = true` to `deny.toml [bans]` — intra-workspace path deps legitimately
+  carry no version (GitHub-only, not yet on crates.io); registry-crate wildcards stay denied; existing pins
+  untouched. Verified locally: `cargo deny check bans licenses sources advisories` = **advisories ok, bans ok,
+  licenses ok, sources ok** (cargo-deny 0.19.7).
+- **Decisions:** D10 — fix the release-blocking wildcard lint via `allow-wildcard-paths = true` rather than
+  pinning `version` on ~170 path deps across 34 country crates: one reviewable line, idiomatic cargo-deny,
+  prevents recurrence as the serializer set grows, and preserves the strict registry-wildcard gate.
+- **Next:** commit deny.toml; move the `v0.1.0` tag to the fixed commit to rebuild + attach the cross-platform
+  binaries (release skill standard tag-iteration); confirm the release carries binaries → close L1.
