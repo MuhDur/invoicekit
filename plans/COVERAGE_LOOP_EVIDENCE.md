@@ -436,3 +436,17 @@ convergence. Maintain skill matrix + per-turn skill usage. Dynamic workflows thr
   refs → isomorphic quality pass → review), over the 34 leaf `report-*` crates. Verified centrally on completion.
 - **Next:** foundation-crate quality waves (dependency-careful) + RTL/CJK intake (L5) via `codebase-archaeology`
   → implement → test.
+
+### Turn 11 — 2026-05-29 — Phase-2 wave 1 verified + committed
+- **Workflow:** `coverage-p2-country-depth-quality` (102 agents, 7.9M tokens, ~27 min) → **34/34 green.**
+- **Independently verified:** `cargo test --workspace` = **2322 passed, 0 failed** (was 2056 → +266 depth tests;
+  the prior 2056 all still pass = isomorphism held); `clippy --workspace -D warnings` clean; **UBS critical = 0**
+  (fixed a test `panic!` in report-za-sars → `matches!`); fixed a stale rejection-path doc in report-es-verifactu.
+  Net **-602 LOC** from isomorphic simplification amid the depth additions. Committed `f45945b`.
+- **Skills used:** `simplify-and-refactor-code-isomorphically`, `verification-before-completion`, `ubs`.
+
+### Turn 12 — 2026-05-29 — RTL/CJK intake (closes L5)
+- **Workflow launched:** `coverage-p2-rtl-cjk-intake` — `codebase-archaeology` → implement RTL (Arabic/Hebrew
+  bidi) + CJK vertical-script handling in the `intake-pdf` digital path (real impl; may add a justified bidi
+  dep since this is a feature, not test-only churn) + tests → review. Then a quality pass on the intake crates.
+- **Next:** foundation/core/format/signer/transmit quality waves (dependency-careful, isomorphic).
