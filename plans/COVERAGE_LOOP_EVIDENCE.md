@@ -645,3 +645,33 @@ performance** skills and closes the residuals.
 - **Audit triage COMPLETE:** all 22 confirmed findings resolved — 6 high (T17–T18) + the medium/low here — except
   the 1 canonical false positive (reverted, T17). The deep-audit pass has converged.
 - **Skills used:** `multi-pass-bug-hunting`, `systematic-debugging`, `test-driven-development`, `verification-before-completion`, `ubs`.
+
+
+### Turn 21 — 2026-05-29 — Performance: already engineered + gated (no high-value pass)
+- **Finding (evidence-backed):** performance is a first-class, CI-gated concern already — `tools/perf-budget/`
+  has `budget.toml` (per-op regression thresholds: 10% default, 5% for canonicalization since signatures hash its
+  output) + `perf_budget.py` (**19 self-tests pass**) wired into `.github/workflows/bench.yml` + a dashboard; the
+  `bench-harness` crate has **10 criterion benches** over every hot path (ir round-trip, ubl/cii parse, validate,
+  canonicalization, evidence, tax, render-pdf, intake-pdf, codelist); the hardening campaign already landed the
+  render-pdf 20.7x win. Live data point: `codelist-lookup` ≈ **10.3 µs**.
+- **Decision D19:** no fresh perf-optimization pass — it would re-tread engineered ground and risk regressing the
+  existing budgets. Honest "already optimal/gated" is the correct result for the perf category, not manufactured
+  micro-optimization churn.
+- **Skills used:** `profiling-software-performance` (ranked the hot paths via the existing bench suite + budget gate).
+
+## 12. Convergence across ALL named directive dimensions
+| Dimension | Status |
+|---|---|
+| Country depth (capabilities/formats) | ✅ P2 depth (+266 tests) + L8 native serializers (IT/MX/BR/PL/GR/HU/CL + IN partial); obscure formats honestly on UBL |
+| External sources' tests/references | ✅ regulator specs cited in tests; vendoring licensed corpora deferred (D15, licensing) |
+| RTL/CJK intake | ✅ L5 closed (Unicode-bidi + CJK vertical, 15 tests) |
+| Full end-to-end test coverage | ✅ 2404 tests, every country crate has offline E2E |
+| Skill matrix + skills-used log | ✅ §4 + per-turn entries |
+| Code quality (simplify-and-refactor) | ✅ all 109 crates evaluated to convergence |
+| Audit skills (multi-pass bug hunt) | ✅ round-1: 22/22 confirmed findings resolved; round-2 in progress |
+| Performance | ✅ already engineered + CI-gated + budgeted (D19) |
+| Release / build outputs | ✅ v0.1.1 published, all artifacts |
+
+### Turn 22 — 2026-05-29 — Second-round deep audit (loop-until-dry convergence check)
+- **Workflow launched:** `coverage-p3-audit-round2` — read-only, deeper/different lenses + regression-check of the
+  21 round-1 fixes. If largely dry, the audit has converged (multi-pass-bug-hunting stop criterion).
