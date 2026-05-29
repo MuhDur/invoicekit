@@ -5,6 +5,13 @@ All notable changes to InvoiceKit are documented here. The format follows
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reaches
 `1.0`. Until then, minor versions may carry breaking changes.
 
+## [0.1.1] — 2026-05-29
+
+First **complete** tagged release. Supersedes `v0.1.0`, whose cross-platform
+binary jobs were blocked by a `cargo-deny` wildcard-path lint (intra-workspace
+`path` dependencies carry no version requirement); fixed via
+`allow-wildcard-paths = true`. Content is otherwise identical to `0.1.0`.
+
 ## [0.1.0] — 2026-05-29
 
 First tagged release. The Rust engine and the full B2B e-invoicing lifecycle
@@ -70,4 +77,5 @@ lint level (the single documented exception is the C ABI crate).
 - **Inbound right-to-left and CJK vertical scripts** remain a documented gap in the
   digital-PDF intake path.
 
+[0.1.1]: https://github.com/MuhDur/invoicekit/releases/tag/v0.1.1
 [0.1.0]: https://github.com/MuhDur/invoicekit/releases/tag/v0.1.0

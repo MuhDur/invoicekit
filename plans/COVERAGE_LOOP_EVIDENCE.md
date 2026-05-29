@@ -330,3 +330,8 @@ where parallelism is safe (distinct crate dirs; no shared-file edits; central `c
   prevents recurrence as the serializer set grows, and preserves the strict registry-wildcard gate.
 - **Next:** commit deny.toml; move the `v0.1.0` tag to the fixed commit to rebuild + attach the cross-platform
   binaries (release skill standard tag-iteration); confirm the release carries binaries → close L1.
+- **D11 (T7):** Tag force-move blocked (dcg guards `-f`; `--force-with-lease` stale-info on tags). Per release
+  skill OP-11, cut **v0.1.1** at the fixed commit instead of forcing — non-destructive, no history overwrite.
+  Bumped only `[workspace.package]` 0.1.0→0.1.1 (path-dep pins are `^0.1.0`, caret-compatible; verified
+  `cargo check` + `cargo deny bans` green; binary reports `0.1.1`). v0.1.0 release left intact (OpenAPI +
+  veraPDF evidence), notes to point at v0.1.1; did NOT delete it (AGENTS.md no-delete discipline).

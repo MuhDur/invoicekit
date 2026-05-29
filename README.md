@@ -12,7 +12,7 @@
 
 > One toolkit for the full B2B invoicing lifecycle: generate, check, render, read, send, and store legally-correct e-invoices for Germany, France, Belgium, Italy, Poland, and the Peppol network. Runs on whatever stack you already use (Node, Python, Go, Java, .NET, browser, edge).
 
-**Status: `v0.1.0` (first tagged release).** The Rust engine and ~110 workspace crates build green with a passing test suite (2000+ tests) and CI. `v0.1.0` is tagged on GitHub; it is not yet published to a language package registry. Build from source (see [Installation](#installation)) or grab the release artifacts. APIs may still move before `1.0`. See [`CHANGELOG.md`](CHANGELOG.md).
+**Status: `v0.1.1` (first complete tagged release).** The Rust engine and ~110 workspace crates build green with a passing test suite (2000+ tests) and CI. `v0.1.1` is tagged on GitHub with cross-platform CLI binaries, the REST OpenAPI document, and a veraPDF-cleared PDF/A-3 gate; it is not yet published to a language package registry. Build from source (see [Installation](#installation)) or grab the release artifacts. APIs may still move before `1.0`. See [`CHANGELOG.md`](CHANGELOG.md).
 
 ## The problem
 
