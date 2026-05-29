@@ -95,6 +95,11 @@ ADVISORY_WAIVERS: tuple[AdvisoryWaiver, ...] = (
             "invoicekit-render-pdf",
             "invoicekit-render-factur-x-acceptance",
             "invoicekit-binding-rest-shim",
+            # The cross-crate benchmark harness depends on render-pdf to bench the
+            # render verb, so it inherits the same Typst -> syntect -> yaml-rust
+            # path. It is `publish = false` (dev/CI only), so the build-time-only
+            # advisory exposure matches the rendering crates above.
+            "invoicekit-bench-harness",
         ),
     ),
     AdvisoryWaiver(
@@ -105,6 +110,9 @@ ADVISORY_WAIVERS: tuple[AdvisoryWaiver, ...] = (
             "invoicekit-render-pdf",
             "invoicekit-render-factur-x-acceptance",
             "invoicekit-binding-rest-shim",
+            # See the yaml-rust waiver: bench-harness reaches paste through the
+            # same Typst -> hayagriva path via its render-pdf bench dependency.
+            "invoicekit-bench-harness",
         ),
     ),
     AdvisoryWaiver(
@@ -115,6 +123,9 @@ ADVISORY_WAIVERS: tuple[AdvisoryWaiver, ...] = (
             "invoicekit-render-pdf",
             "invoicekit-render-factur-x-acceptance",
             "invoicekit-binding-rest-shim",
+            # See the yaml-rust waiver: bench-harness reaches bincode through the
+            # same Typst -> syntect path via its render-pdf bench dependency.
+            "invoicekit-bench-harness",
         ),
     ),
 )
