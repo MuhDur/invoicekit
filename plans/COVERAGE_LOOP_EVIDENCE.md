@@ -390,6 +390,49 @@ gh-cli (T6–T9 release). Convergence was driven by repeated implement→verify�
   EN 16931/UBL representation, with native serializers tracked as follow-ups. Disclosed via matrix `confidence`.
 - **L2/L3** — JVM reference validator + BYOK Peppol / native-AS4-research are settled architectural commitments.
 
-**LOOP STATUS: CONVERGED.** The stated goal — improve coverage so all countries are end-to-end supported with
-exhaustive tests, automated build outputs, and a fully-tested GitHub release — is DONE and verified. Self-pacing
-halted (no further `ScheduleWakeup`). A future loop could pursue depth (L5/L8) if desired.
+**LOOP STATUS: CONVERGED (Phase 1).** The stated goal — improve coverage so all countries are end-to-end
+supported with exhaustive tests, automated build outputs, and a fully-tested GitHub release — is DONE and verified.
+
+---
+
+## 9. Campaign Phase 2 — Depth & Quality (started 2026-05-29)
+
+New principal directive: go DEEP per country (external sources' tests + references, full capability/format
+coverage), close **RTL/CJK intake** (L5), and in parallel run a **per-crate code-quality** loop applying
+`/repeatedly-apply-skill` with `/simplify-and-refactor-code-isomorphically` (+ audit/perf skills) until
+convergence. Maintain skill matrix + per-turn skill usage. Dynamic workflows throughout.
+
+### Phase-2 goals
+- **G9 Country depth:** each country exercises ALL its supported capabilities + format variations (invoice +
+  credit note, multi-line, tax-exempt/zero-rate/reverse-charge, error/rejection paths), grounded in the
+  country's real external spec/test-suite (cited in tests; license-safe synthetic fixtures).
+- **G10 RTL/CJK intake (closes L5):** Arabic/Hebrew RTL + CJK handling in the intake path, with tests.
+- **G11 Code quality (isomorphic):** per crate, evaluate then apply behavior-preserving simplification +
+  audits (ubs, codebase-audit) + perf review, iterating to convergence. **Net-negative LOC with the 2056-test
+  suite still green** is the bar. The One Rule: prove behavior identical, then remove lines — no proof, no delete.
+
+### Phase-2 decisions
+- **D13:** Evaluated true-parallel of depth vs quality → UNSAFE where they share the dependency graph (country
+  E2E compiles foundation crates that a quality agent would be editing). So: run depth+quality **combined per
+  leaf country crate** now (report-* are leaves — no dependents to break), then foundation-quality + RTL/CJK in
+  dependency-careful later waves. High intra-wave parallelism; cargo serializes builds.
+- **D14:** Quality work obeys `simplify-and-refactor-code-isomorphically` strictly: Edit-only (no codemods/sed),
+  one-lever changes, Score=(LOC×Conf)/Risk ≥ 2.0, keep per-crate tests green + clippy `-D warnings` clean + no
+  new warnings; central `cargo test --workspace` (≥2056) gate before every commit. If nothing scores ≥2.0, the
+  crate is already clean (converged) — that's a valid no-op result, not forced churn.
+- **D15:** "External sources' tests + references" = cite the authoritative regulator spec/test-suite per country
+  in test docs and encode spec-grounded scenarios via license-safe synthetic fixtures (conformance-corpus
+  generators) — do NOT vendor copyrighted regulator files.
+
+### Phase-2 skill matrix additions
+`simplify-and-refactor-code-isomorphically` (✅ loaded T10), `repeatedly-apply-skill` (convergence driver),
+`codebase-audit` + `ubs` + `multi-pass-bug-hunting` (audit), `profiling-software-performance` +
+`extreme-software-optimization` (perf), `testing-conformance-harnesses` + `testing-metamorphic` +
+`testing-fuzzing` (deeper tests), `codebase-archaeology` (model intake before RTL/CJK work).
+
+### Turn 10 — 2026-05-29 — Phase 2 kickoff: country depth + quality (combined, leaf crates)
+- **Skills used:** `simplify-and-refactor-code-isomorphically` (loaded), `reality-check`/`verification` discipline.
+- **Workflow launched:** `coverage-p2-country-depth-quality` — per-country pipeline (deepen E2E + cite external
+  refs → isomorphic quality pass → review), over the 34 leaf `report-*` crates. Verified centrally on completion.
+- **Next:** foundation-crate quality waves (dependency-careful) + RTL/CJK intake (L5) via `codebase-archaeology`
+  → implement → test.
