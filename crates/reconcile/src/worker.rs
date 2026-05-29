@@ -552,24 +552,31 @@ impl TransmissionWorker {
 
     /// Processes up to `max_batch_size` jobs in deterministic order.
     ///
-    /// # Errors
+    /// Each job is processed independently and its outcome is collected as a
+    /// per-job [`Result`]. A failure on a later job (for example, a not-ready
+    /// pre-submit guard) must never discard an earlier job's outcome: earlier
+    /// jobs may already have performed an irreversible gateway submit, and
+    /// dropping their [`TransmissionWorkerResult::Submitted`] result would cause
+    /// the next drain to resubmit them, duplicating transmission. The batch
+    /// therefore returns one entry per selected job rather than short-circuiting
+    /// on the first error.
     ///
-    /// Returns [`ReconcileError`] when any selected job is not ready or cannot
-    /// be converted into a gateway submit request.
+    /// The returned vector is parallel to the selected jobs in input order, so
+    /// callers can correlate each outcome with its originating job.
     pub async fn process_batch(
         &mut self,
         adapter: &dyn GatewayAdapter,
         now_seconds: u64,
         jobs: impl IntoIterator<Item = TransmissionJob>,
-    ) -> Result<Vec<TransmissionWorkerResult>, ReconcileError> {
+    ) -> Vec<Result<TransmissionWorkerResult, ReconcileError>> {
         let selected: Vec<TransmissionJob> =
             jobs.into_iter().take(self.config.max_batch_size).collect();
 
         let mut results = Vec::with_capacity(selected.len());
         for job in selected {
-            results.push(self.process_once(adapter, now_seconds, job).await?);
+            results.push(self.process_once(adapter, now_seconds, job).await);
         }
-        Ok(results)
+        results
     }
 
     fn process_ready_state(envelope: &OutboxEnvelope) -> Result<(), ReconcileError> {
@@ -1044,11 +1051,39 @@ mod tests {
             &adapter,
             100,
             [job("outbox_001"), job("outbox_002"), job("outbox_003")],
-        ))
-        .expect("batch results");
+        ));
 
         assert_eq!(results.len(), 2);
+        assert!(results.iter().all(Result::is_ok));
         assert_eq!(adapter.calls(), 2);
+    }
+
+    #[test]
+    fn worker_process_batch_keeps_submitted_result_when_later_job_not_ready() {
+        // One ready job followed by a not-ready job. The ready job performs an
+        // irreversible gateway submit; the not-ready job fails its pre-submit
+        // guard. The batch must still return the earlier Submitted outcome so
+        // the caller does not resubmit it on the next drain.
+        let adapter = ScriptedGatewayAdapter::with_outcomes([Ok(receipt(GatewayStatus::Accepted))]);
+        let mut worker = worker_with_batch(0, 2, 60, 10);
+
+        let ready = job("outbox_ready");
+        let mut not_ready = job("outbox_not_ready");
+        not_ready.envelope.state = OutboxState::Delivered;
+
+        let results = block_on_ready(worker.process_batch(&adapter, 100, [ready, not_ready]));
+
+        // Exactly one gateway submit happened (the ready job).
+        assert_eq!(adapter.calls(), 1);
+        assert_eq!(results.len(), 2);
+
+        let first = results[0].as_ref().expect("first job submitted");
+        assert_eq!(first.outcome(), TransmissionWorkerOutcomeKind::Submitted);
+
+        assert!(matches!(
+            results[1],
+            Err(ReconcileError::InvalidOutboxState { .. })
+        ));
     }
 
     #[test]

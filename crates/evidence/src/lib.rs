@@ -49,6 +49,25 @@ pub const SCHEMA_VERSION: &str = "1.0";
 /// hash + sign the whole bundle by hashing this single entry.
 pub const MANIFEST_ARTEFACT_ID: &str = "manifest.json";
 
+/// Hard cap on the number of decompressed bytes [`unpack`] will
+/// admit from a `.ikb` container, in bytes (512 MiB).
+///
+/// `unpack` runs zstd decompression on attacker-supplied bytes.
+/// Without a cap, a small but pathologically-compressible input
+/// (a "zip bomb" / decompression bomb) could expand to an
+/// unbounded buffer and exhaust process memory. Decompression is
+/// therefore performed through a size-limited reader and aborted
+/// with [`BundleError::DecompressionTooLarge`] the moment the
+/// decompressed stream exceeds this limit.
+///
+/// The cap is deliberately generous: a real evidence bundle
+/// carries the canonical invoice, format artefacts, a PDF/A-3,
+/// intake source bytes, the validation trace, and gateway
+/// receipts, all comfortably under half a gigabyte. Callers that
+/// genuinely need larger bundles can decompress with their own
+/// bounds before re-deriving the typed [`EvidenceBundle`].
+pub const MAX_DECOMPRESSED_SIZE: u64 = 512 * 1024 * 1024;
+
 /// Reserved artefact id for the manifest DSSE sidecar.
 ///
 /// This artefact is deliberately outside [`Manifest::artefacts`]:
@@ -154,6 +173,16 @@ pub enum BundleError {
     /// IO, tar, or zstd error during pack/unpack.
     #[error("bundle io error: {0}")]
     Io(String),
+    /// The container decompressed to more bytes than
+    /// [`MAX_DECOMPRESSED_SIZE`] allows. Guards against
+    /// decompression-bomb / unbounded-memory denial of service.
+    #[error(
+        "bundle decompressed size exceeds the {limit}-byte cap; refusing to buffer a possible decompression bomb"
+    )]
+    DecompressionTooLarge {
+        /// The cap that was exceeded, in bytes.
+        limit: u64,
+    },
 }
 
 /// Compute the BLAKE3 hash of the given bytes as lowercase hex.
@@ -249,8 +278,7 @@ pub fn pack(bundle: &EvidenceBundle) -> Result<Vec<u8>, BundleError> {
 /// Returns [`BundleError`] when the container is malformed,
 /// truncated, or carries hash drift.
 pub fn unpack(bytes: &[u8]) -> Result<EvidenceBundle, BundleError> {
-    let decoded =
-        zstd::stream::decode_all(Cursor::new(bytes)).map_err(|e| BundleError::Io(e.to_string()))?;
+    let decoded = decode_all_capped(bytes, MAX_DECOMPRESSED_SIZE)?;
     let mut archive = tar::Archive::new(Cursor::new(decoded));
     let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     for entry in archive
@@ -354,6 +382,31 @@ pub fn verify(bundle: &EvidenceBundle) -> Result<(), BundleError> {
         return Err(BundleError::MissingArtefact((*missing).to_owned()));
     }
     Ok(())
+}
+
+/// Decompress a zstd stream while refusing to buffer more than
+/// `limit` bytes.
+///
+/// The decoder is read through a [`Read::take`] reader bounded at
+/// `limit + 1`, so reading stops the instant the cap is crossed
+/// instead of materialising the full (potentially enormous)
+/// output. If the bounded read yields more than `limit` bytes,
+/// the input is treated as a decompression bomb and rejected.
+fn decode_all_capped(bytes: &[u8], limit: u64) -> Result<Vec<u8>, BundleError> {
+    let decoder =
+        zstd::stream::read::Decoder::new(Cursor::new(bytes)).map_err(|e| BundleError::Io(e.to_string()))?;
+    // Read one byte past the cap so an output that lands exactly
+    // on `limit` is accepted while anything larger is detected.
+    let read_budget = limit.saturating_add(1);
+    let mut limited = decoder.take(read_budget);
+    let mut out = Vec::new();
+    limited
+        .read_to_end(&mut out)
+        .map_err(|e| BundleError::Io(e.to_string()))?;
+    if out.len() as u64 > limit {
+        return Err(BundleError::DecompressionTooLarge { limit });
+    }
+    Ok(out)
 }
 
 fn append_tar_entry<W: Write>(
@@ -646,6 +699,72 @@ mod tests {
         let mut sorted = ids.clone();
         sorted.sort_unstable();
         assert_eq!(ids, sorted);
+    }
+
+    #[test]
+    fn decode_all_capped_rejects_decompression_bomb() {
+        // A few kilobytes of zstd that inflate to ~8 MiB: a
+        // miniature decompression bomb. Decoded against a 1 MiB
+        // cap, it must be rejected without buffering the whole
+        // 8 MiB output.
+        let inflated = vec![0_u8; 8 * 1024 * 1024];
+        let compressed = zstd::stream::encode_all(Cursor::new(inflated), 0)
+            .expect("compress zero payload");
+        assert!(
+            compressed.len() < 64 * 1024,
+            "bomb should compress tiny, got {} bytes",
+            compressed.len()
+        );
+        let err = decode_all_capped(&compressed, 1024 * 1024)
+            .expect_err("oversize payload must be rejected");
+        assert!(matches!(
+            err,
+            BundleError::DecompressionTooLarge { limit } if limit == 1024 * 1024
+        ));
+    }
+
+    #[test]
+    fn decode_all_capped_accepts_payload_at_or_under_cap() {
+        // Exactly the cap and just under both decode cleanly.
+        let payload = vec![7_u8; 4096];
+        let compressed = zstd::stream::encode_all(Cursor::new(&payload), 0)
+            .expect("compress payload");
+        let under = decode_all_capped(&compressed, 4096).expect("payload at cap decodes");
+        assert_eq!(under, payload);
+        let also = decode_all_capped(&compressed, 8192).expect("payload under cap decodes");
+        assert_eq!(also, payload);
+    }
+
+    #[test]
+    fn decode_all_capped_rejects_one_byte_over_cap() {
+        // Boundary: a payload one byte larger than the cap is the
+        // smallest case the limit must reject.
+        let payload = vec![3_u8; 4097];
+        let compressed = zstd::stream::encode_all(Cursor::new(&payload), 0)
+            .expect("compress payload");
+        let err = decode_all_capped(&compressed, 4096)
+            .expect_err("payload one byte over the cap must be rejected");
+        assert!(matches!(
+            err,
+            BundleError::DecompressionTooLarge { limit } if limit == 4096
+        ));
+    }
+
+    #[test]
+    fn unpack_rejects_oversize_via_default_cap() {
+        // End-to-end: a hand-rolled zstd frame that inflates past
+        // MAX_DECOMPRESSED_SIZE must be refused by unpack before
+        // tar parsing, surfacing DecompressionTooLarge rather than
+        // exhausting memory.
+        let cap = usize::try_from(MAX_DECOMPRESSED_SIZE).expect("cap fits in usize");
+        let inflated = vec![0_u8; cap + 1];
+        let compressed =
+            zstd::stream::encode_all(Cursor::new(inflated), 0).expect("compress bomb");
+        let err = unpack(&compressed).expect_err("oversize container must be rejected");
+        assert!(matches!(
+            err,
+            BundleError::DecompressionTooLarge { limit } if limit == MAX_DECOMPRESSED_SIZE
+        ));
     }
 
     #[test]

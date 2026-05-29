@@ -252,6 +252,16 @@ pub(crate) fn stub_vies_check(supplier_vat: Option<&str>) -> ViesOutcome {
             reason: "VAT must be 4-14 chars (ISO2 country prefix + digits)".to_owned(),
         };
     }
+    // The length gate counts bytes; a multibyte character could otherwise land
+    // mid-codepoint at the `split_at(2)` boundary below and panic. A valid VAT
+    // is ASCII-only, so reject anything else up front.
+    if !vat.is_ascii() {
+        return ViesOutcome::InvalidShape {
+            vat: vat.to_owned(),
+            reason: "VAT must be ASCII (ISO2 country prefix + ASCII alphanumeric digits)"
+                .to_owned(),
+        };
+    }
     let (prefix, digits) = vat.split_at(2);
     let prefix_ok = prefix
         .chars()
@@ -469,6 +479,18 @@ mod tests {
     #[test]
     fn stub_vies_check_invalid_for_too_short() {
         match stub_vies_check(Some("DE")) {
+            ViesOutcome::InvalidShape { .. } => {}
+            other => panic!("expected InvalidShape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stub_vies_check_invalid_for_multibyte_vat() {
+        // `é` is two UTF-8 bytes, so a byte-length check can pass while
+        // byte index 2 lands mid-character. The split must not panic.
+        let vat = "Aé12";
+        assert!(vat.len() >= 4, "input must clear the byte-length gate");
+        match stub_vies_check(Some(vat)) {
             ViesOutcome::InvalidShape { .. } => {}
             other => panic!("expected InvalidShape, got {other:?}"),
         }

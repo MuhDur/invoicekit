@@ -293,8 +293,18 @@ pub fn parse_smp_metadata(
 ) -> Result<AccessPoint, PeppolLookupError> {
     let xml = std::str::from_utf8(body)
         .map_err(|e| PeppolLookupError::Parse(format!("invalid UTF-8: {e}")))?;
+    // The URL and transport profile must come from the *same*
+    // `Endpoint` element. The `cur_*` candidates are scoped to the
+    // endpoint currently being read; they are committed to the
+    // returned `endpoint_url` / `transport_profile` only when an
+    // `Endpoint` closes carrying both halves of the pair. Tracking
+    // the two fields globally would let a later endpoint's URL be
+    // paired with an earlier endpoint's profile.
     let mut endpoint_url = None;
     let mut transport_profile = None;
+    let mut cur_endpoint_url: Option<String> = None;
+    let mut cur_transport_profile: Option<String> = None;
+    let mut in_endpoint = false;
     let mut in_endpoint_uri = false;
     let mut in_transport_profile = false;
 
@@ -308,7 +318,12 @@ pub fn parse_smp_metadata(
                 let local = std::str::from_utf8(name.local_name().as_ref())
                     .unwrap_or("")
                     .to_owned();
-                if local == "EndpointURI" || local == "EndpointReference" {
+                if local == "Endpoint" {
+                    // Open a fresh per-endpoint scope.
+                    in_endpoint = true;
+                    cur_endpoint_url = None;
+                    cur_transport_profile = None;
+                } else if local == "EndpointURI" || local == "EndpointReference" {
                     in_endpoint_uri = true;
                 } else if local == "TransportProfile" {
                     in_transport_profile = true;
@@ -319,10 +334,13 @@ pub fn parse_smp_metadata(
                     .map_err(|e| PeppolLookupError::Parse(e.to_string()))?
                     .trim()
                     .to_owned();
-                if in_endpoint_uri && endpoint_url.is_none() && !text.is_empty() {
-                    endpoint_url = Some(text);
-                } else if in_transport_profile && transport_profile.is_none() && !text.is_empty() {
-                    transport_profile = Some(text);
+                if in_endpoint_uri && cur_endpoint_url.is_none() && !text.is_empty() {
+                    cur_endpoint_url = Some(text);
+                } else if in_transport_profile
+                    && cur_transport_profile.is_none()
+                    && !text.is_empty()
+                {
+                    cur_transport_profile = Some(text);
                 }
             }
             Ok(quick_xml::events::Event::End(ref e)) => {
@@ -330,7 +348,20 @@ pub fn parse_smp_metadata(
                 let local = std::str::from_utf8(name.local_name().as_ref())
                     .unwrap_or("")
                     .to_owned();
-                if local == "EndpointURI" || local == "EndpointReference" {
+                if local == "Endpoint" {
+                    in_endpoint = false;
+                    // Commit the first endpoint that carries both halves.
+                    if endpoint_url.is_none() && transport_profile.is_none() {
+                        if let (Some(url), Some(profile)) =
+                            (cur_endpoint_url.take(), cur_transport_profile.take())
+                        {
+                            endpoint_url = Some(url);
+                            transport_profile = Some(profile);
+                        }
+                    }
+                    cur_endpoint_url = None;
+                    cur_transport_profile = None;
+                } else if local == "EndpointURI" || local == "EndpointReference" {
                     in_endpoint_uri = false;
                 } else if local == "TransportProfile" {
                     in_transport_profile = false;
@@ -341,6 +372,15 @@ pub fn parse_smp_metadata(
             _ => {}
         }
         buf.clear();
+    }
+
+    // Fallback for documents that carry a bare `EndpointURI` +
+    // `TransportProfile` with no enclosing `Endpoint` wrapper: pair
+    // whatever single candidates were collected outside any endpoint
+    // scope. This preserves behaviour for non-wrapped inputs.
+    if endpoint_url.is_none() && transport_profile.is_none() && !in_endpoint {
+        endpoint_url = cur_endpoint_url;
+        transport_profile = cur_transport_profile;
     }
 
     match (endpoint_url, transport_profile) {
@@ -433,6 +473,71 @@ mod tests {
             </SignedServiceMetadata>"#;
         let access = parse_smp_metadata(body, &DocumentTypeId::peppol_bis_3_invoice()).unwrap();
         assert_eq!(access.endpoint_url, "https://ap.example.test/as4");
+        assert_eq!(access.transport_profile, "peppol-transport-as4-v2_0");
+    }
+
+    #[test]
+    fn parse_smp_metadata_pairs_url_and_profile_from_same_endpoint() {
+        // Regression: two endpoints where the FIRST one carries a
+        // transport profile but an empty `EndpointURI`, and the
+        // SECOND one is the only complete endpoint. A parser that
+        // tracks the URL and profile globally would emit the
+        // second endpoint's URL paired with the first endpoint's
+        // profile. The correct result is the second endpoint's
+        // own URL + profile, taken as a matched pair.
+        let body = br#"<?xml version="1.0"?>
+            <SignedServiceMetadata xmlns="http://busdox.org/serviceMetadata/publishing/1.0/">
+              <ServiceMetadata>
+                <ServiceInformation>
+                  <ProcessList>
+                    <Process>
+                      <ServiceEndpointList>
+                        <Endpoint transportProfile="busdox-transport-as2-ver1p0">
+                          <EndpointURI></EndpointURI>
+                          <TransportProfile>busdox-transport-as2-ver1p0</TransportProfile>
+                        </Endpoint>
+                        <Endpoint transportProfile="peppol-transport-as4-v2_0">
+                          <EndpointURI>https://ap.example.test/as4</EndpointURI>
+                          <TransportProfile>peppol-transport-as4-v2_0</TransportProfile>
+                        </Endpoint>
+                      </ServiceEndpointList>
+                    </Process>
+                  </ProcessList>
+                </ServiceInformation>
+              </ServiceMetadata>
+            </SignedServiceMetadata>"#;
+        let access = parse_smp_metadata(body, &DocumentTypeId::peppol_bis_3_invoice()).unwrap();
+        assert_eq!(access.endpoint_url, "https://ap.example.test/as4");
+        assert_eq!(access.transport_profile, "peppol-transport-as4-v2_0");
+    }
+
+    #[test]
+    fn parse_smp_metadata_takes_first_complete_endpoint_when_many() {
+        // Two fully-populated endpoints: the first complete one wins,
+        // and its URL and profile stay paired together.
+        let body = br#"<?xml version="1.0"?>
+            <SignedServiceMetadata xmlns="http://busdox.org/serviceMetadata/publishing/1.0/">
+              <ServiceMetadata>
+                <ServiceInformation>
+                  <ProcessList>
+                    <Process>
+                      <ServiceEndpointList>
+                        <Endpoint transportProfile="peppol-transport-as4-v2_0">
+                          <EndpointURI>https://ap-one.example.test/as4</EndpointURI>
+                          <TransportProfile>peppol-transport-as4-v2_0</TransportProfile>
+                        </Endpoint>
+                        <Endpoint transportProfile="busdox-transport-as2-ver1p0">
+                          <EndpointURI>https://ap-two.example.test/as2</EndpointURI>
+                          <TransportProfile>busdox-transport-as2-ver1p0</TransportProfile>
+                        </Endpoint>
+                      </ServiceEndpointList>
+                    </Process>
+                  </ProcessList>
+                </ServiceInformation>
+              </ServiceMetadata>
+            </SignedServiceMetadata>"#;
+        let access = parse_smp_metadata(body, &DocumentTypeId::peppol_bis_3_invoice()).unwrap();
+        assert_eq!(access.endpoint_url, "https://ap-one.example.test/as4");
         assert_eq!(access.transport_profile, "peppol-transport-as4-v2_0");
     }
 

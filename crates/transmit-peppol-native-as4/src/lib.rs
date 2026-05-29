@@ -384,6 +384,31 @@ impl GatewayAdapter for NativeAs4Adapter {
     }
 }
 
+/// XML-escapes `text` into `out` as element character data.
+///
+/// `message_id` is derived from operator-controlled `tenant_id` and
+/// `gateway_attempt_id` values, which [`GatewaySubmissionId`]'s
+/// `validate_identifier` does not constrain to XML-safe characters. A
+/// value carrying `<`, `>`, `&`, `"`, or `'` would otherwise break out
+/// of the `<eb:MessageId>` element and inject markup into the ebMS3
+/// SOAP envelope, so every reserved character is replaced with its
+/// predefined entity (mirrors the round-1 `transmit-peppol-partner`
+/// fix). Bytes without special meaning pass through unchanged, so a
+/// normal `ik:tenant-attempt` identifier serialises byte-for-byte as
+/// before.
+fn append_escaped_xml_text(out: &mut Vec<u8>, text: &[u8]) {
+    for &byte in text {
+        match byte {
+            b'&' => out.extend_from_slice(b"&amp;"),
+            b'<' => out.extend_from_slice(b"&lt;"),
+            b'>' => out.extend_from_slice(b"&gt;"),
+            b'"' => out.extend_from_slice(b"&quot;"),
+            b'\'' => out.extend_from_slice(b"&apos;"),
+            other => out.push(other),
+        }
+    }
+}
+
 fn build_as4_envelope_bytes(message_id: &[u8], soap_body: &[u8]) -> Vec<u8> {
     // Minimal SOAP envelope shape — the real implementation
     // emits the AS4 / ebMS3 SOAP headers; this scaffold writes
@@ -393,7 +418,10 @@ fn build_as4_envelope_bytes(message_id: &[u8], soap_body: &[u8]) -> Vec<u8> {
     // xmlsec signer lands.
     let mut out =
         b"<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\"><soap:Header><eb:Messaging xmlns:eb=\"http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/\"><eb:UserMessage><eb:MessageInfo><eb:MessageId>".to_vec();
-    out.extend_from_slice(message_id);
+    // `message_id` is operator-controlled; escape it so it cannot
+    // inject markup into the envelope. `soap_body` is already
+    // canonical UBL, so it is embedded verbatim.
+    append_escaped_xml_text(&mut out, message_id);
     out.extend_from_slice(b"</eb:MessageId></eb:MessageInfo></eb:UserMessage></eb:Messaging></soap:Header><soap:Body>");
     out.extend_from_slice(soap_body);
     out.extend_from_slice(b"</soap:Body></soap:Envelope>");
@@ -576,6 +604,43 @@ mod tests {
         assert!(env_str.contains("<eb:MessageId>msg-1</eb:MessageId>"));
         assert!(env_str.contains("<Invoice/>"));
         assert!(env_str.ends_with("</soap:Envelope>"));
+    }
+
+    #[test]
+    fn build_envelope_escapes_hostile_message_id() {
+        // `message_id` is `ik:{tenant_id}-{gateway_attempt_id}` and both
+        // halves are operator-controlled. A hostile tenant carrying XML
+        // metacharacters must not break out of the `<eb:MessageId>`
+        // element and inject markup into the ebMS3 SOAP envelope.
+        let hostile = br#"ik:</eb:MessageId></eb:MessageInfo><eb:Injected attr="x">&evil;</eb:Injected><eb:MessageId>-attempt"#;
+        let env = build_as4_envelope_bytes(hostile, b"<Invoice/>");
+        let env_str = std::str::from_utf8(&env).expect("envelope is valid UTF-8");
+
+        // The raw closing tag must NOT appear: it would have terminated
+        // the element early. Every reserved char is entity-escaped.
+        assert!(
+            !env_str.contains("</eb:MessageId></eb:MessageInfo><eb:Injected"),
+            "hostile markup leaked unescaped into the envelope: {env_str}"
+        );
+        assert!(env_str.contains("&lt;/eb:MessageId&gt;"));
+        assert!(env_str.contains("&lt;eb:Injected attr=&quot;x&quot;&gt;&amp;evil;"));
+
+        // Exactly one genuine MessageId element survives (open + close).
+        assert_eq!(env_str.matches("<eb:MessageId>").count(), 1);
+        assert_eq!(env_str.matches("</eb:MessageId>").count(), 1);
+        assert!(env_str.contains("<Invoice/>"));
+        assert!(env_str.ends_with("</soap:Envelope>"));
+    }
+
+    #[test]
+    fn build_envelope_leaves_benign_message_id_byte_identical() {
+        // A normal `ik:`-prefixed identifier carries no reserved
+        // characters, so escaping must be a no-op: the wire bytes are
+        // identical to the pre-fix scaffold output.
+        let benign = b"ik:tenant-abc-attempt-0001";
+        let env = build_as4_envelope_bytes(benign, b"<Invoice/>");
+        let env_str = std::str::from_utf8(&env).expect("envelope is valid UTF-8");
+        assert!(env_str.contains("<eb:MessageId>ik:tenant-abc-attempt-0001</eb:MessageId>"));
     }
 
     #[test]

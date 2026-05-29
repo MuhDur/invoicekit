@@ -386,9 +386,24 @@ fn write_xml_start(
     let mut canonical_attributes = Vec::with_capacity(raw_attributes.len());
     for attr in raw_attributes {
         let namespace_uri = lookup_attribute_namespace(&frame, &attr.prefix)?;
-        let rendered_prefix = namespace_uri.as_ref().map_or_else(String::new, |uri| {
+        let preferred_prefix = namespace_uri.as_ref().map_or_else(String::new, |uri| {
             preferred_invoice_prefix(uri, &attr.prefix, true)
         });
+        // The invoice-prefix overlay can map two distinct namespace URIs onto the
+        // same rendered prefix (for example the UBL and CII UnqualifiedDataType
+        // namespaces both prefer `udt`). If that prefix is already bound to a
+        // different URI in scope, emitting it here would silently rebind it and
+        // corrupt the element (or an inherited) namespace in the signed output.
+        // Disambiguate to a stable, overlay-free prefix instead of clobbering.
+        let rendered_prefix = match namespace_uri.as_deref() {
+            Some(uri) => disambiguate_attribute_prefix(
+                &frame,
+                &namespace_declarations,
+                &preferred_prefix,
+                uri,
+            ),
+            None => preferred_prefix,
+        };
         let rendered_name = render_xml_qname(&rendered_prefix, &attr.local_name);
 
         if !rendered_attribute_names.insert(rendered_name.clone()) {
@@ -522,6 +537,45 @@ fn preferred_invoice_prefix(uri: &str, original_prefix: &str, is_attribute: bool
         original_prefix.to_owned()
     } else {
         prefix.to_owned()
+    }
+}
+
+/// Pick a rendered prefix for an attribute namespace that does not rebind a
+/// prefix already in scope for a different URI.
+///
+/// Returns `preferred` unchanged in the common case (no conflict, or the prefix
+/// already maps to `uri`). When `preferred` is bound to a different URI — either
+/// inherited via `frame.output` or just declared on this element — append the
+/// smallest numeric suffix that yields a free or matching binding. The result is
+/// deterministic, never collides with the overlay's reserved prefixes, and is a
+/// fixed point of canonicalization (a re-canonicalized document reproduces it).
+fn disambiguate_attribute_prefix(
+    frame: &NamespaceFrame,
+    declarations: &BTreeMap<String, String>,
+    preferred: &str,
+    uri: &str,
+) -> String {
+    // The `xml` prefix and the XML namespace never need a declaration, so they
+    // can never conflict with another binding; keep them as-is.
+    if preferred.is_empty() || preferred == "xml" || uri == XML_NAMESPACE_URI {
+        return preferred.to_owned();
+    }
+    let conflicts = |prefix: &str| {
+        declarations
+            .get(prefix)
+            .or_else(|| frame.output.get(prefix))
+            .is_some_and(|bound| bound != uri)
+    };
+    if !conflicts(preferred) {
+        return preferred.to_owned();
+    }
+    let mut suffix: u32 = 2;
+    loop {
+        let candidate = format!("{preferred}{suffix}");
+        if !conflicts(&candidate) {
+            return candidate;
+        }
+        suffix += 1;
     }
 }
 
@@ -943,6 +997,39 @@ mod tests {
             r#"<Invoice xmlns="{invoice}"><cbc:ID xmlns:cbc="{cbc}">INV-001</cbc:ID><cbc:Note xmlns:cbc="{cbc}">same bytes</cbc:Note></Invoice>"#
         );
         assert_eq!(canonical.as_bytes(), expected.as_bytes());
+    }
+
+    #[test]
+    fn xml_attribute_overlay_does_not_rebind_element_prefix() {
+        // The element binds the rendered prefix `udt` to UBL's UnqualifiedDataTypes URI.
+        // An attribute carries CII's UnqualifiedDataType URI, which the invoice-prefix
+        // overlay also maps onto `udt`. The attribute declaration must not clobber the
+        // element's `xmlns:udt` binding, or the signed element name would resolve to the
+        // wrong namespace.
+        let ubl_udt = UBL_UDT_NAMESPACE_URI;
+        let cii_udt = CII_UDT_NAMESPACE_URI;
+        let input = format!(
+            r#"<a:Amount xmlns:a="{ubl_udt}" xmlns:b="{cii_udt}" b:unit="EUR"></a:Amount>"#
+        );
+        let canonical = canonicalize_xml(&input).expect("canonicalization should succeed");
+        // The element prefix `udt` must still resolve to the UBL URI it was declared with.
+        assert!(
+            canonical.contains(&format!(r#"xmlns:udt="{ubl_udt}""#)),
+            "element prefix binding was clobbered: {canonical}"
+        );
+        // The conflicting attribute namespace must be rendered under a distinct prefix.
+        assert!(
+            canonical.contains(cii_udt),
+            "attribute namespace was dropped: {canonical}"
+        );
+        // The two distinct namespaces must not collapse onto a single declaration.
+        assert!(
+            !canonical.contains(&format!(r#"xmlns:udt="{cii_udt}""#)),
+            "attribute clobbered the element namespace: {canonical}"
+        );
+        // The signed form must be a fixed point: re-canonicalizing reproduces it.
+        let again = canonicalize_xml(&canonical).expect("re-canonicalization should succeed");
+        assert_eq!(canonical, again, "canonicalization is not idempotent");
     }
 
     #[test]

@@ -137,9 +137,16 @@ pub fn to_inv01_json(
     let buyer_gstin = party_gstin(&document.customer);
 
     // Intra-state when both parties share the leading two-digit state code.
-    let intra_state = buyer_gstin
-        .as_deref()
-        .is_some_and(|b| b.len() >= 2 && seller_gstin.len() >= 2 && b[..2] == seller_gstin[..2]);
+    // The state code is the ASCII GSTIN prefix; `gstin_state_prefix` returns it
+    // only when the first two bytes are ASCII, so the byte-index-2 slice can
+    // never split a multibyte character on junk input.
+    let intra_state = match (
+        gstin_state_prefix(seller_gstin.as_str()),
+        buyer_gstin.as_deref().and_then(gstin_state_prefix),
+    ) {
+        (Some(seller), Some(buyer)) => seller == buyer,
+        _ => false,
+    };
 
     let mut root = Map::new();
     root.insert("Version".to_owned(), json!(INV01_SCHEMA_VERSION));
@@ -256,16 +263,30 @@ fn pin_value(postal_code: &str) -> Value {
 /// address subdivision, else `"96"` (the IRP "Other Country" code for foreign
 /// parties in export scenarios).
 fn state_code(party: &Party, gstin: Option<&str>) -> String {
-    if let Some(g) = gstin {
-        if g.len() >= 2 {
-            return g[..2].to_owned();
-        }
+    if let Some(prefix) = gstin.and_then(gstin_state_prefix) {
+        return prefix.to_owned();
     }
     party
         .address
         .subdivision
         .as_deref()
         .map_or_else(|| "96".to_owned(), str::to_owned)
+}
+
+/// The two-character GST state-code prefix of a GSTIN, or `None` when the input
+/// is shorter than two bytes or its first two bytes are not ASCII.
+///
+/// A real GSTIN is ASCII alphanumeric, so its leading two characters are always
+/// available. Guarding on `is_ascii` keeps the byte-index-2 slice on a UTF-8
+/// character boundary, so malformed multibyte input degrades gracefully instead
+/// of panicking.
+fn gstin_state_prefix(gstin: &str) -> Option<&str> {
+    let bytes = gstin.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii() && bytes[1].is_ascii() {
+        Some(&gstin[..2])
+    } else {
+        None
+    }
 }
 
 /// Build one `ItemList` entry: `SlNo`, `HsnCd`, `Qty`, `UnitPrice`, `TotAmt`,
@@ -1054,5 +1075,28 @@ mod inv01_tests {
             assert!(at >= last, "key {key} out of INV-01 order");
             last = at;
         }
+    }
+
+    /// Regression: a GSTIN whose leading bytes are a multibyte UTF-8 character
+    /// must not panic the INV-01 serializer. Both `to_inv01_json` (the
+    /// intra-state state-code comparison) and `state_code` slice the GSTIN at
+    /// byte index 2; with a byte-length-only guard that index can fall inside a
+    /// multibyte character and panic. A real GSTIN is ASCII alphanumeric, so the
+    /// state-code prefix is simply unavailable for such junk input — the
+    /// serializer falls back to the address subdivision rather than crashing.
+    #[test]
+    fn inv01_multibyte_gstin_does_not_panic_and_falls_back_to_subdivision() {
+        let mut doc = inter_state_invoice();
+        // U+20B9 (₹) is a 3-byte character: byte index 2 lands inside it.
+        doc.supplier.tax_ids[0].value = "\u{20b9}9AAAPL2356Q1ZS".to_owned();
+        doc.customer.tax_ids[0].value = "\u{20b9}7AAAPL2356Q1ZT".to_owned();
+        let json = to_inv01_json(&doc, &Inv01Context::default())
+            .expect("multibyte GSTIN must serialize, not panic");
+        let v: serde_json::Value =
+            serde_json::from_str(&json).expect("serializer emits valid JSON");
+        // No ASCII two-char prefix available -> Stcd falls back to the party's
+        // address subdivision ("KA" supplier / "MH" buyer), not a panic.
+        assert_eq!(v["SellerDtls"]["Stcd"], "KA");
+        assert_eq!(v["BuyerDtls"]["Stcd"], "MH");
     }
 }

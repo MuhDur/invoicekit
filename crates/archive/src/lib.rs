@@ -439,10 +439,21 @@ impl LocalFsArchive {
         Self { root: root.into() }
     }
 
-    fn entry_path(&self, id: &ArchiveId) -> PathBuf {
+    fn entry_path(&self, id: &ArchiveId) -> Result<PathBuf, ArchiveError> {
         let hex = id.as_str();
-        let shard = if hex.len() >= 2 { &hex[..2] } else { "00" };
-        self.root.join(shard).join(format!("{hex}.ikb"))
+        // The id for this backend is the bundle's BLAKE3 hash:
+        // exactly 64 lowercase hex chars. Validating it here
+        // before any path join blocks traversal ids such as
+        // `../../../etc/passwd` from escaping the archive root,
+        // and guarantees the `&hex[..2]` shard slice lands on a
+        // char boundary (it is pure ASCII). Mirrors the
+        // `object_from_scheme_id` guard the S3/Azure backends use.
+        if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        {
+            return Err(ArchiveError::InvalidId(hex.to_owned()));
+        }
+        let shard = &hex[..2];
+        Ok(self.root.join(shard).join(format!("{hex}.ikb")))
     }
 }
 
@@ -450,7 +461,7 @@ impl Archive for LocalFsArchive {
     fn store(&self, bundle: &EvidenceBundle) -> Result<ArchiveId, ArchiveError> {
         let bytes = pack(bundle)?;
         let id = ArchiveId::new(invoicekit_evidence::blake3_hex(&bytes));
-        let path = self.entry_path(&id);
+        let path = self.entry_path(&id)?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| ArchiveError::Io(e.to_string()))?;
         }
@@ -471,7 +482,7 @@ impl Archive for LocalFsArchive {
     }
 
     fn retrieve(&self, id: &ArchiveId) -> Result<EvidenceBundle, ArchiveError> {
-        let path = self.entry_path(id);
+        let path = self.entry_path(id)?;
         let bytes = match fs::read(&path) {
             Ok(b) => b,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -483,7 +494,9 @@ impl Archive for LocalFsArchive {
     }
 
     fn exists(&self, id: &ArchiveId) -> bool {
-        self.entry_path(id).exists()
+        // An id this backend would never have minted cannot exist
+        // here; reject it without touching the filesystem.
+        self.entry_path(id).is_ok_and(|path| path.exists())
     }
 }
 
@@ -867,7 +880,10 @@ mod tests {
     fn local_fs_archive_retrieve_missing_id_is_not_found() {
         let tmp = tempfile::tempdir().unwrap();
         let archive = LocalFsArchive::new(tmp.path());
-        let err = archive.retrieve(&ArchiveId::new("deadbeef")).unwrap_err();
+        // A well-formed id (64 lowercase hex chars) that was never
+        // stored must surface as NotFound, not InvalidId.
+        let missing = ArchiveId::new("0".repeat(64));
+        let err = archive.retrieve(&missing).unwrap_err();
         assert!(matches!(err, ArchiveError::NotFound(_)));
     }
 
@@ -879,7 +895,7 @@ mod tests {
             .store(&sample_bundle("2026-05-27T00:00:00Z"))
             .unwrap();
         // Tamper with the file on disk.
-        let entry = archive.entry_path(&id);
+        let entry = archive.entry_path(&id).expect("stored id is well-formed");
         let mut bytes = std::fs::read(&entry).unwrap();
         // Flip a byte well past the header so we hit a payload
         // hash check rather than the magic guard.
@@ -888,6 +904,63 @@ mod tests {
         std::fs::write(&entry, bytes).unwrap();
         let err = archive.retrieve(&id).unwrap_err();
         assert!(matches!(err, ArchiveError::Drift(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn local_fs_archive_rejects_path_traversal_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = LocalFsArchive::new(tmp.path());
+        // An id that tries to climb out of the archive root must be
+        // refused before any path join, on every read path.
+        let escape = ArchiveId::new("../../../../../../etc/passwd");
+        let err = archive.retrieve(&escape).unwrap_err();
+        assert!(matches!(err, ArchiveError::InvalidId(_)), "got {err:?}");
+        assert!(!archive.exists(&escape));
+    }
+
+    #[test]
+    fn local_fs_archive_rejects_multibyte_id_without_panic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = LocalFsArchive::new(tmp.path());
+        // A multibyte id once panicked on the `&hex[..2]` shard
+        // slice (byte index 2 lands mid-char). It must now be a
+        // clean InvalidId error.
+        let multibyte = ArchiveId::new("a\u{e9}foobar");
+        let err = archive.retrieve(&multibyte).unwrap_err();
+        assert!(matches!(err, ArchiveError::InvalidId(_)), "got {err:?}");
+        assert!(!archive.exists(&multibyte));
+    }
+
+    #[test]
+    fn local_fs_archive_rejects_malformed_ids() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = LocalFsArchive::new(tmp.path());
+        // Too short, too long, uppercase, and non-hex are all
+        // rejected; only 64 lowercase hex chars are valid.
+        for bad in [
+            "deadbeef",                                                            // too short
+            &"a".repeat(63),                                                       // 63 chars
+            &"a".repeat(65),                                                       // 65 chars
+            "DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF",     // uppercase
+            "zz00000000000000000000000000000000000000000000000000000000000000",    // non-hex
+        ] {
+            let id = ArchiveId::new(bad);
+            let err = archive.retrieve(&id).unwrap_err();
+            assert!(matches!(err, ArchiveError::InvalidId(_)), "id {bad:?} got {err:?}");
+            assert!(!archive.exists(&id), "id {bad:?} should not exist");
+        }
+    }
+
+    #[test]
+    fn local_fs_archive_accepts_well_formed_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = LocalFsArchive::new(tmp.path());
+        // A round-trip through store proves valid ids still reach
+        // the filesystem exactly as before.
+        let bundle = sample_bundle("2026-05-27T00:00:00Z");
+        let id = archive.store(&bundle).unwrap();
+        assert_eq!(id.as_str().len(), 64);
+        assert!(archive.entry_path(&id).is_ok());
     }
 
     #[test]

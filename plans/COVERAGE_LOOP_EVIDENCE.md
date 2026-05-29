@@ -668,10 +668,52 @@ performance** skills and closes the residuals.
 | Full end-to-end test coverage | ✅ 2404 tests, every country crate has offline E2E |
 | Skill matrix + skills-used log | ✅ §4 + per-turn entries |
 | Code quality (simplify-and-refactor) | ✅ all 109 crates evaluated to convergence |
-| Audit skills (multi-pass bug hunt) | ✅ round-1: 22/22 confirmed findings resolved; round-2 in progress |
+| Audit skills (multi-pass bug hunt) | 🔄 round-1: 22/22 resolved; round-2: 9/9 resolved (T23); round-3 pending (loop-until-dry not yet converged) |
 | Performance | ✅ already engineered + CI-gated + budgeted (D19) |
 | Release / build outputs | ✅ v0.1.1 published, all artifacts |
 
 ### Turn 22 — 2026-05-29 — Second-round deep audit (loop-until-dry convergence check)
 - **Workflow launched:** `coverage-p3-audit-round2` — read-only, deeper/different lenses + regression-check of the
   21 round-1 fixes. If largely dry, the audit has converged (multi-pass-bug-hunting stop criterion).
+- **Result: NOT dry** — round-2 returned **9 confirmed real bugs** (2 high, 6 medium, 1 low) the round-1
+  lenses missed. Loop-until-dry has therefore not converged; a round-3 pass is required after these land.
+
+### Turn 23 — 2026-05-29 — Round-2 bug-fix (TDD workflow): all 9 fixed, green
+- **Workflow launched:** `coverage-p3-audit-round2-bugfix` — pipeline over 8 crates, each stage
+  reproduce→minimal-fix→adversarial-review, under the D17 false-positive guard and a hard golden-preservation
+  rule on `canonical` (any golden/rfc8785 byte change ⇒ revert + report false-positive).
+- **The 9 bugs (all confirmed real by independent reviewer reproduction, all fixed + regression-tested):**
+  1. **[high] `archive` path traversal** (`lib.rs:445`) — `LocalFsArchive::entry_path` joined a raw `ArchiveId`
+     into an fs path; `../../../etc/passwd` escaped the root (PathBuf::join does not normalise `..`).
+     Fixed by a 64-char-lowercase-hex guard at the top of `entry_path` (mirrors the S3/Azure `object_from_scheme_id`
+     guard), now returns `ArchiveError::InvalidId`. The same guard also closes:
+  2. **[medium] `archive` multibyte panic** (`lib.rs:444`) — shard prefix `&hex[..2]` byte-slice on a multibyte id.
+  3. **[high] `report-in-gst` multibyte panic** (`lib.rs:261`) — GSTIN byte-sliced at index 2 behind a byte-length
+     check only (panicked on a leading `₹`); both slice sites now route through an ASCII-prefix helper.
+  4. **[medium] `transmit-peppol-native-as4` XML injection** (`lib.rs:396`) — operator-controlled `message_id`
+     (`ik:{tenant_id}-{gateway_attempt_id}`) raw-appended into the ebMS3 `<eb:MessageId>` with no escaping
+     (`validate_identifier` permits XML metacharacters). Now XML-escaped (mirrors the round-1 partner fix).
+  5. **[medium] `cli` multibyte panic** (`init.rs:255`) — `stub_vies_check` `vat.split_at(2)` on a multibyte VAT;
+     ASCII guard added before the split.
+  6. **[medium] `evidence` decompression bomb** (`lib.rs:253`) — `unpack()` ran zstd `decode_all` with no cap.
+     Now capped at 512 MiB via a `Take`-limited decoder + new `BundleError::DecompressionTooLarge`.
+  7. **[medium] `canonical` signed-output corruption** (`lib.rs:399`) — when the invoice-prefix overlay mapped an
+     attribute namespace URI onto the same prefix as the element (both UDT families → `udt`), the element name
+     resolved to the *attribute's* URI in hashed/signed output. Fixed with per-frame prefix disambiguation;
+     **golden + rfc8785 bytes verified byte-identical**, idempotence asserted by re-canonicalisation. (D17 held.)
+  8. **[medium] `peppol-smp-sml` cross-endpoint mis-pairing** (`lib.rs:290`) — document-global `in_endpoint_uri`/
+     `in_transport_profile` flags paired one endpoint's URL with another's transport profile; scoped per `<Endpoint>`.
+  9. **[low] `reconcile` duplicate-transmission short-circuit** (`worker.rs:570`) — `process_batch` did
+     `results.push(self.process_once(..).await?)`; the `?` aborted the whole batch after an earlier job's
+     irreversible `submit()`, discarding its `Submitted` result ⇒ re-drain resubmitted. Signature changed to
+     `Vec<Result<…>>` so per-job outcomes are never discarded.
+- **Central verification:** `cargo build --workspace` clean (the `reconcile` signature + `evidence` enum changes
+  broke no callers); **`cargo test --workspace` = 2420 passed / 0 failed** (+16 regression tests over the 2404
+  baseline); `cargo clippy --workspace --all-targets -D warnings` clean; scope = exactly the 8 fixed crates.
+- **Note on "6/8 green" in the workflow summary:** the 2 not-counted (`transmit-peppol-native-as4`, `cli`) were
+  flagged *only* for `scope_ok=false`, because all 8 fixes share one working tree so each reviewer saw the other
+  7 crates dirty. Every reviewer confirmed its own fix is correctly confined to its own crate — not a real defect.
+- **Skills used:** `multi-pass-bug-hunting` (round-2 loop-until-dry), `testing-real-service-e2e-no-mocks` (per-bug
+  reproducing regression tests), `verification-before-completion` (central gate). D17 enforced on `canonical`.
+- **Next:** commit + push, then **round-3 audit** (loop continues until dry) in parallel with the code-quality /
+  simplify-and-refactor loop over the crates round-2 did NOT touch.
