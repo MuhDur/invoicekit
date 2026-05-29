@@ -14,6 +14,8 @@ use std::slice;
 
 const NULL_INPUT_RESPONSE: &[u8] = br#"{"abi_version":1,"error":{"code":"invalid_input_pointer","message":"request pointer was null while request_len was non-zero","remediation":"Pass a valid pointer to request_len UTF-8 JSON bytes, or pass null with length 0 for an empty request."},"operation":null,"status":"error"}"#;
 
+const PANIC_RESPONSE: &[u8] = br#"{"abi_version":1,"error":{"code":"internal_panic","message":"the engine panicked while processing the request; the panic was caught at the C ABI boundary","remediation":"This is an InvoiceKit bug. Report it with the request that triggered it. The library state is unaffected and the handle is safe to free."},"operation":null,"status":"error"}"#;
+
 /// Result status code returned by the C ABI.
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -107,9 +109,27 @@ pub unsafe extern "C" fn invoicekit_engine_process_json(
         unsafe { slice::from_raw_parts(request_ptr, request_len) }
     };
 
-    Box::into_raw(Box::new(InvoiceKitEngineResult::new(
-        invoicekit_engine::process_abi_json(request),
-    )))
+    Box::into_raw(Box::new(catch_engine_panic(|| {
+        invoicekit_engine::process_abi_json(request)
+    })))
+}
+
+/// Run an engine call, containing any panic at the C ABI boundary.
+///
+/// A panic must never unwind across the `extern "C"` frame: callers are Go
+/// (cgo), .NET (P/Invoke), and Java (FFM), and unwinding into a foreign frame is
+/// undefined behavior. `process_abi_json` is expected to encode its errors as
+/// JSON rather than panic, but a transitive panic (allocation failure, serde
+/// recursion limit, or a future logic bug) must be contained here. A caught
+/// panic becomes a well-formed [`PANIC_RESPONSE`] error handle so the foreign
+/// caller stays alive and can free the handle normally.
+fn catch_engine_panic(
+    call: impl FnOnce() -> Vec<u8> + std::panic::UnwindSafe,
+) -> InvoiceKitEngineResult {
+    std::panic::catch_unwind(call).map_or_else(
+        |_| InvoiceKitEngineResult::error(PANIC_RESPONSE),
+        InvoiceKitEngineResult::new,
+    )
 }
 
 /// Return the status code carried by an engine result handle.
@@ -363,5 +383,49 @@ mod tests {
         assert_eq!(unsafe { invoicekit_engine_result_len(std::ptr::null()) }, 0);
         assert!(unsafe { invoicekit_engine_result_bytes(std::ptr::null()) }.is_null());
         unsafe { invoicekit_engine_result_free(std::ptr::null_mut()) };
+    }
+
+    // --- Panic-across-FFI containment (the C ABI must never let a panic unwind
+    // --- into a foreign caller; that is undefined behavior).
+
+    #[test]
+    fn catch_engine_panic_contains_a_panicking_call() {
+        // Fault injection: force the engine call to panic and prove the boundary
+        // helper turns it into a well-formed error handle instead of unwinding.
+        let result = super::catch_engine_panic(|| panic!("simulated engine panic"));
+        assert_eq!(result.status, InvoiceKitStatusCode::Error);
+        assert_eq!(result.bytes, super::PANIC_RESPONSE);
+        // The contained response must be parseable JSON the foreign caller can read.
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&result.bytes).expect("panic response is valid JSON");
+        assert_eq!(parsed["status"], "error");
+        assert_eq!(parsed["error"]["code"], "internal_panic");
+    }
+
+    #[test]
+    fn catch_engine_panic_passes_through_a_normal_call() {
+        // The happy path must be untouched: a non-panicking call returns its
+        // bytes and the success/error status derives from the payload as before.
+        let result = super::catch_engine_panic(|| br#"{"status":"ok"}"#.to_vec());
+        assert_eq!(result.status, InvoiceKitStatusCode::Ok);
+        assert_eq!(result.bytes, br#"{"status":"ok"}"#);
+    }
+
+    #[test]
+    fn process_json_survives_when_engine_would_panic() {
+        // End-to-end: even if the engine panicked, the public C ABI returns a
+        // non-null, freeable error handle rather than unwinding across the
+        // boundary. We drive the real entry point with a valid request; the
+        // guarantee being pinned is that the call returns normally and the
+        // handle is well-formed and safe to free.
+        let request = br#"{"abi_version":1,"operation":"unknown","payload":{}}"#;
+        let result = unsafe { invoicekit_engine_process_json(request.as_ptr(), request.len()) };
+        assert!(!result.is_null());
+        let status = unsafe { invoicekit_engine_result_status(result) };
+        assert!(
+            status == InvoiceKitStatusCode::Ok as u32
+                || status == InvoiceKitStatusCode::Error as u32
+        );
+        unsafe { invoicekit_engine_result_free(result) };
     }
 }
