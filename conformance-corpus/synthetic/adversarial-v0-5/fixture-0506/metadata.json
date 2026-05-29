@@ -9,8 +9,8 @@
   "artifact": {
     "path": "fixture.xml",
     "media_type": "application/xml",
-    "sha256": "ec366f3f4ba34a9bacd7b8ec1844e1ac3a1bd957f69f3fa2df64dcf50cdbb0d9",
-    "size_bytes": 8393,
+    "sha256": "2f714479baf6c2ec67b7c90f2ee25bad246aae220930c12b98bbd821fe701139",
+    "size_bytes": 8765,
     "format_family": "ubl",
     "document_type": "invoice"
   },
