@@ -581,6 +581,19 @@ performance** skills and closes the residuals.
   on touched crates; UBS criticals 4→4 (no growth; the 4 are the pre-existing arithmetic-overflow panics, next).
 - **Decisions:** D17 — audit findings are adversarially verified AND centrally test-gated before landing; a "confirmed"
   finding that breaks a standards-conformance test is a false positive and is reverted, not forced.
-- **Next:** fix the remaining **high-severity arithmetic-overflow DoS cluster** in `validate-ubl-cii` BR-CO/BR-AE rules
-  (panicking `Decimal` `*`/`+`/`-`/`.sum()` on attacker-controlled amounts → checked arithmetic emitting findings),
-  then triage the medium/low findings, then L8 native serializers.
+- **Next:** triage the remaining medium/low audit findings, then L8 native serializers.
+### Turn 18 — 2026-05-29 — validate-ubl-cii arithmetic-overflow DoS cluster FIXED
+- **Fixed the high-severity DoS cluster** the audit found in the EN16931 validator (parses untrusted CLI XML):
+  the BR-CO / BR-AE rules did panicking `Decimal` `*`/`+`/`-`/`.sum()` on attacker-controlled amounts parsed up
+  to `Decimal::MAX`. Fix (2 surgical edits, no per-site churn): (1) `decimal()` now rejects magnitudes > 1e16
+  (far above any real invoice in any currency) → `None` skips the dependent rule, making sums/differences
+  overflow-proof for any feasible input; (2) BR-CO-17's product uses `checked_mul`/`checked_div` (a bounded ×
+  bounded value can still exceed MAX) → skips the line on overflow, never panics.
+- **Evidence:** `cargo test --workspace` = **2339 passed, 0 failed** (+1 `huge_amounts_do_not_panic_the_validator`
+  regression test driving `validate_xml` with a 1e16×1e16 BR-CO-17 case that panicked pre-fix); clippy clean;
+  **UBS criticals on the crate 4 → 0** (the overflow-panic patterns resolved). Existing rule tests unaffected.
+- **Audit triage status:** of 22 confirmed findings — 6 high all addressed (flaky T17, parse_xml depth T17, this
+  arithmetic cluster T18; canonical was a reverted false positive). The ~15 medium/low (e.g. IR `urn` whitespace
+  normalization) remain as the next triage pass.
+- **Skills used:** `multi-pass-bug-hunting` (the audit), `systematic-debugging`, `verification-before-completion`.
+

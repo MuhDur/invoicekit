@@ -1485,7 +1485,17 @@ fn line_amounts(ctx: &ValidationContext<'_>) -> Vec<Decimal> {
 }
 
 fn decimal(value: &str) -> Option<Decimal> {
-    value.trim().parse::<Decimal>().ok()
+    let parsed = value.trim().parse::<Decimal>().ok()?;
+    // Defensive magnitude bound. Monetary amounts beyond 1e16 — far larger than
+    // any real invoice in any currency — are rejected (yield None, skipping the
+    // dependent rule) so that downstream rule arithmetic (sums of line amounts,
+    // allowance/charge differences) cannot overflow Decimal::MAX and panic the
+    // validator on attacker-controlled input. Products (BR-CO-17) additionally
+    // use checked_mul since a bounded × bounded value can still exceed MAX.
+    if parsed.abs() > Decimal::new(10_000_000_000_000_000, 0) {
+        return None;
+    }
+    Some(parsed)
 }
 
 fn rounded_2(value: Decimal) -> Decimal {
@@ -3662,8 +3672,19 @@ fn br_co_17(
                 rounded_0(tax_amount) == Decimal::ZERO
             }
             (Some(taxable), Some(rate)) => {
-                let expected = rounded_2(taxable.abs() * rate / Decimal::new(100, 0));
-                br_co_17_within_tolerance(ctx.syntax, tax_amount.abs(), expected)
+                // checked_mul/checked_div: a bounded taxable × bounded rate can
+                // still exceed Decimal::MAX. On overflow, skip this VAT line's
+                // BR-CO-17 arithmetic check rather than panicking the validator.
+                match taxable
+                    .abs()
+                    .checked_mul(rate)
+                    .and_then(|product| product.checked_div(Decimal::new(100, 0)))
+                {
+                    Some(expected) => {
+                        br_co_17_within_tolerance(ctx.syntax, tax_amount.abs(), rounded_2(expected))
+                    }
+                    None => continue,
+                }
             }
             (_, None) | (None, Some(_)) => rounded_0(tax_amount) == Decimal::ZERO,
         };
@@ -3927,6 +3948,34 @@ mod tests {
         }
         let err = parse_xml(&xml).unwrap_err();
         assert!(matches!(err, En16931Error::MalformedXml(_)), "got {err:?}");
+    }
+
+    /// The validator must not panic on attacker-controlled amounts that overflow
+    /// `Decimal` arithmetic. Regression for the BR-CO/BR-AE overflow-panic
+    /// denial of service via `validate_xml` on untrusted invoice XML.
+    #[test]
+    fn huge_amounts_do_not_panic_the_validator() {
+        // Defensive magnitude cap: amounts beyond 1e16 are rejected so sum /
+        // difference arithmetic cannot overflow Decimal::MAX.
+        assert!(decimal("100000000000000000").is_none()); // 1e17 > cap
+        assert!(decimal("100.00").is_some());
+
+        // BR-CO-17 product path: 1e16 * 1e16 = 1e32 exceeds Decimal::MAX even
+        // though both operands are within the cap. Pre-fix this panicked the
+        // validator; checked_mul must skip the line and return Ok instead.
+        let step1 = replace(
+            valid_ubl(),
+            "<cbc:TaxableAmount>100.00</cbc:TaxableAmount>",
+            "<cbc:TaxableAmount>10000000000000000</cbc:TaxableAmount>",
+        );
+        let xml = replace(
+            &step1,
+            "<cbc:Percent>19.00</cbc:Percent>",
+            "<cbc:Percent>10000000000000000</cbc:Percent>",
+        );
+        // Returns Ok (with findings) rather than panicking / aborting.
+        let report = validate_xml(&xml).expect("validator must not error on huge amounts");
+        let _ = report.findings.len();
     }
 
     #[test]
