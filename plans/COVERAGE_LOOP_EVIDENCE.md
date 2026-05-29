@@ -607,9 +607,12 @@ performance** skills and closes the residuals.
   - **CL DTE** ✅ after fix — real SII `DTE`/`Documento`/`Encabezado`/`Totales` names, but had a **real encoding bug**
     (declared ISO-8859-1 while returning a UTF-8 String → mojibake on accented Spanish). Fixed to UTF-8 + documented
     the wire-transcode follow-up. Committed.
-  - **IN GST** ✅ partial — real IRP `INV-01` JSON spine (`TranDtls`/`DocDtls`/`SellerDtls`/`ItemList`/`ValDtls`), but
-    omits several IRP-mandatory fields (`PrdDesc`/`IsServc`/`Addr1`/`Pos`, real `HsnCd`). Committed with an honest
-    partial-coverage doc note; full INV-01 completion is a follow-up.
+  - **IN GST** ✅ — real IRP `INV-01` JSON. The spine plus the IRP-mandatory party/item fields are now mapped from
+    the IR (**T29**): `SellerDtls`/`BuyerDtls.Addr1` (+ optional `Addr2`), `BuyerDtls.Pos` (place of supply),
+    per-item `PrdDesc`, `IsServc` (derived from the HSN/SAC chapter so it agrees with `HsnCd`), and `Unit` (IR unit
+    code mapped to the IRP UQC set via `unit_uqc`, default `OTH`). One documented residual remains: a real per-line
+    `HsnCd` (the IR has no first-class HSN/SAC field, so the generic SAC `9983` placeholder stays — completing it
+    waits on an IR classification field, NOT fabricated).
   - **KR NTS** ❌ REVERTED — **fabricated**: invented namespace `urn:kr:gov:nts:etaxinvoice` (not the real KEC URN)
     + guessed CII-flavored element names, not confirmed KEC ASD tags. Committing fabricated format names = slop, so
     `git stash`ed (recoverable) pending a verified KEC schema; **KR stays on UBL** (honest).
@@ -885,3 +888,28 @@ performance** skills and closes the residuals.
 - **Code-quality strand: CONVERGED.** The whole-workspace refactor converged earlier (Waves QA/QB/QC); this pass
   swept the campaign's new code, applied the 10 worthwhile within-crate simplifications, and honestly found the
   remainder are no-ops or below-threshold cross-crate candidates. No Score ≥2.0 within-crate candidate remains.
+
+### Turn 29 — 2026-05-29 — IN GST INV-01: closed the IRP-mandatory-field coverage gap (L8 residual)
+- With both audit and code-quality loops converged, picked the top concrete known-limitation: the documented
+  IN GST `INV-01` gap (`report-in-gst` emitted the spine but omitted IRP-mandatory party/item fields).
+- **Assessed for fabrication risk FIRST (D18):** read the IR (`DocumentLine`, `PostalAddress`, `Party`) to confirm
+  each field is honestly derivable. 5 of 6 are; the 6th (`HsnCd`) is NOT (no IR field) → left as a documented
+  placeholder rather than invented.
+- **Mapped from the IR (honest, schema-grounded, NOT fabricated):**
+  - `SellerDtls`/`BuyerDtls.Addr1` ← `address.lines[0]`; `Addr2` ← remaining lines joined (lossless).
+  - `BuyerDtls.Pos` (place of supply) ← buyer GST state code (the same value `intra_state` is derived from);
+    sellers correctly carry no `Pos`.
+  - `ItemList[].PrdDesc` ← `line.description`.
+  - `ItemList[].IsServc` (Y/N) ← derived from the resolved `HsnCd` (chapter 99 = SAC = service), so it always
+    agrees with `HsnCd`.
+  - `ItemList[].Unit` ← `line.unit_code` mapped onto the IRP UQC set by a new `unit_uqc` helper (UN/ECE Rec 20 →
+    UQC, pass-through for existing UQCs, `OTH` fallback).
+- **Documented residual:** a real per-line `HsnCd` — the IR has no first-class HSN/SAC classification field, so the
+  generic SAC `9983` placeholder remains. Completing it is an IR-schema change, explicitly NOT fabricated.
+- **TDD:** extended `inv01_emits_real_inter_state_field_names` to assert `Addr1`/`Pos` (seller has none), `PrdDesc`,
+  `IsServc=Y`, `Unit=PCS` (EA→PCS); added `unit_uqc_maps_un_ece_codes_and_defaults_to_oth`.
+- **Verification:** `cargo test --workspace` = **2457 passed / 0 failed** (+1); `cargo clippy --workspace
+  --all-targets -D warnings` clean (fixed a `match_same_arms` on the redundant empty-string arm); scope =
+  `report-in-gst` only. Existing byte-determinism/lifecycle tests unaffected (new fields are deterministic).
+- **Skills used:** `testing-real-service-e2e-no-mocks` (assertions over real INV-01 output), `reality-check-for-
+  project` (honest assess-before-implement, D18 fabrication guard), `verification-before-completion`.

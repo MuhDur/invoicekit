@@ -97,13 +97,15 @@ pub enum Inv01Error {
 /// It is NOT a UBL/EN 16931 XML re-skin — the UBL serializer emits the family
 /// format; this emits the country format the IRP actually accepts.
 ///
-/// **Coverage is the INV-01 core spine, not the full schema.** Several
-/// IRP-mandatory/conditional fields are deliberate follow-ups (tracked, not
-/// hidden): `ItemList[].PrdDesc`/`IsServc`/`Unit`, `SellerDtls.Addr1`,
-/// `BuyerDtls.Addr1`/`Pos`, and a real per-line `HsnCd` routed through
-/// [`validate_hsn_sac`] (currently a placeholder). A payload the live IRP would
-/// reject for a missing mandatory field can still pass the offline structural
-/// check — the offline lifecycle proves the spine, not full IRP acceptance.
+/// **Coverage.** The serializer now emits the IRP-mandatory party and item
+/// fields mapped from the IR: `SellerDtls`/`BuyerDtls.Addr1` (+ optional
+/// `Addr2`), `BuyerDtls.Pos` (place of supply), and per-item `PrdDesc`,
+/// `IsServc`, and `Unit` (the IR unit code mapped to the IRP UQC set via
+/// [`unit_uqc`]). The one remaining placeholder is the per-line `HsnCd`: the IR
+/// carries no first-class HSN/SAC classification field, so the serializer emits
+/// the generic SAC heading `"9983"` rather than inventing line-level data — a
+/// real `HsnCd` waits on an IR classification field. `IsServc` is derived from
+/// the resolved `HsnCd` (chapter 99 ⇒ service) so it always agrees with it.
 ///
 /// Output is byte-stable by construction: a fixed key order via an explicit
 /// [`serde_json::Map`] insertion sequence, amounts rendered at fixed scale 2,
@@ -167,11 +169,14 @@ pub fn to_inv01_json(
     // SellerDtls / BuyerDtls — party blocks.
     root.insert(
         "SellerDtls".to_owned(),
-        party_block(&document.supplier, Some(seller_gstin.as_str())),
+        party_block(&document.supplier, Some(seller_gstin.as_str()), None),
     );
+    // `BuyerDtls.Pos` (place of supply) is the buyer's GST state code — the same
+    // value `intra_state` is derived from above.
+    let buyer_pos = state_code(&document.customer, buyer_gstin.as_deref());
     root.insert(
         "BuyerDtls".to_owned(),
-        party_block(&document.customer, buyer_gstin.as_deref()),
+        party_block(&document.customer, buyer_gstin.as_deref(), Some(&buyer_pos)),
     );
 
     // ItemList — one entry per IR line.
@@ -244,17 +249,35 @@ fn party_gstin(party: &Party) -> Option<String> {
 
 /// Build a `SellerDtls` / `BuyerDtls` object: `Gstin`, `LglNm` (legal name),
 /// `Loc` (location/city), `Pin` (postal code as integer), `Stcd` (state code).
-fn party_block(party: &Party, gstin: Option<&str>) -> Value {
+fn party_block(party: &Party, gstin: Option<&str>, pos: Option<&str>) -> Value {
     let mut block = Map::new();
     // `Gstin` is `URP` ("Unregistered Person") in the IRP schema when the party
     // carries no GSTIN — the canonical placeholder for export/B2C buyers.
     block.insert("Gstin".to_owned(), json!(gstin.unwrap_or("URP")));
     block.insert("LglNm".to_owned(), json!(party.name));
+    // `Addr1` is IRP-mandatory and `Addr2` optional; the IR address carries an
+    // ordered line list (guaranteed non-empty by IR validation). Map the first
+    // line onto `Addr1` and fold any remaining lines into `Addr2` so no address
+    // content is dropped on the two-slot IRP shape.
+    let mut lines = party.address.lines.iter();
+    block.insert(
+        "Addr1".to_owned(),
+        json!(lines.next().map_or("", String::as_str)),
+    );
+    let addr2 = lines.cloned().collect::<Vec<_>>().join(", ");
+    if !addr2.is_empty() {
+        block.insert("Addr2".to_owned(), json!(addr2));
+    }
     block.insert("Loc".to_owned(), json!(party.address.city));
     block.insert("Pin".to_owned(), pin_value(&party.address.postal_code));
     // `Stcd` is the two-digit GST state code (the GSTIN prefix). Falls back to
     // the address subdivision when the party has no GSTIN.
     block.insert("Stcd".to_owned(), json!(state_code(party, gstin)));
+    // `Pos` (place of supply) is a `BuyerDtls`-only field: the destination state
+    // code that determines intra- vs inter-state tax. Sellers carry no `Pos`.
+    if let Some(pos) = pos {
+        block.insert("Pos".to_owned(), json!(pos));
+    }
     Value::Object(block)
 }
 
@@ -319,11 +342,24 @@ fn item_block(
         .and_then(|x| x.checked_add(igst))
         .ok_or_else(|| Inv01Error::BadContext("TotItemVal overflowed".to_owned()))?;
 
+    let hsn = hsn_code(line);
     let mut item = Map::new();
     // `SlNo` (serial number) is a string in the IRP schema.
     item.insert("SlNo".to_owned(), json!((index + 1).to_string()));
-    item.insert("HsnCd".to_owned(), json!(hsn_code(line)));
+    // `PrdDesc` (product description) is IRP-mandatory; map the IR line text.
+    item.insert("PrdDesc".to_owned(), json!(line.description));
+    // `IsServc` (Y/N) flags a service line. SAC headings (services) sit in
+    // chapter 99; HSN codes (goods) sit elsewhere — derive the flag from the
+    // resolved code so it always agrees with `HsnCd`.
+    item.insert(
+        "IsServc".to_owned(),
+        json!(if hsn.starts_with("99") { "Y" } else { "N" }),
+    );
+    item.insert("HsnCd".to_owned(), json!(hsn));
     item.insert("Qty".to_owned(), json!(fmt_qty(line.quantity.inner())));
+    // `Unit` is the IRP unit-quantity code (UQC); map the IR unit code onto the
+    // UQC set, defaulting to `OTH` ("Others") when absent or unrecognized.
+    item.insert("Unit".to_owned(), json!(unit_uqc(line.unit_code.as_deref())));
     item.insert("UnitPrice".to_owned(), json!(fmt_amount(line.unit_price.inner())));
     item.insert("TotAmt".to_owned(), json!(fmt_amount(ass_amt)));
     item.insert("AssAmt".to_owned(), json!(fmt_amount(ass_amt)));
@@ -391,6 +427,37 @@ fn hsn_code(line: &DocumentLine) -> String {
     // generic services heading so the field shape is schema-valid.
     let _ = line;
     "9983".to_owned()
+}
+
+/// Map an IR unit code (typically a UN/ECE Recommendation 20 code) onto the IRP
+/// unit-quantity-code (UQC) set. A value already in the UQC set passes through;
+/// common UN/ECE codes are translated; anything absent or unrecognized falls
+/// back to `OTH` ("Others"), a valid UQC, so the field is always schema-valid
+/// without inventing a unit the IR did not carry.
+fn unit_uqc(unit_code: Option<&str>) -> &'static str {
+    let code = unit_code.unwrap_or("").trim().to_ascii_uppercase();
+    match code.as_str() {
+        "NOS" | "C62" | "NMB" => "NOS",
+        "PCS" | "EA" | "PCE" | "H87" => "PCS",
+        "KGS" | "KGM" => "KGS",
+        "GMS" | "GRM" => "GMS",
+        "TON" | "TNE" => "TON",
+        "LTR" | "LITRE" => "LTR",
+        "MLT" | "MILLILITRE" => "MLT",
+        "MTR" | "METRE" => "MTR",
+        "CMS" | "CMT" => "CMS",
+        "SQM" | "MTK" => "SQM",
+        "CBM" | "MTQ" => "CBM",
+        "BOX" | "BX" => "BOX",
+        "DOZ" | "DZN" => "DOZ",
+        "HRS" | "HUR" => "HRS",
+        "DAY" | "DAYS" => "DAY",
+        "KWH" => "KWH",
+        "BAG" | "BAGS" => "BAG",
+        "BTL" | "BOTTLES" => "BTL",
+        "SET" | "SETS" => "SET",
+        _ => "OTH",
+    }
 }
 
 /// Format an IRP date `dd/mm/yyyy` from an ISO `yyyy-mm-dd` string. Falls back
@@ -975,11 +1042,23 @@ mod inv01_tests {
         assert_eq!(v["SellerDtls"]["Loc"], "Bengaluru");
         assert_eq!(v["SellerDtls"]["Pin"], 560_001);
         assert_eq!(v["SellerDtls"]["Stcd"], "29");
+        // `Addr1` is the first IR address line; the seller carries no `Pos`.
+        assert_eq!(v["SellerDtls"]["Addr1"], "1 MG Road");
+        assert!(v["SellerDtls"].get("Pos").is_none(), "seller carries no Pos");
         assert_eq!(v["BuyerDtls"]["Gstin"], "27AAAPL2356Q1ZT");
         assert_eq!(v["BuyerDtls"]["Stcd"], "27");
+        assert_eq!(v["BuyerDtls"]["Addr1"], "1 MG Road");
+        // `Pos` (place of supply) is the buyer's GST state code.
+        assert_eq!(v["BuyerDtls"]["Pos"], "27");
 
         let item = &v["ItemList"][0];
         assert_eq!(item["SlNo"], "1");
+        // `PrdDesc` maps the IR line description; `IsServc` is `Y` because the
+        // resolved `HsnCd` (9983) is a chapter-99 SAC (service); `Unit` maps the
+        // IR unit code `EA` onto the IRP UQC `PCS`.
+        assert_eq!(item["PrdDesc"], "Software consulting & support");
+        assert_eq!(item["IsServc"], "Y");
+        assert_eq!(item["Unit"], "PCS");
         assert_eq!(item["HsnCd"], "9983");
         assert_eq!(item["Qty"], "2.000");
         assert_eq!(item["UnitPrice"], "5000.00");
@@ -997,6 +1076,22 @@ mod inv01_tests {
         assert_eq!(v["ValDtls"]["CgstVal"], "0.00");
         assert_eq!(v["ValDtls"]["SgstVal"], "0.00");
         assert_eq!(v["ValDtls"]["TotInvVal"], "11800.00");
+    }
+
+    #[test]
+    fn unit_uqc_maps_un_ece_codes_and_defaults_to_oth() {
+        // UN/ECE Rec 20 codes translate to the IRP UQC set.
+        assert_eq!(unit_uqc(Some("EA")), "PCS");
+        assert_eq!(unit_uqc(Some("C62")), "NOS");
+        assert_eq!(unit_uqc(Some("KGM")), "KGS");
+        assert_eq!(unit_uqc(Some("LTR")), "LTR");
+        assert_eq!(unit_uqc(Some("MTK")), "SQM");
+        // Already-UQC values pass through (case-insensitively).
+        assert_eq!(unit_uqc(Some("box")), "BOX");
+        // Absent / unrecognized -> the valid `OTH` ("Others") fallback.
+        assert_eq!(unit_uqc(None), "OTH");
+        assert_eq!(unit_uqc(Some("")), "OTH");
+        assert_eq!(unit_uqc(Some("furlong")), "OTH");
     }
 
     #[test]
