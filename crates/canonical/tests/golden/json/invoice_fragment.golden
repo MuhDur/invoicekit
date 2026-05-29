@@ -1,0 +1,1 @@
+{"currency":"EUR","document_number":"INV-2026-0001","issue_date":"2026-05-26","lines":[{"amount":"200.00","id":"2","qty":2},{"amount":"100.00","id":"1","qty":1}],"total":{"payable":"300.00","tax":"57.00"}}

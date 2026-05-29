@@ -1,0 +1,2 @@
+# Transient diff artifacts written on golden mismatch; never commit.
+*.actual
