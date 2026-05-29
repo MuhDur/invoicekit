@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-label="InvoiceKit: the open-source toolkit for the full B2B e-invoicing lifecycle, covering create, check, render, read, send, and archive.">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1b2a"/>
+      <stop offset="1" stop-color="#10243a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#4dd0c0"/>
+      <stop offset="1" stop-color="#4d9de0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- card -->
+  <rect x="0" y="0" width="1280" height="360" rx="20" fill="url(#bg)"/>
+  <rect x="0.5" y="0.5" width="1279" height="359" rx="20" fill="none" stroke="#1f3a52" stroke-width="1"/>
+
+  <!-- wordmark -->
+  <text x="72" y="118" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="68" font-weight="700" fill="#f5f8fb">Invoice<tspan fill="#4dd0c0">Kit</tspan></text>
+
+  <!-- accent rule -->
+  <rect x="74" y="142" width="132" height="5" rx="2.5" fill="url(#accent)"/>
+
+  <!-- tagline -->
+  <text x="74" y="190" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="25" font-weight="400" fill="#aebfd0">One open-source engine for the full B2B e-invoicing lifecycle.</text>
+  <text x="74" y="222" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="25" font-weight="400" fill="#aebfd0">Rust core, native + WebAssembly delivery. Apache 2.0.</text>
+
+  <!-- lifecycle pipeline -->
+  <g font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="20" font-weight="600" text-anchor="middle">
+    <!-- connecting line -->
+    <line x1="118" y1="292" x2="1162" y2="292" stroke="#27496b" stroke-width="2"/>
+
+    <!-- node template: circle + label -->
+    <g fill="#4dd0c0">
+      <circle cx="118" cy="292" r="9" fill="#0d1b2a" stroke="#4dd0c0" stroke-width="2.5"/>
+      <circle cx="327" cy="292" r="9" fill="#0d1b2a" stroke="#4dd0c0" stroke-width="2.5"/>
+      <circle cx="536" cy="292" r="9" fill="#0d1b2a" stroke="#4dd0c0" stroke-width="2.5"/>
+      <circle cx="745" cy="292" r="9" fill="#0d1b2a" stroke="#4d9de0" stroke-width="2.5"/>
+      <circle cx="954" cy="292" r="9" fill="#0d1b2a" stroke="#4d9de0" stroke-width="2.5"/>
+      <circle cx="1162" cy="292" r="9" fill="#0d1b2a" stroke="#4d9de0" stroke-width="2.5"/>
+    </g>
+    <g fill="#dfe8f1">
+      <text x="118" y="338">create</text>
+      <text x="327" y="338">check</text>
+      <text x="536" y="338">render</text>
+      <text x="745" y="338">read</text>
+      <text x="954" y="338">send</text>
+      <text x="1162" y="338">archive</text>
+    </g>
+  </g>
+
+  <!-- format chips (top-right) -->
+  <g font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#9fb3c8" text-anchor="middle">
+    <rect x="938" y="56" width="120" height="32" rx="16" fill="none" stroke="#27496b"/>
+    <text x="998" y="77">EN 16931</text>
+    <rect x="1068" y="56" width="124" height="32" rx="16" fill="none" stroke="#27496b"/>
+    <text x="1130" y="77">Peppol BIS</text>
+    <rect x="938" y="98" width="120" height="32" rx="16" fill="none" stroke="#27496b"/>
+    <text x="998" y="119">Factur-X</text>
+    <rect x="1068" y="98" width="124" height="32" rx="16" fill="none" stroke="#27496b"/>
+    <text x="1130" y="119">XRechnung</text>
+  </g>
+</svg>
