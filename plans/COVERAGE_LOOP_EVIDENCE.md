@@ -335,3 +335,22 @@ where parallelism is safe (distinct crate dirs; no shared-file edits; central `c
   Bumped only `[workspace.package]` 0.1.0→0.1.1 (path-dep pins are `^0.1.0`, caret-compatible; verified
   `cargo check` + `cargo deny bans` green; binary reports `0.1.1`). v0.1.0 release left intact (OpenAPI +
   veraPDF evidence), notes to point at v0.1.1; did NOT delete it (AGENTS.md no-delete discipline).
+
+### Turn 8 — 2026-05-29 — Release workflow hardening (per-target binaries)
+- **Skills used:** `release-preparations` + `gh-actions` (CI failure triage), `gh-cli`, `verification-before-completion`.
+- **Did:** Diagnosed the v0.1.1 `release.yml` run — OpenAPI ✓, veraPDF ✓, but all 3 binary jobs failed for
+  THREE distinct reasons in the never-before-run workflow: (1) aarch64-linux had no GNU cross-linker;
+  (2) the SBOM step's `cargo cyclonedx` flags errored and blocked the binary attach even where the build
+  succeeded (x86_64-linux built fine, failed at SBOM); (3) all targets emitted a binary named `invoicekit`
+  → would collide on upload. Rewrote the per-target job: install `gcc-aarch64-linux-gnu` + linker env for the
+  cross target; build only `-p invoicekit-cli` (light, cross-friendly — the workspace pulls native ONNX/Paddle
+  via intake-ocr/vlm which the CLI doesn't need); rename per target (`invoicekit-<target>`) + ship `.tar.gz`
+  + `.sha256`; make SBOM/cosign/provenance best-effort (`continue-on-error`).
+- **Decisions:** D12 — release artifact = the `invoicekit` CLI binary per platform (not the whole workspace);
+  supply-chain extras (SBOM/cosign/provenance) are best-effort so they never block the binary attach.
+  Kept a single clean **v0.1.1** by moving the tag with an explicit `--force-with-lease=ref:sha` (lease-protected,
+  dcg-permitted) rather than proliferating v0.1.2.
+- **Evidence:** release.yml valid YAML; pushed `8155f2e`; tag v0.1.1 moved to the fixed commit; new release run
+  `26639398730` building.
+- **Next:** poll run 26639398730 → confirm `invoicekit-{x86_64-linux,aarch64-linux,aarch64-darwin}` binaries +
+  checksums attached to v0.1.1 → L1 closes → loop converged at **release DONE**.
