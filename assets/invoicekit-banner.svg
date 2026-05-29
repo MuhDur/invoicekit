@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-label="InvoiceKit: the open-source toolkit for the full B2B e-invoicing lifecycle. A validated, signed invoice flows through create, check, render, read, send, and archive.">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-label="InvoiceKit: the open-source toolkit for the full B2B e-invoicing lifecycle. A validated, signed invoice flows through create, check, render, read, send, and archive, across many countries.">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#0d1b2a"/>
@@ -13,54 +13,69 @@
       <stop offset="1" stop-color="#4d9de0"/>
     </linearGradient>
     <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0" stop-color="#4dd0c0" stop-opacity="0.12"/>
+      <stop offset="0" stop-color="#4dd0c0" stop-opacity="0.13"/>
       <stop offset="1" stop-color="#4dd0c0" stop-opacity="0"/>
     </radialGradient>
+    <pattern id="dots" width="32" height="32" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.3" fill="#24405f" opacity="0.40"/>
+    </pattern>
   </defs>
 
-  <!-- Card background; fills the whole canvas with its own dark fill so it reads on light + dark themes -->
+  <!-- Card background + subtle dot-grid texture -->
   <rect x="0" y="0" width="1280" height="360" rx="20" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1280" height="360" rx="20" fill="url(#dots)"/>
+  <circle cx="430" cy="240" r="320" fill="url(#glow)"/>
   <rect x="0.5" y="0.5" width="1279" height="359" rx="19.5" fill="none" stroke="#27496b" stroke-width="1"/>
-  <circle cx="250" cy="250" r="240" fill="url(#glow)"/>
 
-  <!-- ============ WORDMARK + TAGLINE (clear upper-left zone, nothing overlaps) ============ -->
-  <text x="80" y="112" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="68" font-weight="700" letter-spacing="-1">
+  <!-- ============ HEADER ZONE (top 40%) ============ -->
+  <text x="80" y="108" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="68" font-weight="700" letter-spacing="-1">
     <tspan fill="#f5f8fb">Invoice</tspan><tspan fill="#4dd0c0">Kit</tspan>
   </text>
-  <text x="83" y="156" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="23" font-weight="400" fill="#aebfd0">One engine for the full e-invoicing lifecycle.</text>
-  <rect x="83" y="174" width="64" height="3" rx="1.5" fill="#f4b740"/>
+  <text x="83" y="150" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="22" font-weight="400" fill="#aebfd0">One engine for the full e-invoicing lifecycle.</text>
+  <rect x="83" y="168" width="60" height="3" rx="1.5" fill="#f4b740"/>
 
-  <!-- ============ LIFECYCLE WAVE (confined to the lower band, well below the tagline) ============ -->
-  <!-- glow underlay then bright ribbon -->
-  <path d="M214 268 C 258 268, 256 262, 300 262 S 420 212, 464 212 S 584 262, 628 262 S 748 212, 792 212 S 912 262, 956 262 S 1076 212, 1120 212 L 1168 212"
+  <!-- upper-right motif: "one network, many endpoints" — a deliberate hub-and-spoke,
+       echoing Peppol-style reach without any text or jargon. Amber hub at center. -->
+  <g stroke="#4d9de0" stroke-width="1.4" opacity="0.5" fill="none">
+    <line x1="1150" y1="86" x2="1092" y2="58"/>
+    <line x1="1150" y1="86" x2="1206" y2="60"/>
+    <line x1="1150" y1="86" x2="1088" y2="108"/>
+    <line x1="1150" y1="86" x2="1150" y2="128"/>
+    <line x1="1150" y1="86" x2="1208" y2="110"/>
+  </g>
+  <g fill="#4dd0c0">
+    <circle cx="1092" cy="58" r="3.4"/>
+    <circle cx="1206" cy="60" r="3.4"/>
+    <circle cx="1088" cy="108" r="3.4"/>
+    <circle cx="1150" cy="128" r="3.4"/>
+    <circle cx="1208" cy="110" r="3.4"/>
+  </g>
+  <circle cx="1150" cy="86" r="5.2" fill="#f4b740"/>
+
+  <!-- ============ LIFECYCLE ZONE (lower 55%, clearly separated from header) ============ -->
+  <path d="M214 280 C 256 280, 258 272, 300 272 S 420 228, 462 228 S 582 272, 624 272 S 744 228, 786 228 S 906 272, 948 272 S 1068 228, 1110 228 L 1158 228"
         fill="none" stroke="url(#ribbon)" stroke-width="13" stroke-linecap="round" opacity="0.12"/>
-  <path d="M214 268 C 258 268, 256 262, 300 262 S 420 212, 464 212 S 584 262, 628 262 S 748 212, 792 212 S 912 262, 956 262 S 1076 212, 1120 212 L 1168 212"
+  <path d="M214 280 C 256 280, 258 272, 300 272 S 420 228, 462 228 S 582 272, 624 272 S 744 228, 786 228 S 906 272, 948 272 S 1068 228, 1110 228 L 1158 228"
         fill="none" stroke="url(#ribbon)" stroke-width="5" stroke-linecap="round" opacity="0.95"/>
-  <!-- amber arrowhead terminating the flow -->
-  <path d="M1174 212 l -15 -9 l 4 9 l -4 9 z" fill="#f4b740"/>
+  <path d="M1164 228 l -15 -9 l 4 9 l -4 9 z" fill="#f4b740"/>
 
-  <!-- ============ PROTAGONIST: a validated, signed invoice that starts the journey (lower-left) ============ -->
-  <g transform="translate(96 206)">
-    <!-- document with folded corner -->
-    <path d="M0 12 A12 12 0 0 1 12 0 L78 0 L104 26 L104 104 A12 12 0 0 1 92 116 L12 116 A12 12 0 0 1 0 104 Z" fill="url(#paper)" stroke="#c2cedd" stroke-width="1"/>
-    <path d="M78 0 L104 26 L78 26 Z" fill="#c2d2e2"/>
-    <!-- text rows -->
-    <rect x="16" y="40" width="52" height="6" rx="3" fill="#9fb2c5" opacity="0.7"/>
-    <rect x="16" y="54" width="70" height="6" rx="3" fill="#9fb2c5" opacity="0.55"/>
-    <rect x="16" y="68" width="44" height="6" rx="3" fill="#9fb2c5" opacity="0.55"/>
-    <!-- amber total bar -->
-    <rect x="16" y="92" width="70" height="11" rx="5.5" fill="#f4b740"/>
-    <!-- small verification seal badge on the corner: this invoice is checked + signed -->
-    <g transform="translate(96 18)">
-      <circle r="18" fill="#10243a" stroke="url(#ribbon)" stroke-width="3.5"/>
-      <polyline points="-7,1 -2,6 8,-7" fill="none" stroke="#4dd0c0" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- protagonist invoice (left, on the lifecycle baseline) -->
+  <g transform="translate(92 218)">
+    <path d="M0 14 A14 14 0 0 1 14 0 L86 0 L116 30 L116 116 A14 14 0 0 1 102 130 L14 130 A14 14 0 0 1 0 116 Z" fill="url(#paper)" stroke="#c2cedd" stroke-width="1"/>
+    <path d="M86 0 L116 30 L86 30 Z" fill="#c2d2e2"/>
+    <rect x="18" y="44" width="58" height="7" rx="3.5" fill="#9fb2c5" opacity="0.7"/>
+    <rect x="18" y="60" width="80" height="7" rx="3.5" fill="#9fb2c5" opacity="0.55"/>
+    <rect x="18" y="76" width="50" height="7" rx="3.5" fill="#9fb2c5" opacity="0.55"/>
+    <rect x="18" y="102" width="80" height="12" rx="6" fill="#f4b740"/>
+    <g transform="translate(108 20)">
+      <circle r="20" fill="#10243a" stroke="url(#ribbon)" stroke-width="4"/>
+      <polyline points="-8,1 -2,7 9,-8" fill="none" stroke="#4dd0c0" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
     </g>
   </g>
 
-  <!-- ============ SIX LIFECYCLE NODES on the wave: create -> check -> render -> read -> send -> archive ============ -->
+  <!-- six lifecycle nodes: create -> check -> render -> read -> send -> archive -->
   <g>
-    <!-- 1. create = pencil -->
-    <g transform="translate(300 262)">
+    <g transform="translate(300 272)">
       <circle r="31" fill="#10243a" stroke="#27496b" stroke-width="1.5"/>
       <circle r="31" fill="none" stroke="#4dd0c0" stroke-width="2" opacity="0.55"/>
       <g transform="translate(-13 -13)" stroke="#eef3f8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none">
@@ -68,15 +83,13 @@
         <path d="M14 6 L20 12" stroke="#4dd0c0"/>
       </g>
     </g>
-    <!-- 2. check = shield + checkmark -->
-    <g transform="translate(464 212)">
+    <g transform="translate(462 228)">
       <circle r="31" fill="#10243a" stroke="#27496b" stroke-width="1.5"/>
       <circle r="31" fill="none" stroke="#4dd0c0" stroke-width="2" opacity="0.6"/>
       <path d="M0 -15 L14 -9 L14 3 C14 12 7 17 0 20 C-7 17 -14 12 -14 3 L-14 -9 Z" fill="none" stroke="#eef3f8" stroke-width="3" stroke-linejoin="round"/>
       <polyline points="-6,1 -1,7 8,-5" fill="none" stroke="#4dd0c0" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
     </g>
-    <!-- 3. render = framed page -->
-    <g transform="translate(628 262)">
+    <g transform="translate(624 272)">
       <circle r="31" fill="#10243a" stroke="#27496b" stroke-width="1.5"/>
       <circle r="31" fill="none" stroke="#4d9de0" stroke-width="2" opacity="0.55"/>
       <g stroke="#eef3f8" stroke-width="2.8" fill="none" stroke-linejoin="round">
@@ -86,8 +99,7 @@
         <line x1="-5" y1="7" x2="1" y2="7" stroke-linecap="round" stroke="#4dd0c0"/>
       </g>
     </g>
-    <!-- 4. read = eye / scan -->
-    <g transform="translate(792 212)">
+    <g transform="translate(786 228)">
       <circle r="31" fill="#10243a" stroke="#27496b" stroke-width="1.5"/>
       <circle r="31" fill="none" stroke="#4d9de0" stroke-width="2" opacity="0.6"/>
       <g stroke="#eef3f8" stroke-width="2.8" fill="none" stroke-linecap="round">
@@ -95,8 +107,7 @@
         <circle cx="0" cy="0" r="4.4" stroke="#4dd0c0"/>
       </g>
     </g>
-    <!-- 5. send = paper plane -->
-    <g transform="translate(956 262)">
+    <g transform="translate(948 272)">
       <circle r="31" fill="#10243a" stroke="#27496b" stroke-width="1.5"/>
       <circle r="31" fill="none" stroke="#4dd0c0" stroke-width="2" opacity="0.55"/>
       <g transform="translate(0 1)">
@@ -104,8 +115,7 @@
         <path d="M-10 0 L16 0 L-3 7 Z" fill="#9fb3c8"/>
       </g>
     </g>
-    <!-- 6. archive = padlock -->
-    <g transform="translate(1120 212)">
+    <g transform="translate(1110 228)">
       <circle r="31" fill="#10243a" stroke="#27496b" stroke-width="1.5"/>
       <circle r="31" fill="none" stroke="#4dd0c0" stroke-width="2" opacity="0.6"/>
       <g transform="translate(0 1)">
