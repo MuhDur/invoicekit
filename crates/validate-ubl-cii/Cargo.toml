@@ -19,8 +19,8 @@ name = "invoicekit-en16931-findings"
 path = "src/bin/en16931_findings.rs"
 
 [dependencies]
-invoicekit-rulepack = { path = "../rulepack", version = "0.0.0" }
-invoicekit-validate = { path = "../validate", version = "0.0.0" }
+invoicekit-rulepack = { path = "../rulepack", version = "0.1.0" }
+invoicekit-validate = { path = "../validate", version = "0.1.0" }
 quick-xml = "0.40.1"
 rust_decimal = "1"
 serde_json = "1"

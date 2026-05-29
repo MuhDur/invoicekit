@@ -15,9 +15,9 @@ name = "invoicekit_tax_calculation"
 path = "src/lib.rs"
 
 [dependencies]
-invoicekit-canonical = { path = "../canonical", version = "0.0.0" }
-invoicekit-ir = { path = "../ir", version = "0.0.0" }
-invoicekit-money = { path = "../money", version = "0.0.0" }
+invoicekit-canonical = { path = "../canonical", version = "0.1.0" }
+invoicekit-ir = { path = "../ir", version = "0.1.0" }
+invoicekit-money = { path = "../money", version = "0.1.0" }
 rust_decimal = { version = "1", default-features = false, features = ["serde-with-str", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

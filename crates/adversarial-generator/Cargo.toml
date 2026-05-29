@@ -22,13 +22,13 @@ name = "gen-corpus-v0-5"
 path = "src/bin/gen_corpus_v0_5.rs"
 
 [dependencies]
-invoicekit-ir = { path = "../ir", version = "0.0.0" }
-invoicekit-format-ubl = { path = "../format-ubl", version = "0.0.0" }
-invoicekit-format-cii = { path = "../format-cii", version = "0.0.0" }
-invoicekit-format-gobl = { path = "../format-gobl", version = "0.0.0" }
-invoicekit-profile-xrechnung = { path = "../profile-xrechnung", version = "0.0.0" }
-invoicekit-profile-peppol-bis = { path = "../profile-peppol-bis", version = "0.0.0" }
-invoicekit-profile-peppol-pint = { path = "../profile-peppol-pint", version = "0.0.0" }
+invoicekit-ir = { path = "../ir", version = "0.1.0" }
+invoicekit-format-ubl = { path = "../format-ubl", version = "0.1.0" }
+invoicekit-format-cii = { path = "../format-cii", version = "0.1.0" }
+invoicekit-format-gobl = { path = "../format-gobl", version = "0.1.0" }
+invoicekit-profile-xrechnung = { path = "../profile-xrechnung", version = "0.1.0" }
+invoicekit-profile-peppol-bis = { path = "../profile-peppol-bis", version = "0.1.0" }
+invoicekit-profile-peppol-pint = { path = "../profile-peppol-pint", version = "0.1.0" }
 rust_decimal = "1"
 serde_json = "1"
 sha2 = "0.10"

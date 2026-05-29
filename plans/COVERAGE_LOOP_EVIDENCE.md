@@ -87,7 +87,7 @@ is labelled as such — that is an honest ceiling, not a limitation to "fix".
 
 | # | Limitation (from README §Limitations + scan) | Disposition | Target |
 |---|---|---|---|
-| L1 | Pre-release; nothing tagged/published | **FIX** | Cut `v0.1.0` GitHub release |
+| L1 | Pre-release; nothing tagged/published | **CLOSING (T6)** | `v0.1.0` version-bumped, tagged; GitHub release via `release.yml` |
 | L2 | Validation needs a JVM for reference grade | **By design** (commitment #6) | Keep, label honestly |
 | L3 | Live Peppol delivery is BYOK; native AS4 research-track | **By design** (commitment #7) | Keep, label honestly |
 | L4 | Coverage maturity varies by country | **DONE (T5)** | Honest matrix entry for all 36 claimed countries (39 entries); per-capability levels + provenance + confidence |
@@ -294,3 +294,23 @@ where parallelism is safe (distinct crate dirs; no shared-file edits; central `c
   `multi-pass-bug-hunting` to drive remaining fixable limitations toward 0; then **P6** build-output
   verification (CLI, WASM, 5 SDKs, REST, evidence/validate actions); then **P7** `release-preparations` →
   changelog → tag `v0.1.0` → GitHub release with checksums + evidence.
+
+### Turn 6 — 2026-05-29 — P5+P6 release-readiness + P7 release prep
+- **Skills used:** `release-preparations` (test gate + version bump + Path-A tag flow), `mock-code-finder`
+  methodology (stub sweep), `changelog-md-workmanship` (curated 0.1.0 changelog), `verification-before-completion`.
+- **Workflow used:** `coverage-p5p6-release-readiness` (5 tracks); 2 returned structured (CLI + WASM/REST green),
+  3 schema-failed and were redone inline. Plus a foreground agent for the mechanical 0.0.0→0.1.0 bump.
+- **Did (P5 sweep):** **0** `todo!()`/`unimplemented!()` in shipping code; TODO/FIXME hits all false positives
+  (test cert PEM, real CFDI codes); "not implemented" hits are honest error-variant docs. README claims audited
+  vs reality — honest (limitations section matches; no overclaims to soften). Codebase is real, not stubbed.
+- **Did (P6 build outputs, verified):** release CLI builds (3.3MB, `invoicekit 0.1.0`, MX resolves to CFDI);
+  WASM builds clean (4.7MB valid module); REST OpenAPI 3.1 exports valid (14 paths); whole workspace + bindings
+  build green.
+- **Did (P7 prep):** bumped workspace + all 53 internal Cargo.toml version pins 0.0.0→0.1.0 (118 occurrences;
+  explicit per-file edits, cargo-verified); wrote `CHANGELOG.md` (0.1.0); updated README status to v0.1.0.
+- **Evidence:** **release test gate = 2056 passed, 0 failed**; `cargo check --workspace` clean; release binary
+  reports `invoicekit-cli 0.1.0 (release)`; 0 remaining `version = "0.0.0"`.
+- **Decisions:** D9 — release as `v0.1.0` via Path A (tag → `release.yml`); version bump done as explicit
+  per-file edits (no sed) with cargo as the correctness gate.
+- **Next:** commit + push release prep; tag `v0.1.0`; monitor `release.yml`; finalize GitHub release (artifacts
+  + checksums + evidence) so L1 closes and the loop reaches **release DONE**.

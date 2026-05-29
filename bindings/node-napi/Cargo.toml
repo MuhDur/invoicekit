@@ -15,7 +15,7 @@ name = "invoicekit_binding_node_napi"
 path = "src/lib.rs"
 
 [dependencies]
-invoicekit-engine = { path = "../../crates/invoicekit-engine", version = "0.0.0" }
+invoicekit-engine = { path = "../../crates/invoicekit-engine", version = "0.1.0" }
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }

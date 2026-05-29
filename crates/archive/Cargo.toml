@@ -18,7 +18,7 @@ name = "invoicekit_archive"
 path = "src/lib.rs"
 
 [dependencies]
-invoicekit-evidence = { path = "../evidence", version = "0.0.0" }
+invoicekit-evidence = { path = "../evidence", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror.workspace = true

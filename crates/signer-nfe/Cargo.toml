@@ -18,7 +18,7 @@ name = "invoicekit_signer_nfe"
 path = "src/lib.rs"
 
 [dependencies]
-invoicekit-signer = { path = "../signer", version = "0.0.0" }
+invoicekit-signer = { path = "../signer", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror.workspace = true

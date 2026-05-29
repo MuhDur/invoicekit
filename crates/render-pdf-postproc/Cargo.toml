@@ -18,7 +18,7 @@ name = "invoicekit_render_pdf_postproc"
 path = "src/lib.rs"
 
 [dependencies]
-invoicekit-intake-pdf = { path = "../intake-pdf", version = "0.0.0" }
+invoicekit-intake-pdf = { path = "../intake-pdf", version = "0.1.0" }
 lopdf = { version = "0.36", default-features = false }
 thiserror.workspace = true
 

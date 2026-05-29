@@ -18,10 +18,10 @@ name = "invoicekit_lossiness_ledger_generator"
 path = "src/lib.rs"
 
 [dependencies]
-invoicekit-format-cii = { path = "../format-cii", version = "0.0.0" }
-invoicekit-format-ubl = { path = "../format-ubl", version = "0.0.0" }
-invoicekit-ir = { path = "../ir", version = "0.0.0" }
-invoicekit-profile-factur-x = { path = "../profile-factur-x", version = "0.0.0" }
+invoicekit-format-cii = { path = "../format-cii", version = "0.1.0" }
+invoicekit-format-ubl = { path = "../format-ubl", version = "0.1.0" }
+invoicekit-ir = { path = "../ir", version = "0.1.0" }
+invoicekit-profile-factur-x = { path = "../profile-factur-x", version = "0.1.0" }
 thiserror.workspace = true
 
 [lints]

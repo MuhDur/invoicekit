@@ -34,18 +34,18 @@ path = "src/bin/invoicekit_admin.rs"
 
 [dependencies]
 blake3 = "1"
-invoicekit-codelists = { path = "../codelists", version = "0.0.0" }
-invoicekit-evidence = { path = "../evidence", version = "0.0.0" }
-invoicekit-ir = { path = "../ir", version = "0.0.0" }
-invoicekit-migration = { path = "../migration", version = "0.0.0" }
-invoicekit-reconcile = { path = "../reconcile", version = "0.0.0" }
-invoicekit-replay = { path = "../replay", version = "0.0.0" }
-invoicekit-signer = { path = "../signer", version = "0.0.0" }
-invoicekit-timestamping = { path = "../timestamping", version = "0.0.0" }
-invoicekit-transmit-peppol-byok = { path = "../transmit-peppol-byok", version = "0.0.0" }
-invoicekit-validate = { path = "../validate", version = "0.0.0" }
-invoicekit-validate-ubl-cii = { path = "../validate-ubl-cii", version = "0.0.0" }
-invoicekit-verify = { path = "../verify", version = "0.0.0" }
+invoicekit-codelists = { path = "../codelists", version = "0.1.0" }
+invoicekit-evidence = { path = "../evidence", version = "0.1.0" }
+invoicekit-ir = { path = "../ir", version = "0.1.0" }
+invoicekit-migration = { path = "../migration", version = "0.1.0" }
+invoicekit-reconcile = { path = "../reconcile", version = "0.1.0" }
+invoicekit-replay = { path = "../replay", version = "0.1.0" }
+invoicekit-signer = { path = "../signer", version = "0.1.0" }
+invoicekit-timestamping = { path = "../timestamping", version = "0.1.0" }
+invoicekit-transmit-peppol-byok = { path = "../transmit-peppol-byok", version = "0.1.0" }
+invoicekit-validate = { path = "../validate", version = "0.1.0" }
+invoicekit-validate-ubl-cii = { path = "../validate-ubl-cii", version = "0.1.0" }
+invoicekit-verify = { path = "../verify", version = "0.1.0" }
 rusqlite = { version = "0.37", features = ["bundled"] }
 rustyline = "18.0.0"
 serde = { version = "1", features = ["derive"] }

@@ -23,8 +23,8 @@ path = "src/lib.rs"
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "macros", "query"] }
 http = "1"
-invoicekit-managed-api = { path = "../../crates/managed-api", version = "0.0.0" }
-invoicekit-reconcile = { path = "../../crates/reconcile", version = "0.0.0" }
+invoicekit-managed-api = { path = "../../crates/managed-api", version = "0.1.0" }
+invoicekit-reconcile = { path = "../../crates/reconcile", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror.workspace = true
