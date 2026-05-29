@@ -337,11 +337,21 @@ pub fn validate_xml_with_registry(
     };
     let line_nodes = collect_lines(syntax, &root);
     let tax_summary_nodes = collect_tax_summaries(syntax, &root);
+    let tax_representative_nodes = collect_tax_representatives(syntax, &root);
+    let payment_means_nodes = collect_payment_means(syntax, &root);
+    let allowance_nodes = collect_document_allowance_charges(syntax, &root, false);
+    let charge_nodes = collect_document_allowance_charges(syntax, &root, true);
+    let invoice_period_nodes = collect_invoice_periods(syntax, &root);
     let ctx = ValidationContext {
         syntax,
         root: &root,
         line_nodes,
         tax_summary_nodes,
+        tax_representative_nodes,
+        payment_means_nodes,
+        allowance_nodes,
+        charge_nodes,
+        invoice_period_nodes,
     };
     let mut findings = Vec::new();
 
@@ -465,6 +475,17 @@ struct ValidationContext<'a> {
     root: &'a XmlNode,
     line_nodes: Vec<&'a XmlNode>,
     tax_summary_nodes: Vec<&'a XmlNode>,
+    // Document-level node sets that several BR/BR-CO rules re-derive. Each was
+    // previously recomputed by re-walking the DOM (CII via recursive
+    // `descendants`) on every call — `document_allowance_charges` alone is hit
+    // 10x per validation. They are collected once here; the helpers below return
+    // slices into these vectors. The traversal is identical to the per-call
+    // version, so the cached node sets are the same nodes in the same order.
+    tax_representative_nodes: Vec<&'a XmlNode>,
+    payment_means_nodes: Vec<&'a XmlNode>,
+    allowance_nodes: Vec<&'a XmlNode>,
+    charge_nodes: Vec<&'a XmlNode>,
+    invoice_period_nodes: Vec<&'a XmlNode>,
 }
 
 fn run_br_rules(
@@ -986,7 +1007,11 @@ fn has_tax_exemption_reason(node: &XmlNode, syntax: DocumentSyntax) -> bool {
 }
 
 fn cii_header_settlement<'doc>(ctx: &ValidationContext<'doc>) -> Option<&'doc XmlNode> {
-    ctx.root.path(&[
+    cii_header_settlement_of(ctx.root)
+}
+
+fn cii_header_settlement_of(root: &XmlNode) -> Option<&XmlNode> {
+    root.path(&[
         "SupplyChainTradeTransaction",
         "ApplicableHeaderTradeSettlement",
     ])
@@ -1022,18 +1047,26 @@ fn buyer_party<'doc>(ctx: &ValidationContext<'doc>) -> Option<&'doc XmlNode> {
     }
 }
 
-fn tax_representatives<'doc>(ctx: &ValidationContext<'doc>) -> Vec<&'doc XmlNode> {
-    match ctx.syntax {
-        DocumentSyntax::Ubl => ctx.root.children_named("TaxRepresentativeParty").collect(),
-        DocumentSyntax::Cii => descendants(ctx.root, "SellerTaxRepresentativeTradeParty"),
+fn collect_tax_representatives(syntax: DocumentSyntax, root: &XmlNode) -> Vec<&XmlNode> {
+    match syntax {
+        DocumentSyntax::Ubl => root.children_named("TaxRepresentativeParty").collect(),
+        DocumentSyntax::Cii => descendants(root, "SellerTaxRepresentativeTradeParty"),
     }
 }
 
-fn payment_means<'doc>(ctx: &ValidationContext<'doc>) -> Vec<&'doc XmlNode> {
-    match ctx.syntax {
-        DocumentSyntax::Ubl => ctx.root.children_named("PaymentMeans").collect(),
-        DocumentSyntax::Cii => descendants(ctx.root, "SpecifiedTradeSettlementPaymentMeans"),
+fn tax_representatives<'ctx, 'doc>(ctx: &'ctx ValidationContext<'doc>) -> &'ctx [&'doc XmlNode] {
+    &ctx.tax_representative_nodes
+}
+
+fn collect_payment_means(syntax: DocumentSyntax, root: &XmlNode) -> Vec<&XmlNode> {
+    match syntax {
+        DocumentSyntax::Ubl => root.children_named("PaymentMeans").collect(),
+        DocumentSyntax::Cii => descendants(root, "SpecifiedTradeSettlementPaymentMeans"),
     }
+}
+
+fn payment_means<'ctx, 'doc>(ctx: &'ctx ValidationContext<'doc>) -> &'ctx [&'doc XmlNode] {
+    &ctx.payment_means_nodes
 }
 
 fn payment_code(payment: &XmlNode, syntax: DocumentSyntax) -> Option<&str> {
@@ -1120,10 +1153,11 @@ fn has_allowance_charge_vat_category(node: &XmlNode, syntax: DocumentSyntax) -> 
     }
 }
 
-fn document_allowance_charges<'doc>(
-    ctx: &ValidationContext<'doc>,
+fn collect_document_allowance_charges(
+    syntax: DocumentSyntax,
+    root: &XmlNode,
     charge: bool,
-) -> Vec<&'doc XmlNode> {
+) -> Vec<&XmlNode> {
     let matches_indicator = |node: &&XmlNode| {
         charge_indicator(node).is_some_and(|indicator| {
             if charge {
@@ -1133,13 +1167,12 @@ fn document_allowance_charges<'doc>(
             }
         })
     };
-    match ctx.syntax {
-        DocumentSyntax::Ubl => ctx
-            .root
+    match syntax {
+        DocumentSyntax::Ubl => root
             .children_named("AllowanceCharge")
             .filter(matches_indicator)
             .collect(),
-        DocumentSyntax::Cii => cii_header_settlement(ctx)
+        DocumentSyntax::Cii => cii_header_settlement_of(root)
             .map(|settlement| {
                 settlement
                     .children_named("SpecifiedTradeAllowanceCharge")
@@ -1147,6 +1180,17 @@ fn document_allowance_charges<'doc>(
                     .collect()
             })
             .unwrap_or_default(),
+    }
+}
+
+fn document_allowance_charges<'ctx, 'doc>(
+    ctx: &'ctx ValidationContext<'doc>,
+    charge: bool,
+) -> &'ctx [&'doc XmlNode] {
+    if charge {
+        &ctx.charge_nodes
+    } else {
+        &ctx.allowance_nodes
     }
 }
 
@@ -1181,10 +1225,10 @@ fn line_allowance_charges<'doc>(
     }
 }
 
-fn invoice_periods<'doc>(ctx: &ValidationContext<'doc>) -> Vec<&'doc XmlNode> {
-    match ctx.syntax {
-        DocumentSyntax::Ubl => ctx.root.children_named("InvoicePeriod").collect(),
-        DocumentSyntax::Cii => cii_header_settlement(ctx)
+fn collect_invoice_periods(syntax: DocumentSyntax, root: &XmlNode) -> Vec<&XmlNode> {
+    match syntax {
+        DocumentSyntax::Ubl => root.children_named("InvoicePeriod").collect(),
+        DocumentSyntax::Cii => cii_header_settlement_of(root)
             .map(|settlement| {
                 settlement
                     .children_named("BillingSpecifiedPeriod")
@@ -1192,6 +1236,10 @@ fn invoice_periods<'doc>(ctx: &ValidationContext<'doc>) -> Vec<&'doc XmlNode> {
             })
             .unwrap_or_default(),
     }
+}
+
+fn invoice_periods<'ctx, 'doc>(ctx: &'ctx ValidationContext<'doc>) -> &'ctx [&'doc XmlNode] {
+    &ctx.invoice_period_nodes
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -1878,7 +1926,7 @@ fn br_18(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    for (index, representative) in tax_representatives(ctx).into_iter().enumerate() {
+    for (index, representative) in tax_representatives(ctx).iter().enumerate() {
         let value = match ctx.syntax {
             DocumentSyntax::Ubl => representative.path_text(&["PartyName", "Name"]),
             DocumentSyntax::Cii => representative.path_text(&["Name"]),
@@ -1900,7 +1948,7 @@ fn br_19(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    for (index, representative) in tax_representatives(ctx).into_iter().enumerate() {
+    for (index, representative) in tax_representatives(ctx).iter().enumerate() {
         let present = match ctx.syntax {
             DocumentSyntax::Ubl => representative.child("PostalAddress").is_some(),
             DocumentSyntax::Cii => representative.child("PostalTradeAddress").is_some(),
@@ -1922,7 +1970,7 @@ fn br_20(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    for (index, representative) in tax_representatives(ctx).into_iter().enumerate() {
+    for (index, representative) in tax_representatives(ctx).iter().enumerate() {
         let value = match ctx.syntax {
             DocumentSyntax::Ubl if representative.child("PostalAddress").is_some() => {
                 representative.path_text(&["PostalAddress", "Country", "IdentificationCode"])
@@ -2156,7 +2204,7 @@ fn br_29(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    for (index, period) in invoice_periods(ctx).into_iter().enumerate() {
+    for (index, period) in invoice_periods(ctx).iter().enumerate() {
         let (has_start, start) = period_start(period, ctx.syntax);
         let (has_end, end) = period_end(period, ctx.syntax);
         if has_start && has_end && !matches!((start, end), (Some(start), Some(end)) if end >= start)
@@ -2213,10 +2261,7 @@ fn br_31(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    for (index, charge) in document_allowance_charges(ctx, false)
-        .into_iter()
-        .enumerate()
-    {
+    for (index, charge) in document_allowance_charges(ctx, false).iter().enumerate() {
         if !has_allowance_charge_amount(charge, ctx.syntax) {
             fail(
                 findings,
@@ -2234,10 +2279,7 @@ fn br_32(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    for (index, charge) in document_allowance_charges(ctx, false)
-        .into_iter()
-        .enumerate()
-    {
+    for (index, charge) in document_allowance_charges(ctx, false).iter().enumerate() {
         if !has_allowance_charge_vat_category(charge, ctx.syntax) {
             fail(
                 findings,
@@ -2255,10 +2297,7 @@ fn br_33(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    for (index, charge) in document_allowance_charges(ctx, false)
-        .into_iter()
-        .enumerate()
-    {
+    for (index, charge) in document_allowance_charges(ctx, false).iter().enumerate() {
         if !has_allowance_charge_reason(charge, ctx.syntax) {
             fail(
                 findings,
@@ -2276,10 +2315,7 @@ fn br_36(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    for (index, charge) in document_allowance_charges(ctx, true)
-        .into_iter()
-        .enumerate()
-    {
+    for (index, charge) in document_allowance_charges(ctx, true).iter().enumerate() {
         if !has_allowance_charge_amount(charge, ctx.syntax) {
             fail(
                 findings,
@@ -2297,10 +2333,7 @@ fn br_37(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    for (index, charge) in document_allowance_charges(ctx, true)
-        .into_iter()
-        .enumerate()
-    {
+    for (index, charge) in document_allowance_charges(ctx, true).iter().enumerate() {
         if !has_allowance_charge_vat_category(charge, ctx.syntax) {
             fail(
                 findings,
@@ -2318,10 +2351,7 @@ fn br_38(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    for (index, charge) in document_allowance_charges(ctx, true)
-        .into_iter()
-        .enumerate()
-    {
+    for (index, charge) in document_allowance_charges(ctx, true).iter().enumerate() {
         if !has_allowance_charge_reason(charge, ctx.syntax) {
             fail(
                 findings,
@@ -2529,7 +2559,7 @@ fn br_49(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    for (index, payment) in payment_means(ctx).into_iter().enumerate() {
+    for (index, payment) in payment_means(ctx).iter().enumerate() {
         if payment_code(payment, ctx.syntax).is_none() {
             fail(
                 findings,
@@ -2547,7 +2577,7 @@ fn br_50(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    for (index, payment) in payment_means(ctx).into_iter().enumerate() {
+    for (index, payment) in payment_means(ctx).iter().enumerate() {
         let has_credit_transfer_code =
             payment_code(payment, ctx.syntax).is_some_and(is_credit_transfer_code);
         if has_credit_transfer_code
@@ -2768,7 +2798,7 @@ fn br_56(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    for (index, representative) in tax_representatives(ctx).into_iter().enumerate() {
+    for (index, representative) in tax_representatives(ctx).iter().enumerate() {
         let value = match ctx.syntax {
             DocumentSyntax::Ubl => representative
                 .children_named("PartyTaxScheme")
@@ -2847,7 +2877,7 @@ fn br_61(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    for (index, payment) in payment_means(ctx).into_iter().enumerate() {
+    for (index, payment) in payment_means(ctx).iter().enumerate() {
         let Some(code) = payment_code(payment, ctx.syntax) else {
             continue;
         };
@@ -3072,7 +3102,7 @@ fn br_ae_08(
                 .filter_map(|line| line.path_text(&["LineExtensionAmount"]).and_then(decimal))
                 .sum::<Decimal>()
                 + document_allowance_charges(ctx, true)
-                    .into_iter()
+                    .iter()
                     .filter(|charge| {
                         charge
                             .path(&["TaxCategory"])
@@ -3082,7 +3112,7 @@ fn br_ae_08(
                     .filter_map(|charge| allowance_charge_amount(charge, ctx.syntax))
                     .sum::<Decimal>()
                 - document_allowance_charges(ctx, false)
-                    .into_iter()
+                    .iter()
                     .filter(|charge| {
                         charge
                             .path(&["TaxCategory"])
@@ -3191,7 +3221,7 @@ fn br_co_03(
     };
     let has_code = match ctx.syntax {
         DocumentSyntax::Ubl => invoice_periods(ctx)
-            .into_iter()
+            .iter()
             .any(|period| period.child("DescriptionCode").is_some()),
         DocumentSyntax::Cii => !descendants(ctx.root, "DueDateTypeCode").is_empty(),
     };
@@ -3327,7 +3357,7 @@ fn br_co_11(
     }
     let sum = rounded_2(
         allowances
-            .into_iter()
+            .iter()
             .filter_map(|charge| allowance_charge_amount(charge, ctx.syntax))
             .sum(),
     );
@@ -3354,7 +3384,7 @@ fn br_co_12(
     }
     let sum = rounded_2(
         charges
-            .into_iter()
+            .iter()
             .filter_map(|charge| allowance_charge_amount(charge, ctx.syntax))
             .sum(),
     );
@@ -3628,7 +3658,7 @@ fn br_co_19(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    for (index, period) in invoice_periods(ctx).into_iter().enumerate() {
+    for (index, period) in invoice_periods(ctx).iter().enumerate() {
         let has_date = match ctx.syntax {
             DocumentSyntax::Ubl => {
                 period.child("StartDate").is_some() || period.child("EndDate").is_some()
