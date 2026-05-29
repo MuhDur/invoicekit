@@ -622,3 +622,26 @@ performance** skills and closes the residuals.
   the remaining ~11 (AR/EC/CR/DO/ID/TH/TW/VN/CN/EG/IL + KR) stay on the EN16931/UBL representation pending verified specs.
 - **Next:** capability-matrix format update for the new native formats (central step: add myDATA/NAV/DTE/GST to the
   schema enum + entries); remaining medium/low audit findings; further L8 batches where specs are verifiable.
+
+
+### Turn 20 — 2026-05-29 — Audit medium/low bug-fix batch (11 crates) FIXED
+- **Workflow:** `coverage-p3-audit-bugfix` (22 agents, TDD fix → adversarial review, false-positive guard) over the
+  remaining confirmed audit findings. Independently re-verified; **full suite stayed green throughout (D17).**
+- **Fixed (real bugs, each with a regression test):**
+  - **Decimal-overflow DoS, group 2** — `format-cii` (`tax_inclusive - tax_exclusive` checked_sub), `format-gobl`
+    (`.sum()` → checked), `intake-witness` (AI-extracted-value arithmetic → checked). Same class as the validator.
+  - **Input-panic DoS** — `intake-pdf` cyclic embedded-files name-tree (added visited-set + depth cap) and UTF-16BE
+    surrogate-pair combining; `render-html` `parse_hex` multibyte-`&str`-slice panic (ASCII-validate before slicing);
+    `reconcile` webhook `delta.abs()` `i64::MIN` overflow.
+  - **JSON injection** — `transmit-peppol-partner` `render_submit_body` now builds JSON safely (was `format!` with
+    no escaping).
+  - **Fidelity** — `ir` `canonicalise_urn` trims before scheme-check (Eq-invariant for whitespace-padded URNs);
+    `report-sa-zatca` threads the real invoice UUID into the receipt; `render-pdf-postproc` embedded-file ordering
+    /indirect-ref handling; `format-ubl` records dropped bare `PaymentMeans` in the lossiness ledger.
+- **Caught by review (corrected):** the `render-html` regression test used a `é` that landed on a char boundary →
+  did NOT reproduce the panic; fixed to a boundary-straddling input (`"#aéZZZ"`) that genuinely pins it.
+- **Evidence:** `cargo test --workspace` = **2404 passed, 0 failed** (+~21 regression tests); `clippy --workspace
+  -D warnings` clean; UBS criticals on changed files 4→4 (no growth; the 4 are pre-existing FP class). 
+- **Audit triage COMPLETE:** all 22 confirmed findings resolved — 6 high (T17–T18) + the medium/low here — except
+  the 1 canonical false positive (reverted, T17). The deep-audit pass has converged.
+- **Skills used:** `multi-pass-bug-hunting`, `systematic-debugging`, `test-driven-development`, `verification-before-completion`, `ubs`.

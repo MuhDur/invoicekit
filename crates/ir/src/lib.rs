@@ -548,10 +548,20 @@ impl JurisdictionExtension {
             && bytes[3] == b':'
     }
 
-    /// Lower-cases the `urn:` scheme prefix and leaves everything after the
-    /// first colon untouched. Returns `urn` unchanged when it does not begin
-    /// with the URN scheme (validation handles rejection downstream).
+    /// Trims surrounding whitespace, lower-cases the `urn:` scheme prefix, and
+    /// leaves everything after the first colon untouched. Returns the trimmed
+    /// `urn` unchanged when it does not begin with the URN scheme (validation
+    /// handles rejection downstream).
+    ///
+    /// Trimming happens first so the scheme check sees the same bytes
+    /// [`Self::validate`] does; otherwise a whitespace-padded uppercase scheme
+    /// would be stored un-canonicalised and break the [`Eq`] invariant.
     fn canonicalise_urn(urn: String) -> String {
+        let urn = if urn.trim().len() == urn.len() {
+            urn
+        } else {
+            urn.trim().to_owned()
+        };
         if Self::has_urn_scheme(&urn) && urn.as_bytes()[..3].iter().any(u8::is_ascii_uppercase) {
             let mut canonical = String::with_capacity(urn.len());
             canonical.push_str("urn:");
@@ -1617,6 +1627,37 @@ mod tests {
         let input = "urn:invoicekit:ext:sa:zatca:2.0";
         let extension = JurisdictionExtension::new(input, json!({})).unwrap();
         assert_eq!(extension.urn, input);
+    }
+
+    #[test]
+    fn ebaq_extension_canonicalises_whitespace_padded_scheme() {
+        // Regression: `canonicalise_urn` used to inspect the untrimmed input,
+        // so a whitespace-padded uppercase scheme skipped canonicalisation and
+        // was stored verbatim, while `validate` trimmed before checking. That
+        // broke the `Eq` invariant against an unpadded lowercase equivalent and
+        // poisoned the canonical signing payload. Both `new` and the
+        // `Deserialize` path must trim and canonicalise to lowercase `urn:`.
+        let padded = JurisdictionExtension::new(
+            "  URN:invoicekit:ext:fr:ctc:1.0  ",
+            json!({"k": "v"}),
+        )
+        .expect("whitespace-padded uppercase scheme is valid");
+        let canonical = JurisdictionExtension::new(
+            "urn:invoicekit:ext:fr:ctc:1.0",
+            json!({"k": "v"}),
+        )
+        .expect("canonical form is valid");
+        assert_eq!(padded.urn, "urn:invoicekit:ext:fr:ctc:1.0");
+        assert_eq!(padded, canonical, "Eq invariant must hold after trimming");
+
+        let raw = json!({
+            "urn": "  URN:invoicekit:ext:fr:ctc:1.0  ",
+            "payload": {"k": "v"}
+        });
+        let deserialized: JurisdictionExtension =
+            serde_json::from_value(raw).expect("deserialize whitespace-padded scheme");
+        assert_eq!(deserialized.urn, "urn:invoicekit:ext:fr:ctc:1.0");
+        assert_eq!(deserialized, canonical);
     }
 
     #[test]

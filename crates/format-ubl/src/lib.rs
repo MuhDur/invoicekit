@@ -15,9 +15,10 @@ use invoicekit_canonical::{canonicalize_xml, XmlCanonicalizeError};
 use invoicekit_ir::{
     Attachment, CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly,
     DecimalValue, DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference,
-    DocumentType, IrError, Iso4217Code, JurisdictionExtension, LocalizedString, LossinessLedger,
-    MonetaryTotal, MoneyAmount, Party, PartyTaxId, PaymentInstruction, PaymentInstructionKind,
-    PaymentTerms, PostalAddress, Quantity, SchemaVersion, TaxCategorySummary,
+    DocumentType, IrError, Iso4217Code, JurisdictionExtension, LocalizedString, LossinessEntry,
+    LossinessLedger, MonetaryTotal, MoneyAmount, Party, PartyTaxId, PaymentInstruction,
+    PaymentInstructionKind, PaymentTerms, PostalAddress, Quantity, SchemaVersion,
+    TaxCategorySummary,
 };
 use quick_xml::events::{attributes::AttrError, BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
@@ -254,14 +255,25 @@ pub fn to_xml(document: &CommercialDocument) -> Result<String, UblError> {
 /// assert!(ledger.lost.is_empty());
 /// ```
 pub fn from_xml(input: &str) -> Result<(CommercialDocument, LossinessLedger), UblError> {
-    let document = parse_xml_document(input)?;
+    let (document, dropped_payment_means) = parse_xml_document(input)?;
     let serialized = to_xml(&document)?;
-    let reparsed = parse_xml_document(&serialized)?;
-    let ledger = LossinessLedger::from_roundtrip_comparison(&document, &reparsed, "format-ubl")?;
+    let (reparsed, _) = parse_xml_document(&serialized)?;
+    let mut ledger =
+        LossinessLedger::from_roundtrip_comparison(&document, &reparsed, "format-ubl")?;
+    if dropped_payment_means > 0 {
+        ledger.lost.push(LossinessEntry {
+            path: "/payment_instructions".to_owned(),
+            reason: format!(
+                "[format-ubl] dropped {dropped_payment_means} cac:PaymentMeans element(s) carrying \
+                 only cbc:PaymentMeansCode (no cbc:PaymentID or cac:PayeeFinancialAccount); the core \
+                 invoice model has no field for a bare payment-means code"
+            ),
+        });
+    }
     Ok((document, ledger))
 }
 
-fn parse_xml_document(input: &str) -> Result<CommercialDocument, UblError> {
+fn parse_xml_document(input: &str) -> Result<(CommercialDocument, usize), UblError> {
     let mut reader = Reader::from_str(input);
     reader.config_mut().trim_text(false);
     let mut xml_version = XmlVersion::default();
@@ -327,7 +339,9 @@ fn parse_xml_document(input: &str) -> Result<CommercialDocument, UblError> {
         }
     }
 
-    state.finish()
+    let dropped_payment_means = state.dropped_payment_means;
+    let document = state.finish()?;
+    Ok((document, dropped_payment_means))
 }
 
 /// Canonical Cargo package name of this crate.
@@ -373,6 +387,7 @@ struct ParseState {
     payment_terms_description: Option<String>,
     payment_instructions: Vec<PaymentInstruction>,
     current_payment: Option<PaymentBuilder>,
+    dropped_payment_means: usize,
     lines: Vec<DocumentLine>,
     current_line: Option<LineBuilder>,
     tax_summary: Vec<TaxCategorySummary>,
@@ -462,8 +477,11 @@ impl ParseState {
             self.tax_summary.push(summary);
         }
         if name == "PaymentMeans" {
-            if let Some(payment) = self.current_payment.take().and_then(PaymentBuilder::build) {
-                self.payment_instructions.push(payment);
+            if let Some(builder) = self.current_payment.take() {
+                match builder.build() {
+                    Some(payment) => self.payment_instructions.push(payment),
+                    None => self.dropped_payment_means += 1,
+                }
             }
         }
         if is_element(element, "UBLExtension", UBL_EXT_NAMESPACE_URI) {
@@ -2238,6 +2256,66 @@ mod tests {
             .unwrap();
         assert_eq!(payload["accounting_cost"], "COST-42");
         assert_eq!(payload["buyer_reference"], "BUYER-PO-7");
+    }
+
+    #[test]
+    fn bare_payment_means_code_drop_is_recorded_in_lossiness_ledger() {
+        // A schema-valid cac:PaymentMeans that carries only cbc:PaymentMeansCode
+        // (no cbc:PaymentID and no cac:PayeeFinancialAccount) has no home in the
+        // core invoice model, so the parser drops it. That drop must be visible in
+        // the lossiness ledger rather than vanishing silently.
+        let document = fixture(DocumentType::Invoice, 21);
+        let bare_payment_means = format!(
+            r#"<cac:PaymentMeans xmlns:cac="{UBL_CAC_NAMESPACE_URI}" xmlns:cbc="{UBL_CBC_NAMESPACE_URI}"><cbc:PaymentMeansCode>10</cbc:PaymentMeansCode></cac:PaymentMeans>"#
+        );
+        // Inject the bare element ahead of the fixture's real payment means,
+        // keeping the original element intact. The canonical serializer pins a
+        // namespace declaration on the original opening tag, so match the prefix.
+        let serialized = to_xml(&document).unwrap();
+        let anchor = "<cac:PaymentMeans";
+        assert!(
+            serialized.contains(anchor),
+            "fixture must serialize a payment means to anchor the injection"
+        );
+        let xml = serialized.replacen(anchor, &format!("{bare_payment_means}{anchor}"), 1);
+        assert_eq!(
+            xml.matches(anchor).count(),
+            2,
+            "injection should leave the original payment means in place"
+        );
+
+        let (parsed, ledger) = from_xml(&xml).expect("bare payment means should still parse");
+
+        // The bare element is dropped: only the original payment instruction survives.
+        assert_eq!(parsed.payment_instructions, document.payment_instructions);
+
+        let entry = ledger
+            .lost
+            .iter()
+            .find(|entry| entry.path == "/payment_instructions")
+            .expect("dropped bare PaymentMeans must produce a /payment_instructions lost entry");
+        assert!(
+            entry.reason.contains("PaymentMeans"),
+            "ledger reason should name the dropped element: {}",
+            entry.reason
+        );
+    }
+
+    #[test]
+    fn payment_means_with_payee_account_does_not_record_loss() {
+        // Control: a real payment means (with a payee financial account) must
+        // survive parsing and must NOT add a spurious lossiness entry.
+        let document = fixture(DocumentType::Invoice, 22);
+        let xml = to_xml(&document).unwrap();
+        let (parsed, ledger) = from_xml(&xml).expect("fixture invoice should parse");
+        assert_eq!(parsed.payment_instructions, document.payment_instructions);
+        assert!(
+            !ledger
+                .lost
+                .iter()
+                .any(|entry| entry.path == "/payment_instructions"),
+            "a preserved payment means must not report a lost /payment_instructions entry"
+        );
     }
 
     #[test]

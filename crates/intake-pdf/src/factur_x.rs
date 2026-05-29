@@ -21,9 +21,18 @@
 //! resolves the `EF.F` (or `EF.UF`) stream and returns its decoded
 //! bytes. Non-Factur-X PDFs return `Ok(None)`, never panic.
 
+use std::collections::HashSet;
+
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use crate::PdfTextError;
+
+/// Hard ceiling on embedded-files name-tree depth. PDF name trees are
+/// balanced and never approach this in practice (a tree this deep
+/// would hold astronomically many entries); the cap is purely a
+/// belt-and-braces guard against a hand-crafted malicious tree that
+/// the visited-set check below somehow misses.
+const MAX_NAME_TREE_DEPTH: usize = 256;
 
 /// Canonical Factur-X / ZUGFeRD attachment file names, in lookup
 /// order. The first match wins — newer Factur-X writers use the
@@ -102,7 +111,14 @@ fn extract_via_embedded_files_tree(
     let Ok(embedded_dict) = resolve_object(doc, embedded_files).and_then(Object::as_dict) else {
         return Ok(None);
     };
-    walk_name_tree(doc, embedded_dict)
+    // Seed the visited set with the root node's ObjectId (when it is
+    // reached by reference) so a Kid that points back at the root is
+    // recognised as a cycle on the first hop.
+    let mut visited = HashSet::new();
+    if let Object::Reference(id) = embedded_files {
+        visited.insert(*id);
+    }
+    walk_name_tree(doc, embedded_dict, &mut visited, 0)
 }
 
 fn extract_via_af_array(doc: &Document, catalog: &Dictionary) -> Option<Vec<u8>> {
@@ -123,7 +139,21 @@ fn extract_via_af_array(doc: &Document, catalog: &Dictionary) -> Option<Vec<u8>>
 /// expose `Names = [name1, ref1, name2, ref2, …]`; internal nodes
 /// expose `Kids = [refs to child name tree nodes]`. Returns the
 /// first Factur-X attachment found in a left-to-right walk.
-fn walk_name_tree(doc: &Document, node: &Dictionary) -> Result<Option<Vec<u8>>, PdfTextError> {
+///
+/// `visited` records every node `ObjectId` already on the current
+/// descent so a cyclic `Kids` graph (a node referencing an ancestor
+/// or itself) terminates instead of recursing forever; `depth` is a
+/// secondary belt-and-braces cap. Both guard against a maliciously
+/// crafted name tree triggering unbounded recursion / stack overflow.
+fn walk_name_tree(
+    doc: &Document,
+    node: &Dictionary,
+    visited: &mut HashSet<ObjectId>,
+    depth: usize,
+) -> Result<Option<Vec<u8>>, PdfTextError> {
+    if depth >= MAX_NAME_TREE_DEPTH {
+        return Ok(None);
+    }
     if let Ok(names) = node.get(b"Names") {
         if let Ok(array) = resolve_object(doc, names).and_then(Object::as_array) {
             let mut idx = 0;
@@ -146,10 +176,18 @@ fn walk_name_tree(doc: &Document, node: &Dictionary) -> Result<Option<Vec<u8>>, 
     if let Ok(kids) = node.get(b"Kids") {
         if let Ok(array) = resolve_object(doc, kids).and_then(Object::as_array) {
             for kid in array {
+                // Only follow a Kid we have not already entered on this
+                // descent. A self- or ancestor-referencing Kid would
+                // otherwise recurse forever and overflow the stack.
+                if let Object::Reference(id) = kid {
+                    if !visited.insert(*id) {
+                        continue;
+                    }
+                }
                 let Ok(child) = resolve_object(doc, kid).and_then(Object::as_dict) else {
                     continue;
                 };
-                if let Some(xml) = walk_name_tree(doc, child)? {
+                if let Some(xml) = walk_name_tree(doc, child, visited, depth + 1)? {
                     return Ok(Some(xml));
                 }
             }
@@ -387,6 +425,124 @@ mod tests {
     #[test]
     fn returns_none_for_pdf_without_attachment() {
         let pdf = build_plain_pdf();
+        assert_eq!(extract_factur_x_xml(&pdf).unwrap(), None);
+    }
+
+    /// A maliciously crafted embedded-files name tree whose `Kids`
+    /// form a cycle (root -> child -> root) must terminate instead of
+    /// recursing until the stack overflows. With the visited-set and
+    /// depth guards in place the walk simply finds no attachment and
+    /// returns `Ok(None)`.
+    #[test]
+    fn cyclic_name_tree_terminates() {
+        let mut doc = Document::with_version("1.7");
+
+        // Reserve the two name-tree node ids up front so each can point
+        // at the other (a two-node cycle).
+        let root_node_id = doc.new_object_id();
+        let child_node_id = doc.new_object_id();
+
+        doc.objects.insert(
+            root_node_id,
+            Object::Dictionary(dictionary! {
+                "Kids" => vec![Object::Reference(child_node_id)],
+            }),
+        );
+        doc.objects.insert(
+            child_node_id,
+            Object::Dictionary(dictionary! {
+                // Points back at the root: this is the cycle.
+                "Kids" => vec![Object::Reference(root_node_id)],
+            }),
+        );
+
+        // Minimal page tree so the catalog is well formed.
+        let content_id = doc.add_object(Stream::new(
+            Dictionary::new(),
+            Content {
+                operations: vec![Operation::new("q", vec![]), Operation::new("Q", vec![])],
+            }
+            .encode()
+            .unwrap(),
+        ));
+        let leaf_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => Object::Reference((0, 0)),
+            "Contents" => content_id,
+        });
+        let parent_id = doc.add_object(dictionary! {
+            "Type" => "Pages",
+            "Count" => 1,
+            "Kids" => vec![leaf_id.into()],
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+        });
+        if let Ok(Object::Dictionary(d)) = doc.get_object_mut(leaf_id) {
+            d.set("Parent", parent_id);
+        }
+
+        let names_id = doc.add_object(dictionary! {
+            "EmbeddedFiles" => Object::Reference(root_node_id),
+        });
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => parent_id,
+            "Names" => names_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        let mut pdf = Vec::new();
+        doc.save_to(&mut pdf).expect("serialize cyclic-tree pdf");
+
+        // The only contract that matters: this returns rather than
+        // overflowing the stack.
+        assert_eq!(extract_factur_x_xml(&pdf).unwrap(), None);
+    }
+
+    /// A self-referencing leaf (a node whose `Kids` contains its own
+    /// id) is the degenerate one-node cycle and must also terminate.
+    #[test]
+    fn self_referencing_name_tree_node_terminates() {
+        let mut doc = Document::with_version("1.7");
+        let node_id = doc.new_object_id();
+        doc.objects.insert(
+            node_id,
+            Object::Dictionary(dictionary! {
+                "Kids" => vec![Object::Reference(node_id)],
+            }),
+        );
+        let content_id = doc.add_object(Stream::new(
+            Dictionary::new(),
+            Content {
+                operations: vec![Operation::new("q", vec![]), Operation::new("Q", vec![])],
+            }
+            .encode()
+            .unwrap(),
+        ));
+        let leaf_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => Object::Reference((0, 0)),
+            "Contents" => content_id,
+        });
+        let parent_id = doc.add_object(dictionary! {
+            "Type" => "Pages",
+            "Count" => 1,
+            "Kids" => vec![leaf_id.into()],
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+        });
+        if let Ok(Object::Dictionary(d)) = doc.get_object_mut(leaf_id) {
+            d.set("Parent", parent_id);
+        }
+        let names_id = doc.add_object(dictionary! {
+            "EmbeddedFiles" => Object::Reference(node_id),
+        });
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => parent_id,
+            "Names" => names_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        let mut pdf = Vec::new();
+        doc.save_to(&mut pdf).expect("serialize self-cyclic pdf");
+
         assert_eq!(extract_factur_x_xml(&pdf).unwrap(), None);
     }
 

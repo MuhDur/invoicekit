@@ -48,10 +48,25 @@ fn parse_hex(s: &str) -> Result<(u8, u8, u8), &'static str> {
     if bytes.len() != 7 || bytes[0] != b'#' {
         return Err("color must be #RRGGBB");
     }
-    let r = u8::from_str_radix(&s[1..3], 16).map_err(|_| "bad red component")?;
-    let g = u8::from_str_radix(&s[3..5], 16).map_err(|_| "bad green component")?;
-    let b = u8::from_str_radix(&s[5..7], 16).map_err(|_| "bad blue component")?;
+    // Index the raw bytes rather than slicing the `&str`: a 7-byte input
+    // may contain a multibyte UTF-8 char, and slicing on a non-char
+    // boundary would panic. Each `hex_pair` validates ASCII hex digits.
+    let r = hex_pair(bytes[1], bytes[2]).ok_or("bad red component")?;
+    let g = hex_pair(bytes[3], bytes[4]).ok_or("bad green component")?;
+    let b = hex_pair(bytes[5], bytes[6]).ok_or("bad blue component")?;
     Ok((r, g, b))
+}
+
+/// Parse two ASCII hex-digit bytes into one octet. Returns `None` for any
+/// non-hex byte (including the continuation bytes of a multibyte UTF-8 char).
+fn hex_pair(hi: u8, lo: u8) -> Option<u8> {
+    let nibble = |c: u8| match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        b'A'..=b'F' => Some(c - b'A' + 10),
+        _ => None,
+    };
+    Some(nibble(hi)? << 4 | nibble(lo)?)
 }
 
 fn relative_luminance((r, g, b): (u8, u8, u8)) -> f64 {
@@ -100,5 +115,25 @@ mod tests {
         assert!(contrast_ratio("nope", "#fff").is_err());
         assert!(contrast_ratio("#fff", "#fff").is_err());
         assert!(contrast_ratio("#ZZZZZZ", "#ffffff").is_err());
+    }
+
+    #[test]
+    fn parse_hex_rejects_multibyte_without_panicking() {
+        // "#a" + "é" + "ZZZ" is exactly 7 bytes (1 + 1 + 2 + 3) and starts
+        // with '#', so the length/prefix check passes. Here 'é' spans bytes
+        // 2..4, so the old `&s[1..3]` slice ends at byte 3 — mid-'é', not a
+        // char boundary — which used to panic; it must now error instead.
+        let input = "#a\u{00e9}ZZZ";
+        assert_eq!(input.len(), 7);
+        assert!(!input.is_char_boundary(3), "input must straddle the 1..3 slice cut");
+        assert!(parse_hex(input).is_err());
+        assert!(contrast_ratio(input, "#ffffff").is_err());
+    }
+
+    #[test]
+    fn parse_hex_round_trips_valid_components() {
+        assert_eq!(parse_hex("#0a4d8c"), Ok((0x0a, 0x4d, 0x8c)));
+        assert_eq!(parse_hex("#FFFFFF"), Ok((0xff, 0xff, 0xff)));
+        assert_eq!(parse_hex("#000000"), Ok((0x00, 0x00, 0x00)));
     }
 }

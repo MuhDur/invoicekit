@@ -150,6 +150,7 @@ fn report_request(ubl_xml: Vec<u8>, mode: InvoiceMode) -> ZatcaReportRequest {
     // (ICV 1, genesis PIH) over the primary `saudi_invoice()` fixture.
     report_request_for(
         &saudi_invoice(),
+        INVOICE_UUID,
         ubl_xml,
         mode,
         SELLER_VAT,
@@ -494,6 +495,7 @@ fn saudi_exempt_invoice() -> CommercialDocument {
 /// position, so chained-document scenarios can advance the hash chain by hand.
 fn report_request_for(
     doc: &CommercialDocument,
+    uuid: &str,
     ubl_xml: Vec<u8>,
     mode: InvoiceMode,
     seller_vat: &str,
@@ -503,6 +505,7 @@ fn report_request_for(
     ZatcaReportRequest {
         tenant_id: TENANT.to_owned(),
         environment: ZatcaEnvironment::Compliance,
+        invoice_uuid: uuid.to_owned(),
         seller_vat_number: seller_vat.to_owned(),
         mode,
         invoice_counter_value: icv,
@@ -539,6 +542,7 @@ fn saudi_credit_note_clears_and_bundles() {
     let report = provider(None)
         .report(&report_request_for(
             &doc,
+            &ctx.uuid,
             ubl.clone().into_bytes(),
             InvoiceMode::Standard,
             SELLER_VAT,
@@ -547,6 +551,10 @@ fn saudi_credit_note_clears_and_bundles() {
         ))
         .unwrap();
     assert_eq!(report.envelope.clearance_kind, ZatcaClearanceKind::Cleared);
+    assert_eq!(
+        report.envelope.invoice_uuid, "uuid-sa-e2e-cn-0001",
+        "the receipt must echo the real cbc:UUID, not a counter-synthesized one"
+    );
 
     // The credit note's QR Tag 4 (invoice total, tax-inclusive) is 575.00 and
     // Tag 5 (VAT total) is 75.00 — half of the original invoice.
@@ -589,6 +597,7 @@ fn saudi_zero_rated_export_has_zero_vat_in_qr() {
     let report = provider(None)
         .report(&report_request_for(
             &doc,
+            &ctx.uuid,
             xml.into_bytes(),
             InvoiceMode::Standard,
             SELLER_VAT,
@@ -614,6 +623,7 @@ fn saudi_exempt_supply_has_zero_vat_and_clears() {
     let report = provider(None)
         .report(&report_request_for(
             &doc,
+            &ctx.uuid,
             xml.into_bytes(),
             InvoiceMode::Standard,
             SELLER_VAT,
@@ -636,6 +646,7 @@ fn saudi_pih_chain_links_consecutive_invoices() {
     let report1 = provider(None)
         .report(&report_request_for(
             &doc1,
+            &ctx1.uuid,
             ubl1.into_bytes(),
             InvoiceMode::Standard,
             SELLER_VAT,
@@ -644,6 +655,10 @@ fn saudi_pih_chain_links_consecutive_invoices() {
         ))
         .unwrap();
     assert_eq!(report1.envelope.invoice_counter_value, 1);
+    assert_eq!(
+        report1.envelope.invoice_uuid, "uuid-sa-chain-0001",
+        "chain link 1 must echo its own real cbc:UUID"
+    );
     let first_hash = report1.envelope.invoice_hash_hex;
     assert!(!first_hash.is_empty(), "invoice 1 must produce a hash");
 
@@ -679,6 +694,7 @@ fn saudi_simplified_rejection_is_a_receipt_not_an_error() {
     let report = provider(Some(ReportingStatus::Rejected))
         .report(&report_request_for(
             &doc,
+            &ctx.uuid,
             ubl.into_bytes(),
             InvoiceMode::Simplified,
             SELLER_VAT,
@@ -705,6 +721,7 @@ fn saudi_accepted_with_warnings_is_accepted() {
     let report = provider(Some(ReportingStatus::AcceptedWithWarnings))
         .report(&report_request_for(
             &doc,
+            &ctx.uuid,
             ubl.into_bytes(),
             InvoiceMode::Standard,
             SELLER_VAT,
@@ -736,6 +753,7 @@ fn saudi_invalid_vat_identifier_is_a_pre_wire_error() {
     let err = provider(None)
         .report(&report_request_for(
             &doc,
+            &ctx.uuid,
             ubl.into_bytes(),
             InvoiceMode::Standard,
             bad_vat,

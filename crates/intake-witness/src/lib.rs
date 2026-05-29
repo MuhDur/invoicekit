@@ -169,19 +169,53 @@ pub fn cross_examine(document: &ExtractedDocument) -> Result<WitnessOutcome, Wit
 fn check_line_totals(doc: &ExtractedDocument, tolerance: Decimal) -> Vec<WitnessFailure> {
     let mut out = Vec::new();
     for line in &doc.lines {
-        let expected = line.quantity * line.unit_price - line.line_discount + line.line_charge;
-        let diff = (expected - line.line_net_amount).abs();
-        if diff > tolerance {
-            let prefix = format!("/lines/{}", line.index);
+        let prefix = format!("/lines/{}", line.index);
+        let cited_fields = vec![
+            format!("{prefix}/quantity"),
+            format!("{prefix}/unit_price"),
+            format!("{prefix}/line_discount"),
+            format!("{prefix}/line_charge"),
+            format!("{prefix}/line_net_amount"),
+        ];
+        // checked_mul/checked_sub/checked_add: these are AI-extracted,
+        // attacker-controlled values, so a bounded × bounded (or a chain
+        // of sums) can still exceed Decimal::MAX. Treat overflow as a
+        // reconciliation failure (the witness must block emission) rather
+        // than panicking the runner.
+        let expected = line
+            .quantity
+            .checked_mul(line.unit_price)
+            .and_then(|product| product.checked_sub(line.line_discount))
+            .and_then(|net| net.checked_add(line.line_charge));
+        let Some(expected) = expected else {
             out.push(WitnessFailure {
                 rule_id: rules::LINE_TOTAL_RECONCILES.to_owned(),
-                cited_fields: vec![
-                    format!("{prefix}/quantity"),
-                    format!("{prefix}/unit_price"),
-                    format!("{prefix}/line_discount"),
-                    format!("{prefix}/line_charge"),
-                    format!("{prefix}/line_net_amount"),
-                ],
+                cited_fields,
+                message: format!(
+                    "line {} net unverifiable: quantity * unit_price - line_discount + line_charge overflows decimal range",
+                    line.index
+                ),
+            });
+            continue;
+        };
+        let Some(diff) = expected
+            .checked_sub(line.line_net_amount)
+            .map(|d| d.abs())
+        else {
+            out.push(WitnessFailure {
+                rule_id: rules::LINE_TOTAL_RECONCILES.to_owned(),
+                cited_fields,
+                message: format!(
+                    "line {} net unverifiable: difference against line_net_amount overflows decimal range",
+                    line.index
+                ),
+            });
+            continue;
+        };
+        if diff > tolerance {
+            out.push(WitnessFailure {
+                rule_id: rules::LINE_TOTAL_RECONCILES.to_owned(),
+                cited_fields,
                 message: format!(
                     "line {} net mismatch: expected {} but got {} (diff {})",
                     line.index, expected, line.line_net_amount, diff
@@ -193,25 +227,40 @@ fn check_line_totals(doc: &ExtractedDocument, tolerance: Decimal) -> Vec<Witness
 }
 
 fn check_vat_subtotals(doc: &ExtractedDocument, tolerance: Decimal) -> Vec<WitnessFailure> {
-    let line_vat_sum: Decimal = doc.lines.iter().map(|l| l.vat_amount).sum();
-    let diff = (line_vat_sum - doc.document_vat_total).abs();
-    if diff > tolerance {
+    let cited = || -> Vec<String> {
         let mut cited: Vec<String> = doc
             .lines
             .iter()
             .map(|l| format!("/lines/{}/vat_amount", l.index))
             .collect();
         cited.push("/document_vat_total".to_owned());
-        vec![WitnessFailure {
+        cited
+    };
+    // checked sum via try_fold: summing AI-extracted per-line VAT amounts
+    // (and subtracting the document total) can exceed Decimal::MAX. Treat
+    // overflow as a "subtotals do not close" failure rather than panicking.
+    let computed = doc
+        .lines
+        .iter()
+        .try_fold(Decimal::ZERO, |acc, l| acc.checked_add(l.vat_amount))
+        .and_then(|sum| sum.checked_sub(doc.document_vat_total).map(|d| (sum, d.abs())));
+    match computed {
+        None => vec![WitnessFailure {
             rule_id: rules::VAT_SUBTOTALS_CLOSE.to_owned(),
-            cited_fields: cited,
+            cited_fields: cited(),
+            message:
+                "vat subtotals unverifiable: line VAT sum overflows decimal range against document total"
+                    .to_owned(),
+        }],
+        Some((line_vat_sum, diff)) if diff > tolerance => vec![WitnessFailure {
+            rule_id: rules::VAT_SUBTOTALS_CLOSE.to_owned(),
+            cited_fields: cited(),
             message: format!(
                 "vat subtotals do not close: line sum {} vs document total {} (diff {})",
                 line_vat_sum, doc.document_vat_total, diff
             ),
-        }]
-    } else {
-        Vec::new()
+        }],
+        Some(_) => Vec::new(),
     }
 }
 
@@ -508,6 +557,62 @@ mod tests {
         );
         assert_eq!(rules::VAT_SUBTOTALS_CLOSE, "witness.vat.subtotals_close");
         assert_eq!(rules::VAT_ID_VALIDATES, "witness.vat_id.validates");
+    }
+
+    #[test]
+    fn line_total_overflow_is_a_finding_not_a_panic() {
+        // AI-extracted, attacker-controlled values: quantity * unit_price
+        // overflows Decimal::MAX. The witness must surface a failure that
+        // blocks emission, never panic the runner.
+        let mut doc = happy_doc();
+        doc.lines[0].quantity = Decimal::MAX;
+        doc.lines[0].unit_price = Decimal::new(2, 0);
+        let outcome = cross_examine(&doc).expect("overflow must not error the runner");
+        let lt: Vec<&WitnessFailure> = outcome
+            .failures()
+            .iter()
+            .filter(|f| f.rule_id == rules::LINE_TOTAL_RECONCILES)
+            .collect();
+        assert_eq!(lt.len(), 1);
+        assert!(lt[0].message.contains("unverifiable"), "got {:?}", lt[0]);
+        assert!(lt[0].cited_fields.contains(&"/lines/0/quantity".to_owned()));
+    }
+
+    #[test]
+    fn line_net_difference_overflow_is_a_finding_not_a_panic() {
+        // The product is in range but the difference against line_net_amount
+        // overflows: expected near +MAX, line_net_amount near -MAX.
+        let mut doc = happy_doc();
+        doc.lines[0].quantity = Decimal::new(1, 0);
+        doc.lines[0].unit_price = Decimal::MAX;
+        doc.lines[0].line_discount = Decimal::ZERO;
+        doc.lines[0].line_charge = Decimal::ZERO;
+        doc.lines[0].line_net_amount = Decimal::MIN;
+        let outcome = cross_examine(&doc).expect("overflow must not error the runner");
+        let lt: Vec<&WitnessFailure> = outcome
+            .failures()
+            .iter()
+            .filter(|f| f.rule_id == rules::LINE_TOTAL_RECONCILES)
+            .collect();
+        assert_eq!(lt.len(), 1);
+        assert!(lt[0].message.contains("unverifiable"), "got {:?}", lt[0]);
+    }
+
+    #[test]
+    fn vat_subtotal_sum_overflow_is_a_finding_not_a_panic() {
+        // Two near-MAX per-line VAT amounts overflow the running sum.
+        let mut doc = happy_doc();
+        doc.lines[0].vat_amount = Decimal::MAX;
+        doc.lines[1].vat_amount = Decimal::MAX;
+        let outcome = cross_examine(&doc).expect("overflow must not error the runner");
+        let vt: Vec<&WitnessFailure> = outcome
+            .failures()
+            .iter()
+            .filter(|f| f.rule_id == rules::VAT_SUBTOTALS_CLOSE)
+            .collect();
+        assert_eq!(vt.len(), 1);
+        assert!(vt[0].message.contains("unverifiable"), "got {:?}", vt[0]);
+        assert!(vt[0].cited_fields.contains(&"/document_vat_total".to_owned()));
     }
 
     #[test]

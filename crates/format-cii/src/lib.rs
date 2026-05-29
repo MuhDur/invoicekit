@@ -2247,8 +2247,17 @@ fn write_monetary_total(
     xml.push_str(r#"<ram:TaxTotalAmount currencyID=""#);
     write_xml_attr(currency, xml);
     xml.push_str(r#"">"#);
-    let tax_total = total.tax_inclusive_amount.inner() - total.tax_exclusive_amount.inner();
-    write_xml_text(&tax_total.to_string(), xml);
+    // Attacker-controlled amounts can push this difference past Decimal::MAX /
+    // MIN; `Decimal`'s `Sub` panics on overflow. Use `checked_sub` and emit an
+    // empty (still well-formed) element on overflow rather than panicking. For
+    // every real invoice the result is identical to the prior subtraction.
+    if let Some(tax_total) = total
+        .tax_inclusive_amount
+        .inner()
+        .checked_sub(total.tax_exclusive_amount.inner())
+    {
+        write_xml_text(&tax_total.to_string(), xml);
+    }
     xml.push_str("</ram:TaxTotalAmount>");
     write_preserved_xml_before(xml, document, container_path, None, "GrandTotalAmount")?;
     write_amount_text_element(
@@ -3854,6 +3863,37 @@ mod tests {
     #[test]
     fn crate_name_is_cargo_package_name() {
         assert_eq!(crate_name(), "invoicekit-format-cii");
+    }
+
+    /// `write_monetary_total` must not panic when the attacker-controlled
+    /// `tax_inclusive_amount - tax_exclusive_amount` difference overflows
+    /// `Decimal`. Pre-fix the unguarded subtraction panicked the serializer
+    /// (a denial of service through the public `to_xml` entry point).
+    #[test]
+    fn monetary_total_does_not_panic_on_decimal_difference_overflow() {
+        let mut document = fixture(DocumentType::Invoice, 0);
+        // Decimal::MIN minus a positive exclusive amount overflows the Sub impl.
+        document.monetary_total.tax_inclusive_amount = DecimalValue::new(Decimal::MIN);
+        document.monetary_total.tax_exclusive_amount =
+            DecimalValue::new(Decimal::ONE_HUNDRED);
+
+        let xml = to_xml(&document).expect("serializer must not panic on overflowing totals");
+        // Element is still emitted and well-formed (empty value on overflow).
+        assert!(xml.contains("<ram:TaxTotalAmount"));
+        assert!(xml.contains("</ram:TaxTotalAmount>"));
+    }
+
+    /// Normal (non-overflowing) totals must serialize the tax difference exactly
+    /// as the prior subtraction did: this guards the behavior-preserving fix.
+    #[test]
+    fn monetary_total_emits_exact_tax_difference_for_normal_amounts() {
+        let mut document = fixture(DocumentType::Invoice, 0);
+        document.monetary_total.tax_exclusive_amount = DecimalValue::new(Decimal::new(10000, 2));
+        document.monetary_total.tax_inclusive_amount = DecimalValue::new(Decimal::new(11900, 2));
+
+        let xml = to_xml(&document).expect("serializer must succeed on normal amounts");
+        // 119.00 - 100.00 = 19.00
+        assert!(xml.contains(">19.00</ram:TaxTotalAmount>"));
     }
 
     fn parse_document(xml: &str) -> CommercialDocument {

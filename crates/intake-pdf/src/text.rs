@@ -311,16 +311,23 @@ fn decode_string(obj: &Object) -> Option<String> {
     // BOM + UTF-16BE; we strip that special-case), fall back to a
     // best-effort Latin-1 mapping that's harmless for ASCII payloads.
     if bytes.starts_with(&[0xFE, 0xFF]) {
-        let mut chars = Vec::with_capacity(bytes.len() / 2);
+        // Decode UTF-16BE code units, combining surrogate pairs. A high
+        // surrogate (U+D800..=U+DBFF) followed by a low surrogate
+        // (U+DC00..=U+DFFF) encodes a single astral scalar value
+        // (U+10000..=U+10FFFF). Decoding each 16-bit unit on its own
+        // would drop both halves (surrogates are not scalar values),
+        // losing emoji and other supplementary-plane characters.
+        let units = (bytes.len() - 2) / 2;
+        let mut utf16 = Vec::with_capacity(units);
         let mut i = 2;
         while i + 1 < bytes.len() {
-            let cp = u32::from(bytes[i]) << 8 | u32::from(bytes[i + 1]);
-            if let Some(c) = char::from_u32(cp) {
-                chars.push(c);
-            }
+            utf16.push((u16::from(bytes[i]) << 8) | u16::from(bytes[i + 1]));
             i += 2;
         }
-        return Some(chars.into_iter().collect());
+        // Lossy decode keeps the well-formed prefix/suffix around any
+        // unpaired surrogate (replaced with U+FFFD) instead of bailing
+        // on the whole run.
+        return Some(String::from_utf16_lossy(&utf16));
     }
     if let Ok(s) = std::str::from_utf8(bytes) {
         return Some(s.to_owned());
@@ -511,6 +518,27 @@ mod tests {
         let bytes = make_pdf("BT\n/F1 12 Tf\n72 720 Td\n<FEFF00480069> Tj\nET\n");
         let st = extract_pdf_text(&bytes).unwrap();
         assert_eq!(st.pages[0].fragments[0].text, "Hi");
+    }
+
+    #[test]
+    fn combines_utf16be_surrogate_pairs_for_astral_code_points() {
+        // U+1F600 GRINNING FACE encodes in UTF-16BE as the surrogate
+        // pair D83D DE00. Decoding each 16-bit unit on its own drops
+        // both halves (surrogates are not scalar values); the pair must
+        // be combined into the single astral character. BOM = FE FF.
+        let bytes = make_pdf("BT\n/F1 12 Tf\n72 720 Td\n<FEFFD83DDE00> Tj\nET\n");
+        let st = extract_pdf_text(&bytes).expect("digital PDF should parse");
+        assert_eq!(st.pages[0].fragments[0].text, "\u{1F600}");
+    }
+
+    #[test]
+    fn utf16be_mixes_bmp_and_astral_code_points() {
+        // "A" (00 41) + U+1F4B0 MONEY BAG (D83D DCB0) + "Z" (00 5A).
+        // The astral glyph between two BMP glyphs must not corrupt
+        // the surrounding text. BOM = FE FF.
+        let bytes = make_pdf("BT\n/F1 12 Tf\n72 720 Td\n<FEFF0041D83DDCB0005A> Tj\nET\n");
+        let st = extract_pdf_text(&bytes).expect("digital PDF should parse");
+        assert_eq!(st.pages[0].fragments[0].text, "A\u{1F4B0}Z");
     }
 
     #[test]

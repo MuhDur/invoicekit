@@ -249,9 +249,14 @@ impl<'a> WebhookVerifier<'a> {
         let (timestamp, signature) = parse_signature_header(&headers.signature)?;
 
         // 5-minute replay window: reject anything older or newer than that.
+        // `timestamp` is attacker-controlled (parsed from the signature
+        // header), so the magnitude must be computed without `i64::abs`,
+        // which panics on `i64::MIN` (reachable via a crafted timestamp).
+        // `unsigned_abs` returns the magnitude as a `u64` and never overflows.
         let delta = now.saturating_sub(timestamp);
-        let abs_delta = delta.abs();
-        if abs_delta > REPLAY_WINDOW_SECONDS {
+        let abs_delta = delta.unsigned_abs();
+        // `REPLAY_WINDOW_SECONDS` is a small positive constant, so the cast is exact.
+        if abs_delta > REPLAY_WINDOW_SECONDS as u64 {
             return Err(WebhookVerifyError::ReplayWindowExceeded {
                 delta_seconds: delta,
             });
@@ -551,6 +556,31 @@ mod tests {
         assert!(matches!(
             err,
             WebhookVerifyError::ReplayWindowExceeded { delta_seconds: 301 }
+        ));
+    }
+
+    #[test]
+    fn verifier_handles_extreme_timestamp_without_overflow_panic() {
+        // Regression: a crafted `t=` header can drive `now - timestamp` to
+        // `i64::MIN` under saturating subtraction. The old `delta.abs()`
+        // panicked on `i64::MIN` (debug overflow), giving an attacker a
+        // denial-of-service via a single malformed webhook. The verifier
+        // must instead reject the timestamp as outside the replay window.
+        let ledger = EventIdLedger::new();
+        let verifier = WebhookVerifier::new(b"shh", &ledger);
+        // 64-char hex placeholder so we reach the window check first.
+        let signature = "0".repeat(64);
+        let headers = WebhookHeaders {
+            signature: format!("t={},v1={signature}", i64::MAX),
+            event_id: "evt-overflow".to_owned(),
+        };
+        // now = -1, timestamp = i64::MAX => saturating_sub == i64::MIN.
+        let err = verifier
+            .verify(&headers, "body", -1)
+            .expect_err("extreme timestamp must be rejected, not panic");
+        assert!(matches!(
+            err,
+            WebhookVerifyError::ReplayWindowExceeded { .. }
         ));
     }
 

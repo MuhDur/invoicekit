@@ -736,7 +736,14 @@ fn tax_summary_to_gobl(summary: &[TaxCategorySummary]) -> Value {
             })
         })
         .collect();
-    let sum: Decimal = summary.iter().map(|s| s.tax_amount.inner()).sum();
+    // checked_add via try_fold: summing many bounded tax amounts can still
+    // exceed Decimal::MAX. On overflow, emit "0" (this codec's default-when-
+    // unrepresentable convention) rather than panicking the adapter. Normal
+    // values are unaffected.
+    let sum = summary
+        .iter()
+        .try_fold(Decimal::ZERO, |acc, s| acc.checked_add(s.tax_amount.inner()))
+        .unwrap_or(Decimal::ZERO);
     json!({
         "categories": categories,
         "sum": sum.to_string(),
@@ -1159,6 +1166,54 @@ mod tests {
             .lost
             .iter()
             .any(|e| e.path == "/payee" && e.reason.contains("payee")));
+    }
+
+    #[test]
+    fn tax_summary_to_gobl_does_not_panic_on_sum_overflow() {
+        // Two tax amounts that each sit at Decimal::MAX overflow when summed.
+        // Before the checked-sum fix this panicked ("Addition overflowed").
+        let near_max = DecimalValue::new(Decimal::MAX);
+        let summary = vec![
+            TaxCategorySummary {
+                category_code: "VAT".into(),
+                taxable_amount: dv("0"),
+                tax_amount: near_max.clone(),
+                tax_rate: None,
+            },
+            TaxCategorySummary {
+                category_code: "VAT2".into(),
+                taxable_amount: dv("0"),
+                tax_amount: near_max,
+                tax_rate: None,
+            },
+        ];
+        let value = tax_summary_to_gobl(&summary);
+        // Categories are still emitted; the unrepresentable sum falls back to "0".
+        assert_eq!(
+            value.get("categories").and_then(Value::as_array).map(Vec::len),
+            Some(2)
+        );
+        assert_eq!(value.get("sum").and_then(Value::as_str), Some("0"));
+    }
+
+    #[test]
+    fn tax_summary_to_gobl_sums_normal_values_unchanged() {
+        let summary = vec![
+            TaxCategorySummary {
+                category_code: "VAT".into(),
+                taxable_amount: dv("100.00"),
+                tax_amount: dv("21.00"),
+                tax_rate: Some(dv("21.00")),
+            },
+            TaxCategorySummary {
+                category_code: "VAT-RED".into(),
+                taxable_amount: dv("50.00"),
+                tax_amount: dv("5.00"),
+                tax_rate: Some(dv("10.00")),
+            },
+        ];
+        let value = tax_summary_to_gobl(&summary);
+        assert_eq!(value.get("sum").and_then(Value::as_str), Some("26.00"));
     }
 
     #[test]

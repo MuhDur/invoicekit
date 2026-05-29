@@ -454,6 +454,11 @@ pub struct ZatcaReportRequest {
     pub tenant_id: String,
     /// Target environment (compliance/sandbox vs production).
     pub environment: ZatcaEnvironment,
+    /// Invoice `cbc:UUID` — the real universally-unique identifier the portal
+    /// keys clearance/reporting on, copied verbatim from
+    /// [`ZatcaUblContext::uuid`]. The envelope echoes this back unchanged; it is
+    /// never synthesized from the counter.
+    pub invoice_uuid: String,
     /// Seller's 15-digit Saudi VAT number (starts and ends with `3`).
     pub seller_vat_number: String,
     /// Invoice mode: clearance (Standard/B2B) vs reporting (Simplified/B2C).
@@ -622,22 +627,15 @@ impl ZatcaReportProvider for MockZatcaReportProvider {
         let reason = (clearance_kind == ZatcaClearanceKind::Rejected)
             .then(|| "ZATCA portal rejected the invoice".to_owned());
 
-        // The cleared invoice's hash becomes the PIH of the next invoice; the
-        // UUID is recovered from the QR Tag set when present, else synthesized
-        // from the counter so the receipt is self-describing.
-        let invoice_uuid = request
-            .qr_fields
-            .get(&QrField::Timestamp)
-            .map_or_else(
-                || format!("icv-{}", request.invoice_counter_value),
-                |_| format!("uuid-icv-{}", request.invoice_counter_value),
-            );
+        // The cleared invoice's hash becomes the PIH of the next invoice. The
+        // receipt echoes the request's real `cbc:UUID` verbatim — never a value
+        // synthesized from the counter.
 
         Ok(ZatcaReport {
             envelope: ZatcaReportEnvelope {
                 clearance_kind,
                 mode: request.mode,
-                invoice_uuid,
+                invoice_uuid: request.invoice_uuid.clone(),
                 invoice_hash_hex: stamp.invoice_sha256_hex.clone(),
                 invoice_counter_value: request.invoice_counter_value,
                 recorded_at: self.fixed_recorded_at.clone(),
@@ -873,6 +871,7 @@ mod tests {
         ZatcaReportRequest {
             tenant_id: "tenant_sa".to_owned(),
             environment: ZatcaEnvironment::Compliance,
+            invoice_uuid: ctx(mode).uuid,
             seller_vat_number: SELLER_VAT.to_owned(),
             mode,
             invoice_counter_value: 1,
@@ -948,6 +947,24 @@ mod tests {
         assert!(report.envelope.reason.is_none());
         assert!(!report.qr_tlv.is_empty());
         assert_eq!(report.envelope.invoice_counter_value, 1);
+    }
+
+    #[test]
+    fn report_echoes_real_invoice_uuid_not_synthesized_icv() {
+        // Regression: the receipt's invoice_uuid must be the real cbc:UUID from
+        // the serialization context, echoed verbatim — never a value fabricated
+        // from the Invoice Counter Value (the old `uuid-icv-{icv}` synthesis).
+        let xml = to_zatca_ubl_xml(&sample_invoice(), &ctx(ZatcaInvoiceMode::Standard))
+            .unwrap()
+            .into_bytes();
+        let mut request = sample_request(xml, ZatcaInvoiceMode::Standard);
+        request.invoice_uuid = "uuid-sa-0001".to_owned();
+        request.invoice_counter_value = 7;
+        let report = provider().report(&request).unwrap();
+        assert_eq!(report.envelope.invoice_uuid, "uuid-sa-0001");
+        // The counter must not leak into the UUID under any synthesis scheme.
+        assert_ne!(report.envelope.invoice_uuid, "uuid-icv-7");
+        assert_ne!(report.envelope.invoice_uuid, "icv-7");
     }
 
     #[test]

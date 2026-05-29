@@ -418,17 +418,35 @@ impl GatewayAdapter for PartnerPeppolAdapter {
 
 fn render_submit_body(vendor: PartnerVendor, legal_entity_id: &str, xml: &str) -> String {
     let xml_b64 = base64_encode(xml.as_bytes());
-    match vendor {
-        PartnerVendor::Storecove => format!(
-            r#"{{"legal_entity_id":"{legal_entity_id}","document":{{"document_type":"invoice","raw_document_data":{{"document":"{xml_b64}","parse":true,"document_type":"ubl"}}}}}}"#
-        ),
-        PartnerVendor::Ecosio => format!(
-            r#"{{"sender":{{"id":"{legal_entity_id}"}},"payload":"{xml_b64}","syntax":"UBL"}}"#
-        ),
-        PartnerVendor::B2brouter => {
-            format!(r#"{{"project_id":"{legal_entity_id}","xml_base64":"{xml_b64}"}}"#)
-        }
-    }
+    // Build the body with `serde_json` rather than `format!` so that
+    // `legal_entity_id` (operator-controlled, may contain `"`, `\`, or
+    // control characters) is correctly escaped. `xml_b64` is already a
+    // base64 string, but routing it through the value keeps the whole
+    // body canonically encoded. For normal values this yields the same
+    // JSON the hand-written literals produced.
+    let body = match vendor {
+        PartnerVendor::Storecove => serde_json::json!({
+            "legal_entity_id": legal_entity_id,
+            "document": {
+                "document_type": "invoice",
+                "raw_document_data": {
+                    "document": xml_b64,
+                    "parse": true,
+                    "document_type": "ubl",
+                },
+            },
+        }),
+        PartnerVendor::Ecosio => serde_json::json!({
+            "sender": { "id": legal_entity_id },
+            "payload": xml_b64,
+            "syntax": "UBL",
+        }),
+        PartnerVendor::B2brouter => serde_json::json!({
+            "project_id": legal_entity_id,
+            "xml_base64": xml_b64,
+        }),
+    };
+    body.to_string()
 }
 
 fn decode_submit_response(
@@ -773,6 +791,42 @@ mod tests {
         // <x/> base64 = "PHgvPg=="
         assert!(body.contains("PHgvPg=="));
         assert!(body.contains("document_type"));
+    }
+
+    #[test]
+    fn render_submit_body_escapes_legal_entity_id_for_every_vendor() {
+        // A legal-entity ID containing a JSON metacharacter must not be
+        // able to break out of its string literal or inject sibling keys.
+        // Previously the body was assembled with `format!` and a raw
+        // interpolation, so a `"` produced malformed / attacker-shaped JSON.
+        let nasty = r#"x","injected":"yes"#;
+        for vendor in [
+            PartnerVendor::Storecove,
+            PartnerVendor::Ecosio,
+            PartnerVendor::B2brouter,
+        ] {
+            let body = render_submit_body(vendor, nasty, "<x/>");
+            // The body must be valid JSON.
+            let parsed: serde_json::Value =
+                serde_json::from_str(&body).expect("render_submit_body must emit valid JSON");
+            // The literal raw ID must NOT appear unescaped in the wire bytes:
+            // a `"` from the ID is escaped to `\"`, so the raw substring is absent.
+            assert!(
+                !body.contains(r#""injected":"yes""#),
+                "raw injected key leaked into {vendor:?} body: {body}"
+            );
+            // And the ID round-trips intact at its proper location.
+            let recovered = match vendor {
+                PartnerVendor::Storecove => parsed["legal_entity_id"].as_str(),
+                PartnerVendor::Ecosio => parsed["sender"]["id"].as_str(),
+                PartnerVendor::B2brouter => parsed["project_id"].as_str(),
+            };
+            assert_eq!(
+                recovered,
+                Some(nasty),
+                "legal_entity_id must round-trip through the {vendor:?} body"
+            );
+        }
     }
 
     #[test]

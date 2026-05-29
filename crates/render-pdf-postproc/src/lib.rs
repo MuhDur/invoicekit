@@ -249,10 +249,21 @@ fn merged_names_id(
     };
 
     let mut embedded_files = match names.get(b"EmbeddedFiles") {
+        Ok(Object::Reference(id)) => doc
+            .get_object(*id)
+            .ok()
+            .and_then(|object| object.as_dict().ok())
+            .cloned()
+            .unwrap_or_default(),
         Ok(Object::Dictionary(dict)) => dict.clone(),
         _ => Dictionary::new(),
     };
     let mut entries = match embedded_files.get(b"Names") {
+        Ok(Object::Reference(id)) => doc
+            .get_object(*id)
+            .ok()
+            .and_then(|object| object.as_array().ok())
+            .map_or_else(Vec::new, |items| without_existing_filename(items, filename)),
         Ok(Object::Array(items)) => without_existing_filename(items, filename),
         _ => Vec::new(),
     };
@@ -261,10 +272,38 @@ fn merged_names_id(
         StringFormat::Literal,
     ));
     entries.push(filespec_id.into());
+    let entries = sort_name_tree_entries(&entries);
     embedded_files.set("Names", entries);
     names.set("EmbeddedFiles", embedded_files);
 
     Ok(doc.add_object(names))
+}
+
+/// Re-sort a flat name-tree `Names` array (`[key1, val1, key2, val2,
+/// …]`) into ascending lexical key order, as required by ISO 32000
+/// 7.9.6. Keys are compared as raw byte strings. Non-string keys or a
+/// trailing unpaired element are left in place at the end so the
+/// function never loses data on a malformed input.
+fn sort_name_tree_entries(entries: &[Object]) -> Vec<Object> {
+    let mut pairs: Vec<(&Object, &Object)> = Vec::with_capacity(entries.len() / 2);
+    let mut leftover: Vec<&Object> = Vec::new();
+    for chunk in entries.chunks(2) {
+        match chunk {
+            [key @ Object::String(..), value] => pairs.push((key, value)),
+            other => leftover.extend(other.iter()),
+        }
+    }
+    pairs.sort_by(|(a, _), (b, _)| match (a, b) {
+        (Object::String(a_bytes, _), Object::String(b_bytes, _)) => a_bytes.cmp(b_bytes),
+        _ => std::cmp::Ordering::Equal,
+    });
+    let mut sorted = Vec::with_capacity(entries.len());
+    for (key, value) in pairs {
+        sorted.push(key.clone());
+        sorted.push(value.clone());
+    }
+    sorted.extend(leftover.into_iter().cloned());
+    sorted
 }
 
 fn without_existing_filename(items: &[Object], filename: &str) -> Vec<Object> {
@@ -548,6 +587,57 @@ mod tests {
             catalog.set("Names", names_id);
             catalog.set("AF", vec![Object::Reference(existing_filespec_id)]);
             catalog.set("Metadata", metadata_id);
+        }
+
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        bytes
+    }
+
+    /// Like [`synthesize_pdf_with_existing_catalog_entries`], but the
+    /// catalog's `Names`, its `EmbeddedFiles` sub-dictionary, and that
+    /// sub-dictionary's `Names` array are each stored as indirect
+    /// objects (`Object::Reference`) rather than inline. ISO 32000
+    /// permits any of these to be a reference, so a conforming
+    /// post-processor must resolve them before merging.
+    fn synthesize_pdf_with_indirect_embedded_files() -> Vec<u8> {
+        let mut doc = Document::load_mem(&synthesize_pdf_for_profile(101)).unwrap();
+        let catalog_id = super::catalog_id(&doc).unwrap();
+        let existing_xml_id = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "EmbeddedFile",
+                "Subtype" => Object::Name(b"text/xml".to_vec()),
+            },
+            b"<existing/>".to_vec(),
+        ));
+        let existing_filespec_id = doc.add_object(dictionary! {
+            "Type" => "Filespec",
+            "F" => Object::String(b"existing.xml".to_vec(), StringFormat::Literal),
+            "UF" => Object::String(b"existing.xml".to_vec(), StringFormat::Literal),
+            "AFRelationship" => Object::Name(b"Data".to_vec()),
+            "EF" => dictionary! {
+                "F" => existing_xml_id,
+                "UF" => existing_xml_id,
+            },
+        });
+        // The leaf name array is itself an indirect object.
+        let inner_names_id = doc.add_object(Object::Array(vec![
+            Object::String(b"existing.xml".to_vec(), StringFormat::Literal),
+            existing_filespec_id.into(),
+        ]));
+        // The EmbeddedFiles sub-dictionary is an indirect object.
+        let embedded_files_id = doc.add_object(dictionary! {
+            "Names" => Object::Reference(inner_names_id),
+        });
+        // The Names dictionary itself is an indirect object whose
+        // EmbeddedFiles entry is also a reference.
+        let names_id = doc.add_object(dictionary! {
+            "EmbeddedFiles" => Object::Reference(embedded_files_id),
+        });
+
+        if let Ok(Object::Dictionary(catalog)) = doc.get_object_mut(catalog_id) {
+            catalog.set("Names", Object::Reference(names_id));
+            catalog.set("AF", vec![Object::Reference(existing_filespec_id)]);
         }
 
         let mut bytes = Vec::new();
@@ -875,5 +965,110 @@ mod tests {
     fn embed_factur_x_rejects_garbage_input() {
         let err = embed_factur_x(b"not a pdf", b"<x/>", super::ZugferdProfile::Basic).unwrap_err();
         assert!(matches!(err, super::PostprocError::Parse(_)));
+    }
+
+    /// Regression: a pre-existing embedded file must survive even when
+    /// the catalog stores `Names`, `EmbeddedFiles`, and the inner
+    /// `Names` array as indirect references. Before the fix,
+    /// `merged_names_id` only matched `Object::Dictionary` /
+    /// `Object::Array` inline and silently dropped the prior
+    /// attachment when any of those were a `Reference`.
+    #[test]
+    fn embed_factur_x_preserves_attachment_behind_indirect_embedded_files() {
+        let pdf = synthesize_pdf_with_indirect_embedded_files();
+        let xml = xml_for_profile(super::ZugferdProfile::Basic, 0);
+        let patched = embed_factur_x(&pdf, &xml, super::ZugferdProfile::Basic).unwrap();
+        let doc = Document::load_mem(&patched).unwrap();
+        let catalog_id = super::catalog_id(&doc).unwrap();
+        let catalog = doc.get_object(catalog_id).unwrap().as_dict().unwrap();
+
+        let names_id = catalog.get(b"Names").unwrap().as_reference().unwrap();
+        let names = doc.get_object(names_id).unwrap().as_dict().unwrap();
+        let embedded_files = names.get(b"EmbeddedFiles").unwrap().as_dict().unwrap();
+        let name_entries = embedded_files.get(b"Names").unwrap().as_array().unwrap();
+        assert_eq!(
+            name_entries.len(),
+            4,
+            "both the pre-existing and new attachment must be present"
+        );
+        assert!(name_entries
+            .iter()
+            .any(|entry| is_string(entry, b"existing.xml")));
+        assert!(name_entries
+            .iter()
+            .any(|entry| is_string(entry, b"factur-x.xml")));
+    }
+
+    /// Regression: the leaf `Names` array of a PDF name tree must be
+    /// sorted lexically by key (ISO 32000 7.9.6). Before the fix the
+    /// new `(filename, filespec)` pair was always appended to the end,
+    /// leaving the array out of order whenever the new key sorts
+    /// before a pre-existing key.
+    #[test]
+    fn embed_factur_x_keeps_embedded_files_names_array_sorted() {
+        // Pre-existing key "z-other.xml" sorts after the injected
+        // "factur-x.xml", so a naive append produces a non-sorted
+        // array.
+        let mut doc = Document::load_mem(&synthesize_pdf_for_profile(102)).unwrap();
+        let catalog_id = super::catalog_id(&doc).unwrap();
+        let existing_xml_id = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "EmbeddedFile",
+                "Subtype" => Object::Name(b"text/xml".to_vec()),
+            },
+            b"<existing/>".to_vec(),
+        ));
+        let existing_filespec_id = doc.add_object(dictionary! {
+            "Type" => "Filespec",
+            "F" => Object::String(b"z-other.xml".to_vec(), StringFormat::Literal),
+            "UF" => Object::String(b"z-other.xml".to_vec(), StringFormat::Literal),
+            "AFRelationship" => Object::Name(b"Data".to_vec()),
+            "EF" => dictionary! {
+                "F" => existing_xml_id,
+                "UF" => existing_xml_id,
+            },
+        });
+        let names_id = doc.add_object(dictionary! {
+            "EmbeddedFiles" => dictionary! {
+                "Names" => vec![
+                    Object::String(b"z-other.xml".to_vec(), StringFormat::Literal),
+                    existing_filespec_id.into(),
+                ],
+            },
+        });
+        if let Ok(Object::Dictionary(catalog)) = doc.get_object_mut(catalog_id) {
+            catalog.set("Names", Object::Reference(names_id));
+            catalog.set("AF", vec![Object::Reference(existing_filespec_id)]);
+        }
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+
+        let xml = xml_for_profile(super::ZugferdProfile::Basic, 0);
+        let patched = embed_factur_x(&bytes, &xml, super::ZugferdProfile::Basic).unwrap();
+        let patched_doc = Document::load_mem(&patched).unwrap();
+        let patched_catalog_id = super::catalog_id(&patched_doc).unwrap();
+        let patched_catalog = patched_doc
+            .get_object(patched_catalog_id)
+            .unwrap()
+            .as_dict()
+            .unwrap();
+        let names_ref = patched_catalog.get(b"Names").unwrap().as_reference().unwrap();
+        let names = patched_doc.get_object(names_ref).unwrap().as_dict().unwrap();
+        let embedded_files = names.get(b"EmbeddedFiles").unwrap().as_dict().unwrap();
+        let entries = embedded_files.get(b"Names").unwrap().as_array().unwrap();
+
+        let keys: Vec<&[u8]> = entries
+            .iter()
+            .step_by(2)
+            .filter_map(|entry| match entry {
+                Object::String(value, _) => Some(value.as_slice()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            keys,
+            vec![b"factur-x.xml" as &[u8], b"z-other.xml"],
+            "name-tree keys must be in lexical order per ISO 32000 7.9.6"
+        );
     }
 }
