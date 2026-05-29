@@ -309,11 +309,15 @@ impl AuditEventStore for InMemoryAuditStore {
                 .then_with(|| a.event_id.as_str().cmp(b.event_id.as_str()))
         });
 
+        // The cursor is client-supplied and decodes to an unbounded `usize`, so
+        // clamp it to the result length before slicing: an out-of-range cursor
+        // must yield an empty final page, never a panic. `saturating_add` keeps
+        // a near-`usize::MAX` start from overflowing when the page size is added.
         let start = match &query.cursor {
-            Some(c) => decode_cursor(c)?,
+            Some(c) => decode_cursor(c)?.min(filtered.len()),
             None => 0,
         };
-        let end = (start + query.page_size).min(filtered.len());
+        let end = start.saturating_add(query.page_size).min(filtered.len());
         let page: Vec<AuditEvent> = filtered[start..end].iter().map(|e| (*e).clone()).collect();
         let next_cursor = if end < filtered.len() {
             Some(encode_cursor(end))
@@ -744,6 +748,30 @@ mod tests {
         for id in &p2_ids {
             assert!(!p1_ids.contains(id), "cursor must not double-emit");
         }
+    }
+
+    #[test]
+    fn query_out_of_range_cursor_yields_empty_page_not_panic() {
+        // The cursor is a client-controlled opaque token. A value past the end
+        // of the result set must yield an empty final page, never panic the
+        // `filtered[start..end]` slice (start > len) or overflow the
+        // `start + page_size` offset. `v1.ffff...f` decodes to usize::MAX on a
+        // 64-bit host, exercising both the out-of-range slice and the add.
+        let store = InMemoryAuditStore::new();
+        let ctx = seed_store(&store);
+        let page = handle_audit_query(
+            &ctx,
+            &store,
+            AuditQuery {
+                tenant_id: ctx.tenant_id.clone(),
+                page_size: 50,
+                cursor: Some("v1.ffffffffffffffff".into()),
+                ..AuditQuery::for_tenant(ctx.tenant_id.clone())
+            },
+        )
+        .expect("an out-of-range cursor must be handled gracefully, not panic");
+        assert_eq!(page.count, 0, "out-of-range cursor returns an empty page");
+        assert!(page.next_cursor.is_none());
     }
 
     #[test]

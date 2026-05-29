@@ -668,7 +668,7 @@ performance** skills and closes the residuals.
 | Full end-to-end test coverage | ✅ 2404 tests, every country crate has offline E2E |
 | Skill matrix + skills-used log | ✅ §4 + per-turn entries |
 | Code quality (simplify-and-refactor) | ✅ all 109 crates evaluated to convergence |
-| Audit skills (multi-pass bug hunt) | ✅ CONVERGED (T26): 50 bugs fixed (R1 22, R2 9, R3 9, class-sweep 10); confirming re-sweep 216 sites / 0 unguarded across all 5 classes; trend 22→9→9→0. (1 integer-div-by-zero lead → 6th-class sweep pending) |
+| Audit skills (multi-pass bug hunt) | ✅ CONVERGED (T27): 51 bugs fixed (R1 22, R2 9, R3 9, class-sweep 10, int-arith 1); 6 dangerous classes all at literal zero (273 sites triaged across two confirming sweeps); trend 22→9→9→0 |
 | Performance | ✅ already engineered + CI-gated + budgeted (D19) |
 | Release / build outputs | ✅ v0.1.1 published, all artifacts |
 
@@ -826,3 +826,24 @@ performance** skills and closes the residuals.
 - **Skills used:** `multi-pass-bug-hunting` (convergence confirmation), `verification-before-completion`.
 - **Next:** (1) 6th-class enumeration + fix (integer div/rem-by-zero); (2) then the deferred D20 strand — the
   targeted `simplify-and-refactor-code-isomorphically` pass over the guard/helper code added across rounds 1–5.
+
+### Turn 27 — 2026-05-29 — 6th class (integer-arithmetic panics) swept + 1 bug fixed → all classes zero
+- **Integer-arithmetic class sweep** (read-only, 2 lenses, 57 sites examined):
+  - **divide/remainder-by-zero — CLEAN (0/19).** The stripe lead was a FALSE alarm: `unit_price_for`'s only caller
+    clamps `quantity = line.quantity.unwrap_or(1).max(1)`, so the divisor is provably ≥1. Every other integer
+    `/`/`%` divides by a non-zero constant (check-digit moduli, `10^exponent`) or a guarded divisor (`money`
+    `AllocateZeroSumRatios`, `jitter_cap.saturating_add(1)`, `(denominator>0).then(...)`).
+  - **indexing / unsigned-underflow — 1 unguarded (HIGH), now FIXED.** `managed-api/src/audit_log.rs` audit-log
+    paging decoded a client-supplied `?cursor=` opaque token to an unbounded `usize`, then `filtered[start..end]`
+    panicked when `start > filtered.len()` (end clamped to len ⇒ start > end) and `start + page_size` could
+    overflow `usize`. Reachable by any authenticated tenant ⇒ request-crash DoS. **Fix:** clamp the decoded start
+    with `.min(filtered.len())` and use `saturating_add` for the end, so an out-of-range cursor yields an empty
+    final page. Regression test `query_out_of_range_cursor_yields_empty_page_not_panic` uses a `usize::MAX` cursor
+    (exercises both the slice and the add). All other indexing sites confirmed guarded (`.position()`/`.find()`/
+    `.rfind()`-derived offsets, length-checked rows, `.min(len)` windows, `.get()` fallbacks).
+- **Central verification:** `cargo test --workspace` = **2456 passed / 0 failed**; clippy `-D warnings` clean;
+  scope = `crates/managed-api/src/audit_log.rs` only.
+- **All 6 dangerous classes are now at literal zero. Total campaign: 51 bugs fixed, every one regression-tested.**
+- **Skills used:** `multi-pass-bug-hunting` (integer-arithmetic class), `verification-before-completion`.
+- **Audit phase CLOSED.** Pivot to the deferred D20 strand: targeted `simplify-and-refactor-code-isomorphically`
+  over the guard/helper code added across the campaign (the parallel code-quality directive).
