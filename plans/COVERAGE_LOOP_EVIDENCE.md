@@ -913,3 +913,38 @@ performance** skills and closes the residuals.
   `report-in-gst` only. Existing byte-determinism/lifecycle tests unaffected (new fields are deterministic).
 - **Skills used:** `testing-real-service-e2e-no-mocks` (assertions over real INV-01 output), `reality-check-for-
   project` (honest assess-before-implement, D18 fabrication guard), `verification-before-completion`.
+
+### Turn 30 — 2026-05-29 — Coverage-gap census across all serializers + it-sdi close; honest reclassification
+- **Coverage-gap census** (read-only, 4 agents, **42 crates examined**): **36 documented gaps** — 12 tagged
+  closeable-from-IR, 11 needs-IR-field, 13 needs-external-schema. The 13 needs-external-schema are mostly the
+  by-design **opaque-signed-payload** crates (AR/CO/CR/DO/EC/CN/EG accept the signed national XML/JSON as an opaque
+  blob — the BYOK/partner model, NOT a true gap).
+- **Gap-close workflow (6 crates) STALLED** → `TaskStop`ped. An agent hung (~14 min total silence, 0-byte output,
+  empty git tree → no work lost). Signal: broad fire-and-forget gap-closing of national formats is unsafe.
+- **Ground-truth verification exposed the census as a LEAD GENERATOR, not truth** (every claim must be checked
+  against real code + an authoritative schema before emitting):
+  - **FALSE POSITIVES:** `profile-xrechnung` BG-6 contact + BG-10 payee — `format-ubl` ALREADY emits `cac:Contact`
+    (correct Name/Telephone/ElectronicMail order from `party.contact`) and `cac:PayeeParty` (from `document.payee`).
+    The census agent read the profile in isolation, not its `format-ubl` base.
+  - **MISCLASSIFIED → needs-IR-field:** `format-ubl`/`format-cii` document references. `DocumentReference.kind` is
+    a FREE-FORM `String` with an inconsistent vocabulary ("original-invoice", "credit-note-original-invoice",
+    "rectified-invoice", "factura", "cfdi-relacion-01", …) and NO canonical "order" kind. Mapping it to specific
+    UBL/CII elements (`cac:OrderReference` vs `cac:BillingReference`) would be fabrication-adjacent guessing.
+    Closing it safely needs a normalized `DocumentReferenceKind` in the IR — a foundation-model decision deferred
+    to the principal, NOT auto-decided in loop mode.
+- **VERIFIED-REAL + safely CLOSED — `report-it-sdi` (FatturaPA v1.2):** ground-truth-confirmed both fields absent,
+  then added bedrock elements from single IR values (low fabrication risk, unambiguous XSD placement):
+  - `DatiGeneraliDocumento/ImportoTotaleDocumento` ← `monetary_total.payable_amount` (gross grand total).
+  - `DettaglioLinee/UnitaMisura` ← `line.unit_code` (emitted when present, after `Quantita`).
+  Assertions added to `fatturapa_contains_mandatory_structure` (`122.00`, `C62`). 2457 tests green, clippy clean.
+- **VERIFIED-REAL but DEFERRED (need a vendored national schema to confirm exact element names — emitting without
+  one is a D18 risk):** `report-cl-dte` SII Emisor/Receptor address elements (DirOrigen/CmnaOrigen/DirRecep/
+  CmnaRecep), `report-pl-ksef` FA(3) P_6 (sale date) / P_8A (unit), `report-br-nfe` `<ide>` subset (idDest/tpAmb
+  closeable; cMunFG needs the IBGE municipality codelist; cNF is a generated random). Logged as honest residuals.
+- **Boundary reached:** autonomous coverage-deepening is now bounded by (a) a principal decision on IR reference-
+  kind normalization, and (b) vendoring licensed national schemas (D15) to confirm element names without guessing.
+  Both are out of scope for fabrication-risk-prone autonomous loop work. The IN GST + it-sdi closes are the clean,
+  schema-unambiguous wins; the rest are honestly documented.
+- **Skills used:** `multi-pass-bug-hunting` (census), `reality-check-for-project` (verify-before-act, caught the
+  census false positives; D18 held — declined to guess element names), `testing-real-service-e2e-no-mocks`,
+  `verification-before-completion`.

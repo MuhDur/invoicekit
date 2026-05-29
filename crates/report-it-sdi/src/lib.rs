@@ -144,6 +144,16 @@ pub fn to_fattura_pa_xml(
     el(&mut out, 4, "Divisa", document.currency.as_str());
     el(&mut out, 4, "Data", document.issue_date.as_str());
     el(&mut out, 4, "Numero", document.document_number.as_str());
+    // `ImportoTotaleDocumento` is the document grand total (gross), a standard
+    // FatturaPA v1.2 element. It sits after the core fields in the XSD order;
+    // the intervening optional elements (DatiRitenuta, DatiBollo, …) are not
+    // emitted, so placing it directly before the close is order-correct.
+    el(
+        &mut out,
+        4,
+        "ImportoTotaleDocumento",
+        &fmt_amount(document.monetary_total.payable_amount.inner()),
+    );
     close(&mut out, 3, "DatiGeneraliDocumento");
     close(&mut out, 2, "DatiGenerali");
 
@@ -154,6 +164,11 @@ pub fn to_fattura_pa_xml(
         el(&mut out, 4, "NumeroLinea", &(index + 1).to_string());
         el(&mut out, 4, "Descrizione", &line.description);
         el(&mut out, 4, "Quantita", &fmt_amount(line.quantity.inner()));
+        // `UnitaMisura` follows `Quantita` in the FatturaPA `DettaglioLinee`
+        // order; emit it from the IR line unit code when present.
+        if let Some(unit) = &line.unit_code {
+            el(&mut out, 4, "UnitaMisura", unit);
+        }
         el(&mut out, 4, "PrezzoUnitario", &fmt_amount(line.unit_price.inner()));
         el(
             &mut out,
@@ -682,7 +697,9 @@ mod tests {
             "<TipoDocumento>TD01</TipoDocumento>",
             "<Divisa>EUR</Divisa>",
             "<Numero>INV-2026-0001</Numero>",
+            "<ImportoTotaleDocumento>122.00</ImportoTotaleDocumento>",
             "<Descrizione>Consulenza &amp; sviluppo</Descrizione>",
+            "<UnitaMisura>C62</UnitaMisura>",
             "<AliquotaIVA>22.00</AliquotaIVA>",
             "<ImponibileImporto>100.00</ImponibileImporto>",
             "<Imposta>22.00</Imposta>",
