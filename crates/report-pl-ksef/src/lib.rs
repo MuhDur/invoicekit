@@ -101,6 +101,10 @@ pub enum Fa3Error {
     /// The FA(3) header context was malformed (e.g. blank `DataWytworzeniaFa`).
     #[error("invalid FA(3) header context: {0}")]
     BadContext(String),
+    /// Accumulating the tax-summary totals overflowed `Decimal`'s range; the
+    /// named FA(3) totals field cannot be represented.
+    #[error("FA(3) totals field {0} is not representable (Decimal overflow)")]
+    TotalsUnrepresentable(&'static str),
 }
 
 /// Serialize an InvoiceKit [`CommercialDocument`] to deterministic FA(3)
@@ -116,7 +120,9 @@ pub enum Fa3Error {
 ///
 /// Returns [`Fa3Error::UnsupportedDocumentType`] for document types with no
 /// `RodzajFaktury` mapping, [`Fa3Error::MissingSellerNip`] when the seller has
-/// no NIP, and [`Fa3Error::BadContext`] when the header context is malformed.
+/// no NIP, [`Fa3Error::BadContext`] when the header context is malformed, and
+/// [`Fa3Error::TotalsUnrepresentable`] when summing the tax-summary totals
+/// overflows `Decimal`'s range.
 pub fn to_fa3_xml(document: &CommercialDocument, context: &Fa3Context) -> Result<String, Fa3Error> {
     if context.data_wytworzenia.is_empty() {
         return Err(Fa3Error::BadContext(
@@ -168,11 +174,18 @@ pub fn to_fa3_xml(document: &CommercialDocument, context: &Fa3Context) -> Result
     // VAT summary: P_13_x = net base per rate group; P_14_x = VAT amount.
     // We project the tax summary into a single net/gross/VAT triple plus the
     // per-rate breakdown so the FA(3) totals block is faithful.
+    // checked_add: the tax-summary amounts are untrusted at this point, so
+    // summing many bounded bases can still exceed Decimal::MAX. Bail with a
+    // typed error rather than letting Decimal's `+=` panic on overflow.
     let mut net_total = Decimal::ZERO;
     let mut vat_total = Decimal::ZERO;
     for summary in &document.tax_summary {
-        net_total += summary.taxable_amount.inner();
-        vat_total += summary.tax_amount.inner();
+        net_total = net_total
+            .checked_add(summary.taxable_amount.inner())
+            .ok_or(Fa3Error::TotalsUnrepresentable("P_13_1"))?;
+        vat_total = vat_total
+            .checked_add(summary.tax_amount.inner())
+            .ok_or(Fa3Error::TotalsUnrepresentable("P_14_1"))?;
     }
     el(&mut out, 2, "P_13_1", &fmt_amount(net_total));
     el(&mut out, 2, "P_14_1", &fmt_amount(vat_total));
@@ -752,6 +765,58 @@ mod tests {
     #[test]
     fn fa3_credit_note_maps_to_korekta() {
         assert_eq!(rodzaj_faktury(DocumentType::CreditNote).unwrap(), "KOR");
+    }
+
+    #[test]
+    fn fa3_totals_overflow_is_err_not_panic() {
+        // Two tax-summary entries whose taxable amounts each sit near
+        // Decimal::MAX so the running `net_total` sum overflows. Before the
+        // checked_add fix the `+=` accumulator panicked; now it surfaces a
+        // typed Fa3Error::TotalsUnrepresentable.
+        let mut doc = sample_invoice();
+        let huge = DecimalValue::new(Decimal::MAX);
+        doc.tax_summary = vec![
+            TaxCategorySummary {
+                category_code: "S".to_owned(),
+                taxable_amount: huge.clone(),
+                tax_amount: amt(0),
+                tax_rate: Some(DecimalValue::new(Decimal::new(2300, 2))),
+            },
+            TaxCategorySummary {
+                category_code: "R".to_owned(),
+                taxable_amount: huge,
+                tax_amount: amt(0),
+                tax_rate: Some(DecimalValue::new(Decimal::new(800, 2))),
+            },
+        ];
+        let err = to_fa3_xml(&doc, &Fa3Context::default())
+            .expect_err("near-Decimal::MAX taxable totals must overflow, not panic");
+        assert!(matches!(err, Fa3Error::TotalsUnrepresentable("P_13_1")));
+    }
+
+    #[test]
+    fn fa3_vat_totals_overflow_is_err_not_panic() {
+        // Same defect on the `vat_total` accumulator: the net base fits but the
+        // VAT amounts each sit near Decimal::MAX.
+        let mut doc = sample_invoice();
+        let huge = DecimalValue::new(Decimal::MAX);
+        doc.tax_summary = vec![
+            TaxCategorySummary {
+                category_code: "S".to_owned(),
+                taxable_amount: amt(0),
+                tax_amount: huge.clone(),
+                tax_rate: Some(DecimalValue::new(Decimal::new(2300, 2))),
+            },
+            TaxCategorySummary {
+                category_code: "R".to_owned(),
+                taxable_amount: amt(0),
+                tax_amount: huge,
+                tax_rate: Some(DecimalValue::new(Decimal::new(800, 2))),
+            },
+        ];
+        let err = to_fa3_xml(&doc, &Fa3Context::default())
+            .expect_err("near-Decimal::MAX VAT totals must overflow, not panic");
+        assert!(matches!(err, Fa3Error::TotalsUnrepresentable("P_14_1")));
     }
 
     #[test]

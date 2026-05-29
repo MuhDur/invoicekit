@@ -764,3 +764,38 @@ performance** skills and closes the residuals.
   enumerates EVERY remaining instance of each known-dangerous pattern (multibyte `&str` byte-slice/`split_at`,
   unchecked `Decimal` arithmetic on untrusted amounts, unbounded decompression/allocation of untrusted bytes,
   string-built XML/URL/path without escaping) across all 109 crates and drives each class to literal zero.
+
+### Turn 25 — 2026-05-29 — Class-exhaustive sweep: 2 classes already at zero, 10 sites fixed
+- **Class-exhaustive enumeration** (read-only, 5 class agents, **209 candidate sites opened and triaged**). Result
+  per class:
+  - **multibyte `&str` panic — CLEAN (0/61).** Every byte-index slice/`split_at`/`truncate` reachable from
+    untrusted input is already ASCII/char-boundary guarded (tax-id prefix strips, date slices, hex/base64-built
+    strings, `find`/`rfind`-derived offsets). The whole class is at literal zero.
+  - **unbounded recursion / loop — CLEAN (0/48).** Every parser walk over attacker structure has a depth/seen
+    guard (the validate-ubl-cii `MAX_NESTING_DEPTH` + intake-pdf cyclic-name-tree guards had no missing siblings).
+  - **unchecked `Decimal` overflow — 8 sites.** Structural: `DecimalValue` exposes no checked arithmetic and the
+    IR validators impose no magnitude bound, so report/format crates write raw `.inner()` arithmetic on untrusted
+    amounts (`rust_decimal` panics on overflow).
+  - **unbounded decompression — 1 site.** intake-pdf `text.rs` page **content** streams hit
+    `decompressed_content()` uncapped (the round-4 cap only covered *embedded* files).
+  - **markup/URL/path injection — 1 site.** peppol-smp-sml builds the SMP REST URL without percent-encoding the
+    participant / document-type path segments.
+- **Note on the proposed systemic Decimal fix:** the enumerator suggested a single IR magnitude bound to clear all
+  8 at once; I rejected it as *incomplete* — a 1e16 cap on each operand still lets `net × rate` (≤1e16 each)
+  overflow `Decimal::MAX` (~7.9e28), and an unbounded line count still overflows a bounded-operand sum. The proven
+  per-site `checked_mul`/`checked_add`/`try_fold` pattern (already used in report-gr-mydata/mx-cfdi/format-gobl)
+  is the complete fix. A safe `DecimalValue` checked-arithmetic API is logged as a future ergonomic enhancement.
+- **Crate-grouped TDD fix workflow** (9 disjoint crates, reproduce→fix→adversarial-review): **9/9 green-and-real,
+  zero flagged.** report-in-gst (×2: accumulator + `base×rate/100/2`), report-hu-nav, report-br-nfe, report-cl-dte,
+  report-pl-ksef, report-sa-zatca, format-ubl → `checked_*`/`try_fold` surfacing each crate's typed error
+  (`TotalsUnrepresentable`/`Inv01Error::BadContext`/etc.); intake-pdf → page content streams routed through the
+  shared capped FlateDecode helper; peppol-smp-sml → per-segment percent-encoding (RFC 3986 PCHAR). Each reviewer
+  independently reproduced the pre-fix panic (e.g. `Decimal::MAX + Decimal::MAX` / `MAX × 27`) and confirmed
+  byte-identical output on valid invoices.
+- **Central verification:** build clean; **`cargo test --workspace` = 2455 passed / 0 failed** (+14 regression
+  tests over 2441); `cargo clippy --workspace --all-targets -D warnings` clean; scope = the 9 fixed crates only.
+- **Skills used:** `multi-pass-bug-hunting` (class-exhaustive variant), `testing-real-service-e2e-no-mocks`
+  (per-site reproducing regression tests), `verification-before-completion`. D17 + D18 enforced.
+- **Next:** a confirming class re-sweep — if all 5 classes now read zero, the security-audit loop has CONVERGED;
+  then move to the deferred strand (D20): the targeted simplify-and-refactor pass over the guard/helper code
+  accumulated across rounds 1–5.

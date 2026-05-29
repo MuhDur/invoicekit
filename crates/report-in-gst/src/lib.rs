@@ -181,12 +181,23 @@ pub fn to_inv01_json(
     let mut integrated_total = Decimal::ZERO;
     let mut assessable_total = Decimal::ZERO;
     for (index, line) in document.lines.iter().enumerate() {
-        let item = item_block(document, line, index, intra_state);
-        assessable_total += line.line_extension_amount.inner();
-        let (cgst, sgst, igst) = line_tax_amounts(document, line, intra_state);
-        central_total += cgst;
-        state_total += sgst;
-        integrated_total += igst;
+        let item = item_block(document, line, index, intra_state)?;
+        // checked_add: summing untrusted per-line amounts can exceed
+        // Decimal::MAX. Surface overflow as a typed error rather than panicking
+        // on the `+=` accumulator.
+        let (cgst, sgst, igst) = line_tax_amounts(document, line, intra_state)?;
+        assessable_total = assessable_total
+            .checked_add(line.line_extension_amount.inner())
+            .ok_or_else(|| Inv01Error::BadContext("AssVal total overflowed".to_owned()))?;
+        central_total = central_total
+            .checked_add(cgst)
+            .ok_or_else(|| Inv01Error::BadContext("CgstVal total overflowed".to_owned()))?;
+        state_total = state_total
+            .checked_add(sgst)
+            .ok_or_else(|| Inv01Error::BadContext("SgstVal total overflowed".to_owned()))?;
+        integrated_total = integrated_total
+            .checked_add(igst)
+            .ok_or_else(|| Inv01Error::BadContext("IgstVal total overflowed".to_owned()))?;
         items.push(item);
     }
     root.insert("ItemList".to_owned(), Value::Array(items));
@@ -296,11 +307,17 @@ fn item_block(
     line: &DocumentLine,
     index: usize,
     intra_state: bool,
-) -> Value {
+) -> Result<Value, Inv01Error> {
     let ass_amt = line.line_extension_amount.inner();
     let rate = line_tax_rate(document, line);
-    let (cgst, sgst, igst) = line_tax_amounts(document, line, intra_state);
-    let tot_item_val = ass_amt + cgst + sgst + igst;
+    let (cgst, sgst, igst) = line_tax_amounts(document, line, intra_state)?;
+    // checked_add: assessable base + the tax split on untrusted amounts can
+    // exceed Decimal::MAX. Surface overflow as a typed error, not a panic.
+    let tot_item_val = ass_amt
+        .checked_add(cgst)
+        .and_then(|x| x.checked_add(sgst))
+        .and_then(|x| x.checked_add(igst))
+        .ok_or_else(|| Inv01Error::BadContext("TotItemVal overflowed".to_owned()))?;
 
     let mut item = Map::new();
     // `SlNo` (serial number) is a string in the IRP schema.
@@ -318,7 +335,7 @@ fn item_block(
         item.insert("IgstAmt".to_owned(), json!(fmt_amount(igst)));
     }
     item.insert("TotItemVal".to_owned(), json!(fmt_amount(tot_item_val)));
-    Value::Object(item)
+    Ok(Value::Object(item))
 }
 
 /// The line's headline GST rate (`GstRt`), looked up from the tax summary entry
@@ -343,17 +360,24 @@ fn line_tax_amounts(
     document: &CommercialDocument,
     line: &DocumentLine,
     intra_state: bool,
-) -> (Decimal, Decimal, Decimal) {
+) -> Result<(Decimal, Decimal, Decimal), Inv01Error> {
     let base = line.line_extension_amount.inner();
     let rate = line_tax_rate(document, line);
     let hundred = Decimal::from(100);
+    // checked_mul/checked_div: `base * rate` on untrusted amounts can exceed
+    // Decimal::MAX. Surface overflow as a typed error rather than panicking.
+    let full = base
+        .checked_mul(rate)
+        .and_then(|product| product.checked_div(hundred))
+        .ok_or_else(|| Inv01Error::BadContext("line tax base*rate overflowed".to_owned()))?;
     if intra_state {
-        let half = (base * rate / hundred) / Decimal::from(2);
-        let half = half.round_dp(2);
-        (half, half, Decimal::ZERO)
+        let half = full
+            .checked_div(Decimal::TWO)
+            .ok_or_else(|| Inv01Error::BadContext("line tax split overflowed".to_owned()))?
+            .round_dp(2);
+        Ok((half, half, Decimal::ZERO))
     } else {
-        let igst = (base * rate / hundred).round_dp(2);
-        (Decimal::ZERO, Decimal::ZERO, igst)
+        Ok((Decimal::ZERO, Decimal::ZERO, full.round_dp(2)))
     }
 }
 
@@ -1098,5 +1122,70 @@ mod inv01_tests {
         // address subdivision ("KA" supplier / "MH" buyer), not a panic.
         assert_eq!(v["SellerDtls"]["Stcd"], "KA");
         assert_eq!(v["BuyerDtls"]["Stcd"], "MH");
+    }
+
+    /// Build a `DecimalValue` straight from a raw `Decimal` (no scale-2 minor
+    /// coercion) so tests can place untrusted amounts near `Decimal::MAX`.
+    fn raw(value: Decimal) -> DecimalValue {
+        DecimalValue::new(value)
+    }
+
+    /// Regression for the accumulation loop in `to_inv01_json`: summing
+    /// per-line `line_extension_amount` values that individually fit but
+    /// jointly exceed `Decimal::MAX` must surface a typed error, not panic on
+    /// the `+=` accumulator. Before the `checked_add` fix this panicked
+    /// ("attempt to add with overflow" inside `rust_decimal`).
+    #[test]
+    fn inv01_assessable_total_overflow_is_error_not_panic() {
+        let mut doc = inter_state_invoice();
+        // Two lines, each at the maximum representable amount: their sum
+        // overflows the accumulator. Both lines carry the zero-rate "Z"
+        // category so the tax multiply at site 2 stays in range and we
+        // isolate the accumulation overflow.
+        let line = DocumentLine {
+            id: "1".to_owned(),
+            description: "Huge line".to_owned(),
+            quantity: DecimalValue::new(Decimal::from(1)),
+            unit_code: Some("EA".to_owned()),
+            unit_price: raw(Decimal::MAX),
+            line_extension_amount: raw(Decimal::MAX),
+            tax_category: None,
+            extensions: Vec::new(),
+        };
+        doc.lines = vec![line.clone(), line];
+        doc.tax_summary.clear();
+
+        let err = to_inv01_json(&doc, &Inv01Context::default())
+            .expect_err("two Decimal::MAX line amounts must overflow the assessable total");
+        assert!(
+            matches!(err, Inv01Error::BadContext(_)),
+            "overflow must surface as a typed Inv01Error, got {err:?}"
+        );
+    }
+
+    /// Regression for the per-line tax computation in `line_tax_amounts`:
+    /// `base * rate` on untrusted amounts can exceed `Decimal::MAX`. With a
+    /// near-`MAX` base and a non-trivial rate the multiply overflows and must
+    /// surface a typed error rather than panic. Before the `checked_mul` fix
+    /// this panicked ("attempt to multiply with overflow").
+    #[test]
+    fn inv01_line_tax_multiply_overflow_is_error_not_panic() {
+        let mut doc = inter_state_invoice();
+        doc.lines[0].line_extension_amount = raw(Decimal::MAX);
+        doc.lines[0].tax_category = Some("S".to_owned());
+        // An 18% rate against a Decimal::MAX base overflows `base * rate`.
+        doc.tax_summary = vec![TaxCategorySummary {
+            category_code: "S".to_owned(),
+            taxable_amount: raw(Decimal::MAX),
+            tax_amount: amt(0),
+            tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))),
+        }];
+
+        let err = to_inv01_json(&doc, &Inv01Context::default())
+            .expect_err("Decimal::MAX base times an 18% rate must overflow the tax multiply");
+        assert!(
+            matches!(err, Inv01Error::BadContext(_)),
+            "overflow must surface as a typed Inv01Error, got {err:?}"
+        );
     }
 }

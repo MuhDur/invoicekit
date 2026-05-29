@@ -66,6 +66,12 @@ pub enum InvoiceDataError {
     /// The supplier carries no usable Hungarian `taxNumber`.
     #[error("supplier has no tax id usable as NAV supplierTaxNumber")]
     MissingSupplierTaxId,
+    /// A per-line VAT product or a running net/VAT/gross total overflowed the
+    /// representable `Decimal` range while building the `invoiceSummary`.
+    /// Untrusted invoice amounts near `Decimal::MAX` reach this rather than
+    /// panicking the adapter.
+    #[error("NAV invoice totals are not representable: {0}")]
+    TotalsUnrepresentable(&'static str),
 }
 
 /// Serialize an InvoiceKit [`CommercialDocument`] to deterministic NAV Online
@@ -150,9 +156,21 @@ pub fn to_invoice_data_xml(document: &CommercialDocument) -> Result<String, Invo
     for (index, line) in document.lines.iter().enumerate() {
         let rate = line_tax_rate(document, line);
         let net = line.line_extension_amount.inner();
-        let vat = (net * rate / Decimal::ONE_HUNDRED).round_dp(2);
-        net_total += net;
-        vat_total += vat;
+        // checked_mul/checked_div: net * rate on untrusted amounts can exceed
+        // Decimal::MAX before the divide brings it back into range. Bail with a
+        // typed error rather than panicking.
+        let vat = net
+            .checked_mul(rate)
+            .and_then(|product| product.checked_div(Decimal::ONE_HUNDRED))
+            .ok_or(InvoiceDataError::TotalsUnrepresentable("lineVatAmount"))?
+            .round_dp(2);
+        // checked_add: summing untrusted per-line amounts can itself overflow.
+        net_total = net_total
+            .checked_add(net)
+            .ok_or(InvoiceDataError::TotalsUnrepresentable("invoiceNetAmount"))?;
+        vat_total = vat_total
+            .checked_add(vat)
+            .ok_or(InvoiceDataError::TotalsUnrepresentable("invoiceVatAmount"))?;
 
         open(&mut out, 4, "line");
         el(&mut out, 5, "lineNumber", &(index + 1).to_string());
@@ -188,19 +206,13 @@ pub fn to_invoice_data_xml(document: &CommercialDocument) -> Result<String, Invo
     el(&mut out, 5, "invoiceVatAmount", &fmt_amount(vat_total));
     el(&mut out, 5, "invoiceVatAmountHUF", &fmt_amount(vat_total));
     close(&mut out, 4, "summaryNormal");
+    // checked_add: net + vat can overflow even when each total fits on its own.
+    let gross_total = net_total
+        .checked_add(vat_total)
+        .ok_or(InvoiceDataError::TotalsUnrepresentable("invoiceGrossAmount"))?;
     open(&mut out, 4, "summaryGrossData");
-    el(
-        &mut out,
-        5,
-        "invoiceGrossAmount",
-        &fmt_amount(net_total + vat_total),
-    );
-    el(
-        &mut out,
-        5,
-        "invoiceGrossAmountHUF",
-        &fmt_amount(net_total + vat_total),
-    );
+    el(&mut out, 5, "invoiceGrossAmount", &fmt_amount(gross_total));
+    el(&mut out, 5, "invoiceGrossAmountHUF", &fmt_amount(gross_total));
     close(&mut out, 4, "summaryGrossData");
     close(&mut out, 3, "invoiceSummary");
 
@@ -857,6 +869,73 @@ mod tests {
         let json = serde_json::to_string(&env).unwrap();
         let parsed: NavManageEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, env);
+    }
+
+    /// Two lines each near `Decimal::MAX` overflow the `net_total` accumulator.
+    /// Before the `checked_add` fix this panicked (Decimal's `+=` panics on
+    /// overflow); now it returns a typed [`InvoiceDataError::TotalsUnrepresentable`].
+    #[test]
+    fn invoice_data_net_total_overflow_returns_error_not_panic() {
+        let huge = DecimalValue::new(Decimal::MAX);
+        let mut doc = sample_invoice();
+        doc.lines = vec![
+            DocumentLine {
+                id: "1".to_owned(),
+                description: "near-max line a".to_owned(),
+                quantity: DecimalValue::new(Decimal::ONE),
+                unit_code: Some("EA".to_owned()),
+                unit_price: huge.clone(),
+                line_extension_amount: huge.clone(),
+                // No tax_category -> line_tax_rate is zero, so the per-line VAT
+                // product stays zero and the overflow lands on the net total.
+                tax_category: None,
+                extensions: Vec::new(),
+            },
+            DocumentLine {
+                id: "2".to_owned(),
+                description: "near-max line b".to_owned(),
+                quantity: DecimalValue::new(Decimal::ONE),
+                unit_code: Some("EA".to_owned()),
+                unit_price: huge.clone(),
+                line_extension_amount: huge,
+                tax_category: None,
+                extensions: Vec::new(),
+            },
+        ];
+        doc.tax_summary = Vec::new();
+        let err = to_invoice_data_xml(&doc)
+            .expect_err("two near-MAX net lines must overflow the net total");
+        assert!(matches!(err, InvoiceDataError::TotalsUnrepresentable(_)));
+    }
+
+    /// A single line whose `net * rate` product overflows `Decimal::MAX` before
+    /// the divide by 100. Before the `checked_mul` fix this panicked; now it
+    /// returns a typed [`InvoiceDataError::TotalsUnrepresentable`].
+    #[test]
+    fn invoice_data_vat_product_overflow_returns_error_not_panic() {
+        let huge = DecimalValue::new(Decimal::MAX);
+        let mut doc = sample_invoice();
+        doc.lines = vec![DocumentLine {
+            id: "1".to_owned(),
+            description: "near-max line".to_owned(),
+            quantity: DecimalValue::new(Decimal::ONE),
+            unit_code: Some("EA".to_owned()),
+            unit_price: huge.clone(),
+            line_extension_amount: huge,
+            tax_category: Some("S".to_owned()),
+            extensions: Vec::new(),
+        }];
+        // tax_rate of 27 means net * 27 = MAX * 27 overflows before the
+        // division by 100 can bring it back into range.
+        doc.tax_summary = vec![TaxCategorySummary {
+            category_code: "S".to_owned(),
+            taxable_amount: DecimalValue::new(Decimal::MAX),
+            tax_amount: amt(0),
+            tax_rate: Some(DecimalValue::new(Decimal::from(27))),
+        }];
+        let err = to_invoice_data_xml(&doc)
+            .expect_err("MAX * 27 VAT product must overflow before the divide");
+        assert!(matches!(err, InvoiceDataError::TotalsUnrepresentable(_)));
     }
 
     #[test]

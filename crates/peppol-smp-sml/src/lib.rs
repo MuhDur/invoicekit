@@ -97,9 +97,20 @@ impl ParticipantId {
 
     /// Wire form `iso6523-actorid-upis::{scheme}:{value}` used
     /// in SMP URLs.
+    ///
+    /// The scheme and value are percent-encoded with
+    /// [`percent_encode_segment`] so that a hostile identifier
+    /// carrying `/`, `?`, `#`, `%`, or `..` cannot break out of
+    /// its SMP path segment. The structural `iso6523-actorid-upis::`
+    /// prefix and the `:` separator are fixed literals and stay
+    /// readable.
     #[must_use]
     pub fn to_url_segment(&self) -> String {
-        format!("iso6523-actorid-upis::{}:{}", self.scheme, self.value)
+        format!(
+            "iso6523-actorid-upis::{}:{}",
+            percent_encode_segment(&self.scheme),
+            percent_encode_segment(&self.value)
+        )
     }
 
     /// Canonical SML hostname for this participant under the
@@ -137,10 +148,47 @@ impl DocumentTypeId {
     }
 
     /// URL segment form used in SMP requests.
+    ///
+    /// The scheme and value are percent-encoded with
+    /// [`percent_encode_segment`] so that a hostile document-type
+    /// identifier cannot break out of its SMP path segment. The
+    /// `::` separator is a fixed literal and stays readable.
     #[must_use]
     pub fn to_url_segment(&self) -> String {
-        format!("{}::{}", self.scheme, self.value)
+        format!(
+            "{}::{}",
+            percent_encode_segment(&self.scheme),
+            percent_encode_segment(&self.value)
+        )
     }
+}
+
+/// Percent-encode one URL path segment per RFC 3986.
+///
+/// Bytes outside the "unreserved" set (ASCII letters and digits
+/// plus `-`, `.`, `_`, `~`) are written as `%XX`. In particular
+/// `/`, `?`, `#`, `%`, `:`, and whitespace are escaped, so a
+/// participant or document-type identifier can no longer inject
+/// extra path, query, or fragment components into the SMP REST
+/// URL. Mirrors `transmit-peppol-partner::percent_encode_path_segment`;
+/// implemented inline so the crate does not pull `percent_encoding`
+/// into the workspace for one call.
+#[must_use]
+fn percent_encode_segment(input: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut out = String::with_capacity(input.len());
+    for &byte in input.as_bytes() {
+        let unreserved =
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~');
+        if unreserved {
+            out.push(byte as char);
+        } else {
+            out.push('%');
+            out.push(HEX[(byte >> 4) as usize] as char);
+            out.push(HEX[(byte & 0x0f) as usize] as char);
+        }
+    }
+    out
 }
 
 /// Resolved access-point endpoint.
@@ -551,5 +599,89 @@ mod tests {
     #[test]
     fn crate_name_is_cargo_package_name() {
         assert_eq!(crate_name(), "invoicekit-peppol-smp-sml");
+    }
+
+    /// Resolver that always returns a fixed SMP base for any host.
+    struct FixedResolver(String);
+    impl Resolver for FixedResolver {
+        fn lookup_cname(&self, _host: &str) -> Result<Option<String>, String> {
+            Ok(Some(self.0.clone()))
+        }
+    }
+
+    /// HTTP client that records the exact URL it was asked to fetch.
+    struct CapturingHttp(Mutex<Vec<String>>);
+    impl HttpClient for CapturingHttp {
+        fn get(&self, url: &str) -> Result<Vec<u8>, String> {
+            self.0.lock().unwrap().push(url.to_owned());
+            // Return a payload with no endpoint so the lookup ends
+            // after the fetch; the test only inspects the URL.
+            Ok(b"<?xml version=\"1.0\"?><X/>".to_vec())
+        }
+    }
+
+    #[test]
+    fn url_segment_neutralises_path_injection_from_identifier() {
+        // Regression: a hostile participant/document-type identifier
+        // must not break out of its path segment. Before the fix the
+        // raw `scheme`/`value` were interpolated into the SMP REST URL
+        // unencoded, so a `/ ? # %` payload injected extra path,
+        // query, or fragment components.
+        let participant = ParticipantId {
+            scheme: "0192".to_owned(),
+            value: "../../admin?x=1#frag%2e&z".to_owned(),
+        };
+        let document = DocumentTypeId {
+            scheme: "busdox-docid-qns".to_owned(),
+            value: "evil/../../bypass#frag".to_owned(),
+        };
+
+        let http = CapturingHttp(Mutex::new(Vec::new()));
+        let resolver = FixedResolver("https://smp.example.test".to_owned());
+        let client = PeppolClient::new(resolver, http, "acc.edelivery.tech.ec.europa.eu");
+        let _ = client.lookup(&participant, &document);
+
+        let url = {
+            let urls = client.http.0.lock().unwrap();
+            urls.first().expect("one SMP fetch was attempted").clone()
+        };
+        let url = url.as_str();
+        // The base, the structural prefix, and `/services/` are the
+        // only `/` separators allowed; the injected payload must not
+        // add more. Strip the trusted prefix, then assert no path or
+        // URL delimiters from the payload survived.
+        let rest = url
+            .strip_prefix("https://smp.example.test/")
+            .expect("URL keeps the trusted SMP base");
+        let injected = rest.replace("/services/", "|");
+        assert!(
+            !injected.contains('/'),
+            "slash from identifier leaked into path: {url}"
+        );
+        assert!(
+            !injected.contains('?'),
+            "query opener from identifier leaked: {url}"
+        );
+        assert!(
+            !injected.contains('#'),
+            "fragment opener from identifier leaked: {url}"
+        );
+        // The literal `%` in the payload must itself be encoded, so the
+        // only `%` sequences left are the encoder's own `%XX` escapes.
+        assert!(
+            url.contains("%2F") && url.contains("%3F") && url.contains("%23"),
+            "expected percent escapes for `/`, `?`, `#`: {url}"
+        );
+    }
+
+    #[test]
+    fn url_segment_leaves_valid_identifiers_intact() {
+        // The structural delimiters and ordinary identifier characters
+        // must survive unchanged so legitimate lookups still hit the
+        // canonical Peppol SMP path.
+        let id = ParticipantId::parse("0192:991825827").unwrap();
+        assert_eq!(id.to_url_segment(), "iso6523-actorid-upis::0192:991825827");
+        let dt = DocumentTypeId::peppol_bis_3_invoice();
+        assert!(dt.to_url_segment().starts_with("busdox-docid-qns::"));
     }
 }

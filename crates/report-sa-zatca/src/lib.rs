@@ -140,6 +140,10 @@ pub enum ZatcaUblError {
     /// The serialization context was malformed (e.g. blank UUID, ICV 0).
     #[error("invalid ZATCA serialization context: {0}")]
     BadContext(String),
+    /// Summing the tax-summary amounts exceeded the representable `Decimal`
+    /// range (would overflow `Decimal::MAX`).
+    #[error("monetary amount overflowed the representable Decimal range")]
+    AmountOverflow,
 }
 
 /// Serialize an InvoiceKit [`CommercialDocument`] to deterministic ZATCA Phase
@@ -336,14 +340,16 @@ fn party_saudi_vat(party: &Party) -> Option<String> {
 /// # Errors
 ///
 /// Returns [`ZatcaUblError::MissingSupplierVat`] when the seller has no Saudi
-/// VAT number to place in Tag 2.
+/// VAT number to place in Tag 2, or [`ZatcaUblError::AmountOverflow`] when
+/// summing the tax-summary amounts for Tag 5 exceeds the representable
+/// `Decimal` range.
 pub fn build_qr_fields(
     document: &CommercialDocument,
     timestamp_rfc3339: &str,
 ) -> Result<BTreeMap<QrField, String>, ZatcaUblError> {
     let vat = party_saudi_vat(&document.supplier).ok_or(ZatcaUblError::MissingSupplierVat)?;
     let total = fmt_amount(document.monetary_total.tax_inclusive_amount.inner());
-    let vat_total = fmt_amount(total_vat(document));
+    let vat_total = fmt_amount(total_vat(document)?);
     let mut fields = BTreeMap::new();
     fields.insert(QrField::SellerName, document.supplier.name.clone());
     fields.insert(QrField::VatNumber, vat);
@@ -354,11 +360,18 @@ pub fn build_qr_fields(
 }
 
 /// Sum every tax-summary entry's tax amount (the QR Tag 5 VAT total).
-fn total_vat(document: &CommercialDocument) -> Decimal {
+///
+/// The tax-summary amounts are untrusted at this point, so the sum is
+/// accumulated with [`Decimal::checked_add`] rather than the panicking `+`
+/// operator; an out-of-range total yields [`ZatcaUblError::AmountOverflow`].
+fn total_vat(document: &CommercialDocument) -> Result<Decimal, ZatcaUblError> {
     document
         .tax_summary
         .iter()
-        .fold(Decimal::ZERO, |acc, s| acc + s.tax_amount.inner())
+        .try_fold(Decimal::ZERO, |acc, s| {
+            acc.checked_add(s.tax_amount.inner())
+                .ok_or(ZatcaUblError::AmountOverflow)
+        })
 }
 
 /// Format a decimal at fixed scale 2 (`100` -> `"100.00"`), deterministic.
@@ -1089,6 +1102,37 @@ mod tests {
         assert_eq!(fields.get(&QrField::Total).unwrap(), "1150.00");
         assert_eq!(fields.get(&QrField::VatTotal).unwrap(), "150.00");
         assert_eq!(fields.len(), 5);
+    }
+
+    #[test]
+    fn total_vat_overflow_is_reported_not_panicked() {
+        // Regression: untrusted tax-summary amounts must be summed with checked
+        // addition. Two near-maximum Decimals overflow the range; the unchecked
+        // `+` operator would panic, so `build_qr_fields` must surface a clean
+        // `ZatcaUblError::AmountOverflow` instead.
+        let mut doc = sample_invoice();
+        doc.tax_summary = vec![
+            TaxCategorySummary {
+                category_code: "S".to_owned(),
+                taxable_amount: amt(100_000),
+                tax_amount: DecimalValue::new(Decimal::MAX),
+                tax_rate: Some(DecimalValue::new(Decimal::new(1500, 2))),
+            },
+            TaxCategorySummary {
+                category_code: "S2".to_owned(),
+                taxable_amount: amt(100_000),
+                tax_amount: DecimalValue::new(Decimal::MAX),
+                tax_rate: Some(DecimalValue::new(Decimal::new(1500, 2))),
+            },
+        ];
+        let err = build_qr_fields(&doc, "2026-05-26T10:30:00Z")
+            .expect_err("two Decimal::MAX tax amounts must overflow the VAT-total sum");
+        assert!(matches!(err, ZatcaUblError::AmountOverflow));
+        // The single-summary happy path still sums cleanly.
+        assert_eq!(
+            total_vat(&sample_invoice()).expect("single summary sums without overflow"),
+            Decimal::new(15000, 2)
+        );
     }
 
     #[test]

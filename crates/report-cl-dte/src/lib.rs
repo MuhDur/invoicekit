@@ -78,6 +78,10 @@ pub enum DteXmlError {
     /// The DTE context was malformed (e.g. zero `Folio`).
     #[error("invalid SII DTE context: {0}")]
     BadContext(String),
+    /// A monetary total (`MntNeto` / `IVA`) overflowed the representable
+    /// `Decimal` range while summing the tax summary.
+    #[error("DTE totals are not representable: {0}")]
+    TotalsUnrepresentable(String),
 }
 
 /// Serialize an InvoiceKit [`CommercialDocument`] to deterministic SII **DTE**
@@ -105,8 +109,10 @@ pub enum DteXmlError {
 ///
 /// Returns [`DteXmlError::UnsupportedDocumentType`] for document types with no
 /// `TipoDTE` mapping, [`DteXmlError::MissingEmisorRut`] /
-/// [`DteXmlError::MissingReceptorRut`] when a party has no RUT, and
-/// [`DteXmlError::BadContext`] when the context is malformed.
+/// [`DteXmlError::MissingReceptorRut`] when a party has no RUT,
+/// [`DteXmlError::BadContext`] when the context is malformed, and
+/// [`DteXmlError::TotalsUnrepresentable`] when summing the tax summary
+/// overflows the representable `Decimal` range.
 pub fn to_dte_xml(
     document: &CommercialDocument,
     context: &DteContext,
@@ -118,7 +124,7 @@ pub fn to_dte_xml(
     let emisor_rut = party_rut(&document.supplier).ok_or(DteXmlError::MissingEmisorRut)?;
     let receptor_rut = party_rut(&document.customer).ok_or(DteXmlError::MissingReceptorRut)?;
 
-    let (mnt_neto, tasa_iva, iva) = dte_tax_totals(document);
+    let (mnt_neto, tasa_iva, iva) = dte_tax_totals(document)?;
     let mnt_total = document.monetary_total.payable_amount.inner();
 
     let mut out = String::with_capacity(2048);
@@ -218,20 +224,30 @@ fn party_rut(party: &Party) -> Option<String> {
 /// `TasaIVA` the (single) IVA percentage in effect — Chile's standard IVA is a
 /// flat 19 %, so a DTE carries one `TasaIVA`. When the document is fully exempt
 /// (tipo 34, no tax), `TasaIVA` is zero.
-fn dte_tax_totals(document: &CommercialDocument) -> (Decimal, Decimal, Decimal) {
+///
+/// The summary amounts are untrusted here, so the running `MntNeto` / `IVA`
+/// totals accumulate with [`Decimal::checked_add`] rather than the panicking
+/// `+=`; an out-of-range total yields [`DteXmlError::TotalsUnrepresentable`].
+fn dte_tax_totals(
+    document: &CommercialDocument,
+) -> Result<(Decimal, Decimal, Decimal), DteXmlError> {
     let mut mnt_neto = Decimal::ZERO;
     let mut iva = Decimal::ZERO;
     let mut tasa = Decimal::ZERO;
     for summary in &document.tax_summary {
-        mnt_neto += summary.taxable_amount.inner();
-        iva += summary.tax_amount.inner();
+        mnt_neto = mnt_neto
+            .checked_add(summary.taxable_amount.inner())
+            .ok_or_else(|| DteXmlError::TotalsUnrepresentable("MntNeto".to_owned()))?;
+        iva = iva
+            .checked_add(summary.tax_amount.inner())
+            .ok_or_else(|| DteXmlError::TotalsUnrepresentable("IVA".to_owned()))?;
         if let Some(rate) = summary.tax_rate.as_ref() {
             if rate.inner() > tasa {
                 tasa = rate.inner();
             }
         }
     }
-    (mnt_neto, tasa, iva)
+    Ok((mnt_neto, tasa, iva))
 }
 
 /// Format an integer Chilean-peso amount: CLP has no minor unit, and the SII
@@ -952,6 +968,36 @@ mod tests {
         assert!(xml.contains("<TasaIVA>0</TasaIVA>"));
         assert!(xml.contains("<IVA>0</IVA>"));
         assert!(xml.contains("<MntTotal>10000</MntTotal>"));
+    }
+
+    /// Two tax-summary bands each near `Decimal::MAX` overflow the `MntNeto`
+    /// accumulator in [`dte_tax_totals`]. Before the `checked_add` fix this
+    /// panicked (`rust_decimal`'s `+=` panics on overflow); now it surfaces a
+    /// typed [`DteXmlError::TotalsUnrepresentable`].
+    #[test]
+    fn dte_totals_overflow_returns_error_not_panic() {
+        let huge = DecimalValue::new(Decimal::MAX);
+        let mut doc = sample_dte_invoice();
+        // Two near-MAX taxable bases sum past Decimal::MAX. The amounts are
+        // wired directly onto tax_summary (post-construction) so the overflow
+        // lands squarely on the MntNeto accumulator inside dte_tax_totals.
+        doc.tax_summary = vec![
+            TaxCategorySummary {
+                category_code: "S".to_owned(),
+                taxable_amount: huge.clone(),
+                tax_amount: peso(0),
+                tax_rate: Some(DecimalValue::new(Decimal::from(19))),
+            },
+            TaxCategorySummary {
+                category_code: "S".to_owned(),
+                taxable_amount: huge,
+                tax_amount: peso(0),
+                tax_rate: Some(DecimalValue::new(Decimal::from(19))),
+            },
+        ];
+        let err = to_dte_xml(&doc, &sample_ctx())
+            .expect_err("two near-MAX taxable bases must overflow MntNeto");
+        assert!(matches!(err, DteXmlError::TotalsUnrepresentable(_)));
     }
 
     #[test]

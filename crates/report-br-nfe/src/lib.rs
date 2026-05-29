@@ -100,6 +100,10 @@ pub enum InfNfeError {
     /// The serialization context was malformed (e.g. zero nNF).
     #[error("invalid NF-e context: {0}")]
     BadContext(String),
+    /// Summing the tax-summary entries overflowed `Decimal`'s range.
+    /// The payload `String` names the total that could not be represented.
+    #[error("NF-e total {0} is not representable as a Decimal")]
+    TotalsUnrepresentable(&'static str),
 }
 
 /// Serialize an InvoiceKit [`CommercialDocument`] to deterministic infNFe XML
@@ -115,7 +119,9 @@ pub enum InfNfeError {
 ///
 /// Returns [`InfNfeError::UnsupportedDocumentType`] for document types with no
 /// NF-e mapping, [`InfNfeError::MissingEmitenteTaxId`] when the issuer has no
-/// CNPJ/CPF, and [`InfNfeError::BadContext`] when the context is malformed.
+/// CNPJ/CPF, [`InfNfeError::BadContext`] when the context is malformed, and
+/// [`InfNfeError::TotalsUnrepresentable`] when summing the tax-summary entries
+/// overflows `Decimal`'s range.
 pub fn to_inf_nfe_xml(
     document: &CommercialDocument,
     context: &NfeContext,
@@ -165,7 +171,7 @@ pub fn to_inf_nfe_xml(
     // --- total (ICMSTot) ---
     open(&mut out, 2, "total");
     open(&mut out, 3, "ICMSTot");
-    let (taxable, tax) = totals(document);
+    let (taxable, tax) = totals(document)?;
     el(&mut out, 4, "vBC", &fmt_amount(taxable));
     el(&mut out, 4, "vICMS", &fmt_amount(tax));
     el(
@@ -294,14 +300,24 @@ fn write_det(out: &mut String, numero: usize, line: &DocumentLine) {
 }
 
 /// Sum the tax-summary entries into `(vBC, vICMS)` totals at scale 2.
-fn totals(document: &CommercialDocument) -> (Decimal, Decimal) {
+///
+/// # Errors
+///
+/// Returns [`InfNfeError::TotalsUnrepresentable`] when summing the untrusted
+/// per-category amounts would exceed `Decimal`'s range; bail with a typed
+/// error rather than panicking on the overflowing `AddAssign`.
+fn totals(document: &CommercialDocument) -> Result<(Decimal, Decimal), InfNfeError> {
     let mut taxable = Decimal::ZERO;
     let mut tax = Decimal::ZERO;
     for summary in &document.tax_summary {
-        taxable += summary.taxable_amount.inner();
-        tax += summary.tax_amount.inner();
+        taxable = taxable
+            .checked_add(summary.taxable_amount.inner())
+            .ok_or(InfNfeError::TotalsUnrepresentable("vBC"))?;
+        tax = tax
+            .checked_add(summary.tax_amount.inner())
+            .ok_or(InfNfeError::TotalsUnrepresentable("vICMS"))?;
     }
-    (taxable, tax)
+    Ok((taxable, tax))
 }
 
 /// The 2-letter UF for a party, from the address subdivision when present,
@@ -904,6 +920,36 @@ mod tests {
         };
         let err = to_inf_nfe_xml(&sample_invoice(), &ctx).unwrap_err();
         assert!(matches!(err, InfNfeError::BadContext(_)));
+    }
+
+    #[test]
+    fn inf_nfe_overflowing_tax_summary_errors_not_panics() {
+        // Two tax-summary entries each at half of Decimal::MAX make the running
+        // `taxable` accumulator exceed the range on the second entry. Before the
+        // `checked_add` fix the `+=` AddAssign panicked; now it surfaces a typed
+        // [`InfNfeError::TotalsUnrepresentable`].
+        let near_max = DecimalValue::new(Decimal::MAX);
+        let mut doc = sample_invoice();
+        doc.tax_summary = vec![
+            TaxCategorySummary {
+                category_code: "S".to_owned(),
+                taxable_amount: near_max.clone(),
+                tax_amount: amt(0),
+                tax_rate: None,
+            },
+            TaxCategorySummary {
+                category_code: "S".to_owned(),
+                taxable_amount: near_max,
+                tax_amount: amt(0),
+                tax_rate: None,
+            },
+        ];
+        let err = to_inf_nfe_xml(&doc, &NfeContext::default())
+            .expect_err("summing two Decimal::MAX taxable amounts must error, not panic");
+        assert!(
+            matches!(err, InfNfeError::TotalsUnrepresentable("vBC")),
+            "expected TotalsUnrepresentable(\"vBC\"), got {err:?}"
+        );
     }
 
     #[test]

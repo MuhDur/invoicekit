@@ -132,6 +132,11 @@ pub enum UblError {
         /// Validation diagnostic.
         message: String,
     },
+    /// Summing the tax-category amounts overflowed the `Decimal` range. The
+    /// per-summary amounts are untrusted at serialization time, so an
+    /// out-of-range total is reported rather than allowed to panic.
+    #[error("tax amount summation overflowed the decimal range; hint: reduce the per-category tax amounts so their sum fits the decimal range")]
+    AmountOverflow,
 }
 
 /// Serialize an InvoiceKit commercial document into deterministic UBL 2.1 XML.
@@ -1249,7 +1254,7 @@ fn write_document_settlement(
         write_preserved_top_level(xml, document, "cac:AllowanceCharge")?;
     }
     if !document.tax_summary.is_empty() {
-        write_tax_total(xml, &document.tax_summary, currency);
+        write_tax_total(xml, &document.tax_summary, currency)?;
     }
     write_preserved_top_level(xml, document, "cac:WithholdingTaxTotal")?;
     write_monetary_total(xml, &document.monetary_total, currency);
@@ -1718,10 +1723,18 @@ fn write_payment_instruction(xml: &mut String, instruction: &PaymentInstruction)
     xml.push_str("</cac:PaymentMeans>");
 }
 
-fn write_tax_total(xml: &mut String, summaries: &[TaxCategorySummary], currency: &str) {
-    let total = summaries.iter().fold(Decimal::ZERO, |acc, summary| {
-        acc + summary.tax_amount.inner()
-    });
+fn write_tax_total(
+    xml: &mut String,
+    summaries: &[TaxCategorySummary],
+    currency: &str,
+) -> Result<(), UblError> {
+    // checked_add via try_fold: the per-summary tax amounts are untrusted at
+    // serialization time, so summing them can exceed Decimal::MAX. Surface the
+    // overflow as a typed error rather than letting Decimal's Add impl panic.
+    let total = summaries.iter().try_fold(Decimal::ZERO, |acc, summary| {
+        acc.checked_add(summary.tax_amount.inner())
+            .ok_or(UblError::AmountOverflow)
+    })?;
     xml.push_str("<cac:TaxTotal>");
     write_amount_element(xml, "cbc:TaxAmount", total, currency);
     for summary in summaries {
@@ -1743,6 +1756,7 @@ fn write_tax_total(xml: &mut String, summaries: &[TaxCategorySummary], currency:
         xml.push_str("</cac:TaxSubtotal>");
     }
     xml.push_str("</cac:TaxTotal>");
+    Ok(())
 }
 
 fn write_tax_scheme(xml: &mut String) {
@@ -2140,6 +2154,33 @@ mod tests {
     #[test]
     fn crate_name_is_cargo_package_name() {
         assert_eq!(crate_name(), "invoicekit-format-ubl");
+    }
+
+    /// Two tax-category amounts near `Decimal::MAX` make `write_tax_total`'s
+    /// running sum exceed the decimal range. Before the `checked_add` fix this
+    /// panicked inside `Decimal`'s `Add` impl; the serializer must instead
+    /// surface [`UblError::AmountOverflow`].
+    #[test]
+    fn tax_total_does_not_panic_on_decimal_summation_overflow() {
+        let mut document = fixture(DocumentType::Invoice, 1);
+        // Each summary individually fits; the running accumulator does not.
+        document.tax_summary = vec![
+            TaxCategorySummary {
+                category_code: "S".to_owned(),
+                taxable_amount: DecimalValue::new(Decimal::MAX),
+                tax_amount: DecimalValue::new(Decimal::MAX),
+                tax_rate: None,
+            },
+            TaxCategorySummary {
+                category_code: "AA".to_owned(),
+                taxable_amount: DecimalValue::new(Decimal::MAX),
+                tax_amount: DecimalValue::new(Decimal::MAX),
+                tax_rate: None,
+            },
+        ];
+        let err = to_xml(&document)
+            .expect_err("overflowing tax-amount summation must surface an error, not panic");
+        assert!(matches!(err, UblError::AmountOverflow));
     }
 
     fn parse_document(xml: &str) -> CommercialDocument {

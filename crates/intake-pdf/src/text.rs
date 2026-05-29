@@ -26,6 +26,7 @@ use std::fmt;
 use lopdf::content::Operation;
 use lopdf::{Document, Object, ObjectId};
 
+use crate::factur_x::decode_embedded_capped;
 use crate::PdfTextError;
 
 /// Maximum number of pages [`extract_pdf_text`] will process from an
@@ -44,6 +45,20 @@ const MAX_PAGES: usize = 4096;
 /// fragments; a million across the document is a generous ceiling no
 /// conformant invoice approaches.
 const MAX_FRAGMENTS_TOTAL: usize = 1_000_000;
+
+/// Hard ceiling on the *decompressed* size of a single page's content
+/// stream(s), in bytes. A real page's content stream is a few kilobytes
+/// to a few megabytes (a graphics-heavy page); even a verbose invoice
+/// page stays well under this, so a 64 MiB ceiling is generous for any
+/// conformant page while refusing a decompression bomb.
+///
+/// Without this cap, a hostile PDF can name a page content stream whose
+/// `FlateDecode` input is a few kilobytes but inflates to gigabytes, and
+/// force an unbounded allocation on intake. lopdf's `get_page_content`
+/// helper calls `Stream::decompressed_content()` with no cap, so we walk
+/// the page's content-stream object ids ourselves and decode each one
+/// through the same size-capped path the embedded-file extractor uses.
+const MAX_PAGE_CONTENT_SIZE: u64 = 64 * 1024 * 1024;
 
 /// The full text surface of a single PDF, page by page.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -207,7 +222,7 @@ fn box_dims(obj: &Object) -> Option<(f32, f32)> {
 }
 
 fn extract_page(doc: &Document, page_id: ObjectId) -> Result<Vec<TextFragment>, String> {
-    let content = doc.get_page_content(page_id).map_err(|e| e.to_string())?;
+    let content = page_content_capped(doc, page_id)?;
     let content = lopdf::content::Content::decode(&content).map_err(|e| e.to_string())?;
 
     let mut state = State::default();
@@ -216,6 +231,47 @@ fn extract_page(doc: &Document, page_id: ObjectId) -> Result<Vec<TextFragment>, 
         apply_operator(&op, &mut state, &mut frags);
     }
     Ok(frags)
+}
+
+/// Concatenate a page's content stream(s) with a hard cap on the total
+/// decompressed size.
+///
+/// lopdf's `Document::get_page_content` calls
+/// `Stream::decompressed_content()` on every page content stream with no
+/// size cap, which is a decompression-bomb sink on an untrusted PDF: a
+/// hostile page can name a `FlateDecode` content stream whose few
+/// kilobytes of input inflate to gigabytes. Instead we walk the page's
+/// content-stream object ids and decode each one through
+/// [`decode_embedded_capped`] — the same size-capped path the
+/// embedded-file extractor uses — accumulating against
+/// [`MAX_PAGE_CONTENT_SIZE`]. A page whose decoded content crosses the
+/// ceiling is refused with an error rather than materialised.
+fn page_content_capped(doc: &Document, page_id: ObjectId) -> Result<Vec<u8>, String> {
+    let mut content: Vec<u8> = Vec::new();
+    let mut budget = MAX_PAGE_CONTENT_SIZE;
+    for object_id in doc.get_page_contents(page_id) {
+        let Ok(stream) = doc.get_object(object_id).and_then(Object::as_stream) else {
+            // A content-stream reference that does not resolve to a
+            // stream is not text we can read; skip it, mirroring lopdf's
+            // own lenient handling.
+            continue;
+        };
+        // `budget` is whatever ceiling remains after earlier streams on
+        // this page, so the *total* decoded content is capped, not just
+        // each stream individually.
+        let Some(decoded) = decode_embedded_capped(stream, budget) else {
+            return Err(format!(
+                "page content stream exceeds {MAX_PAGE_CONTENT_SIZE}-byte decompression ceiling"
+            ));
+        };
+        budget = budget.saturating_sub(decoded.len() as u64);
+        content.extend_from_slice(&decoded);
+        // lopdf inserts no separator between concatenated content
+        // streams; the PDF spec treats them as one logical stream and a
+        // token cannot straddle the boundary, so a newline is harmless
+        // and matches `get_page_content`'s `write_all` concatenation.
+    }
+    Ok(content)
 }
 
 #[derive(Debug, Default)]
@@ -758,6 +814,121 @@ mod tests {
         let mut bytes = Vec::new();
         doc.save_to(&mut bytes).expect("serialize many-fragment pdf");
         bytes
+    }
+
+    /// `FlateDecode`-compress `plain` into a zlib stream the way a PDF
+    /// writer would, returning the on-wire compressed bytes.
+    fn flate_compress(plain: &[u8]) -> Vec<u8> {
+        use std::io::Write as _;
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        encoder.write_all(plain).expect("zlib write");
+        encoder.finish().expect("zlib finish")
+    }
+
+    /// Build a one-page PDF whose page content stream carries `plain`
+    /// `FlateDecode`-compressed. The on-wire bytes are the compressed
+    /// form (tiny even when `plain` is enormous — a decompression bomb);
+    /// the page's *decompressed* content is `plain`.
+    fn build_pdf_with_flate_page_content(plain: &[u8]) -> Vec<u8> {
+        use lopdf::Dictionary;
+        let mut doc = Document::with_version("1.4");
+        let pages_id = doc.new_object_id();
+
+        let mut font = Dictionary::new();
+        font.set("Type", "Font");
+        font.set("Subtype", "Type1");
+        font.set("BaseFont", "Helvetica");
+        let font_id = doc.add_object(Object::Dictionary(font));
+
+        let mut content_stream = lopdf::Stream::new(Dictionary::new(), flate_compress(plain));
+        // Mark the on-wire bytes as FlateDecode so the extractor decodes
+        // them through the size-capped path. `Stream::new` already set
+        // `/Length` to the compressed size.
+        content_stream
+            .dict
+            .set("Filter", Object::Name(b"FlateDecode".to_vec()));
+        let content_id = doc.add_object(content_stream);
+
+        let mut fonts = Dictionary::new();
+        fonts.set("F1", Object::Reference(font_id));
+        let mut resources = Dictionary::new();
+        resources.set("Font", Object::Dictionary(fonts));
+        let mut page = Dictionary::new();
+        page.set("Type", "Page");
+        page.set("Parent", Object::Reference(pages_id));
+        page.set(
+            "MediaBox",
+            Object::Array(vec![
+                Object::Integer(0),
+                Object::Integer(0),
+                Object::Integer(612),
+                Object::Integer(792),
+            ]),
+        );
+        page.set("Resources", Object::Dictionary(resources));
+        page.set("Contents", Object::Reference(content_id));
+        let leaf_id = doc.add_object(Object::Dictionary(page));
+
+        let mut pages = Dictionary::new();
+        pages.set("Type", "Pages");
+        pages.set("Kids", Object::Array(vec![Object::Reference(leaf_id)]));
+        pages.set("Count", Object::Integer(1));
+        doc.objects.insert(pages_id, Object::Dictionary(pages));
+        let mut catalog = Dictionary::new();
+        catalog.set("Type", "Catalog");
+        catalog.set("Pages", Object::Reference(pages_id));
+        let catalog_id = doc.add_object(Object::Dictionary(catalog));
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).expect("serialize flate-content pdf");
+        bytes
+    }
+
+    /// Regression for the page-content decompression bomb: a hostile PDF
+    /// names a page content stream whose `FlateDecode` input is a few
+    /// kilobytes but inflates to far more than the
+    /// [`MAX_PAGE_CONTENT_SIZE`] ceiling.
+    ///
+    /// Before the fix, `extract_page` called lopdf's
+    /// `Document::get_page_content`, which runs the unbounded
+    /// `Stream::decompressed_content()` on every page content stream and
+    /// materialises the whole bomb. With the size-capped walk in place
+    /// the over-cap page content is refused and extraction surfaces a
+    /// typed [`PdfTextError::Page`] error instead of exhausting memory.
+    #[test]
+    fn rejects_page_content_decompression_bomb() {
+        // 256 MiB of a benign content operator repeated compresses to a
+        // few kilobytes of DEFLATE but inflates well past the 64 MiB
+        // page-content ceiling.
+        let bomb = b" 0 0 0 0 0 0 cm\n".repeat(256 * 1024 * 1024 / 15);
+        let pdf = build_pdf_with_flate_page_content(&bomb);
+        // The on-wire PDF stays tiny — proof the danger is the
+        // *decompressed* size, not the input size.
+        assert!(
+            pdf.len() < 1024 * 1024,
+            "compressed bomb PDF should be small, got {} bytes",
+            pdf.len()
+        );
+        let err = extract_pdf_text(&pdf)
+            .expect_err("over-cap page content must be refused, not materialised");
+        assert!(
+            matches!(err, PdfTextError::Page { .. }),
+            "expected Page error, got {err:?}"
+        );
+    }
+
+    /// A normally-sized, `FlateDecode`-compressed page content stream
+    /// must still extract through the size-capped path. This proves the
+    /// cap is behaviour-preserving for conformant input.
+    #[test]
+    fn extracts_flate_compressed_page_content() {
+        let pdf = build_pdf_with_flate_page_content(
+            b"BT /F1 12 Tf 72 720 Td (Compressed page) Tj ET\n",
+        );
+        let st = extract_pdf_text(&pdf).expect("flate-compressed page extracts");
+        assert_eq!(st.pages.len(), 1);
+        assert_eq!(st.pages[0].fragments[0].text, "Compressed page");
     }
 
     /// A single page that emits more than [`MAX_FRAGMENTS_TOTAL`]

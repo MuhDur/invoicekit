@@ -238,8 +238,8 @@ fn read_filespec(doc: &Document, filespec: &Dictionary) -> Option<Vec<u8>> {
     None
 }
 
-/// Decode an embedded-file stream while refusing to materialise more
-/// than `limit` bytes.
+/// Decode a PDF stream while refusing to materialise more than `limit`
+/// bytes.
 ///
 /// For the common single-`FlateDecode` case (what every Factur-X writer
 /// emits) the DEFLATE stream is read through a [`Read::take`] reader
@@ -248,8 +248,18 @@ fn read_filespec(doc: &Document, filespec: &Dictionary) -> Option<Vec<u8>> {
 /// (or filter chain, or an uncompressed stream) we fall back to lopdf's
 /// decoder and then enforce the same size cap on the result. Either way
 /// an output larger than `limit` yields `None`, which the caller treats
-/// as "no usable attachment".
-fn decode_embedded_capped(stream: &Stream, limit: u64) -> Option<Vec<u8>> {
+/// as "no usable bytes".
+///
+/// Shared with the page-content extractor in `text.rs`, which faces the
+/// same decompression-bomb sink on every page content stream of an
+/// untrusted PDF.
+// `pub(crate)` is correct here (the helper is crate-internal, never part
+// of the public API). `redundant_pub_crate` would have us write `pub`
+// since the enclosing module is private, but that trips `unreachable_pub`
+// — the two lints disagree, so we pin the accurate visibility and silence
+// the nursery lint locally.
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) fn decode_embedded_capped(stream: &Stream, limit: u64) -> Option<Vec<u8>> {
     // Read one byte past the cap so an output landing exactly on `limit`
     // is accepted while anything larger is detected and rejected.
     let read_budget = limit.saturating_add(1);
