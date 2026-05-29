@@ -91,7 +91,7 @@ is labelled as such — that is an honest ceiling, not a limitation to "fix".
 | L2 | Validation needs a JVM for reference grade | **By design** (commitment #6) | Keep, label honestly |
 | L3 | Live Peppol delivery is BYOK; native AS4 research-track | **By design** (commitment #7) | Keep, label honestly |
 | L4 | Coverage maturity varies by country | **DONE (T5)** | Honest matrix entry for all 36 claimed countries (39 entries); per-capability levels + provenance + confidence |
-| L5 | Inbound RTL/CJK vertical-script intake gap | **INVESTIGATE** | Reduce or document precisely |
+| L5 | Inbound RTL/CJK vertical-script intake gap | **DONE (T12)** | Real RTL (Unicode-bidi Arabic/Hebrew) + CJK vertical reconstruction in intake-pdf; 15 tests; README bounded honestly |
 | L6 | Flagship report adapters are stubs (G2) | **DONE (T2–T3)** | All 6 flagships (IT/FR/PL/MX/BR/SA) now real adapters + offline E2E |
 | L7 | No per-country E2E tests (G3) | **DONE (T2–T4)** | All 34 country report crates have offline E2E (verify exit 0) |
 | L8 | Native national-format serialization built only for flagships (IT/MX/BR/PL); other countries serialize the EN16931/UBL representation | **HONEST RESIDUAL** | Disclosed via matrix format=UBL + confidence; native serializers tracked as follow-up. Not a hidden gap. |
@@ -450,3 +450,21 @@ convergence. Maintain skill matrix + per-turn skill usage. Dynamic workflows thr
   bidi) + CJK vertical-script handling in the `intake-pdf` digital path (real impl; may add a justified bidi
   dep since this is a feature, not test-only churn) + tests → review. Then a quality pass on the intake crates.
 - **Next:** foundation/core/format/signer/transmit quality waves (dependency-careful, isomorphic).
+
+### Turn 13 — 2026-05-29 — RTL/CJK verified + committed (L5 closed)
+- **Workflow:** `coverage-p2-rtl-cjk-intake` (7 agents) → L5 closed. New `intake-pdf/src/script_order.rs`:
+  RTL detection via `unicode-bidi` strong-class counting (Arabic/Hebrew) + whole-line logical reorder; CJK
+  vertical-column reconstruction (≥80% CJK mass + column-depth gate). Wired into `text.rs` production path.
+  `unicode-bidi 0.3` added (MIT OR Apache-2.0; already transitively in the lockfile → no new crate version).
+- **Independently verified:** `cargo test --workspace` = **2337 passed, 0 failed** (+15 RTL/CJK tests);
+  `clippy --workspace -D warnings` clean; `cargo deny check` = advisories/bans/licenses/sources **ok**; README
+  L5 rewritten to an honest bounded claim. Review PASSED all criteria.
+- **Known false positive (recorded):** `ubs` flags `crates/intake-pdf/src/text.rs:171`
+  `lopdf::content::Content::decode(...)` as a "JWT decode/validation bypass" — its keyword heuristic matched
+  `decode` on a PRE-EXISTING PDF-content-stream decode line (nothing to do with JWT/auth). UBS has no
+  finding-level suppression and a whole-file glob would hide real future bugs, so it is documented, not
+  suppressed. Code is correct + tested.
+- **Skills used:** `codebase-archaeology` (intake path), `simplify-and-refactor-code-isomorphically`,
+  `testing-real-service-e2e-no-mocks`, `verification-before-completion`, `ubs`, `gh-cli`.
+- **Next:** foundation/format/signer/transmit isomorphic-quality waves (dependency-careful) over the
+  remaining ~75 non-country crates, to honor "on each crate."

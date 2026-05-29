@@ -154,7 +154,7 @@ Roughly sixty jurisdictions are covered in two ways. The ~35 countries that use 
 - **Validation needs a JVM.** The reference validators run as an out-of-process Java worker. The pure-Rust EN 16931 checker covers the common rules, but the conformance-grade path calls the worker.
 - **Live Peppol delivery is bring-your-own-credentials.** You hold the access-point certificate and endpoint; InvoiceKit drives the transmission. Native AS4 transport is a research track, not a Year-1 feature.
 - **Coverage maturity varies by country.** Do not assume a country is fully supported because it is listed. Run `invoicekit capabilities --from <X> --to <Y>` for the real answer.
-- **Inbound reading of right-to-left and CJK vertical scripts** is a documented gap in the digital-PDF intake path.
+- **Right-to-left and CJK vertical scripts are reconstructed in the digital-PDF intake path.** Arabic and Hebrew lines are detected with the Unicode Bidirectional Algorithm and rebuilt into logical reading order; CJK vertical columns are read right-to-left, each column top-to-bottom. Two bounds remain: reconstruction works at show-text-run granularity (a multi-run embedded left-to-right phrase inside a right-to-left line keeps its place on the line but its runs land reversed among themselves), and a producer that bakes visual-order glyphs into each run instead of logical order is left to the OCR / vision fallback.
 
 ## FAQ
 

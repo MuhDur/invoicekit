@@ -17,6 +17,11 @@ path = "src/lib.rs"
 [dependencies]
 lopdf = { version = "0.36", default-features = false }
 thiserror.workspace = true
+# Unicode Bidirectional Algorithm (UAX #9). Used to detect right-to-
+# left lines in extracted PDF text and rebuild logical reading order.
+# License "MIT OR Apache-2.0" (allowed by deny.toml); already present
+# in the workspace lockfile as a transitive dependency.
+unicode-bidi = "0.3"
 
 [lints]
 workspace = true

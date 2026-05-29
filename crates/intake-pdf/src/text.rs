@@ -5,7 +5,12 @@
 //! Walks every page's content stream, tracks the text-positioning
 //! state (current Text matrix, leading, font size), and emits one
 //! [`TextFragment`] per `Tj` / `TJ` / `'` / `"` operator. Fragments
-//! are then sorted into reading order per page.
+//! are then sorted into reading order per page by the
+//! `script_order` module, which is script-aware: left-to-right
+//! Latin lines sort left-to-right, right-to-left lines (Arabic,
+//! Hebrew) are rebuilt into logical order via the Unicode
+//! Bidirectional Algorithm, and CJK vertical columns are read
+//! right-to-left, top-to-bottom.
 //!
 //! The implementation is intentionally simple: no character mapping
 //! (`CMap`) reverse-lookups, no font kerning, no rendering-mode
@@ -63,7 +68,11 @@ pub struct PageText {
     pub width_pt: f32,
     /// Page height in PDF user-space units.
     pub height_pt: f32,
-    /// Text fragments sorted top-to-bottom then left-to-right.
+    /// Text fragments in reading order. Left-to-right lines sort
+    /// top-to-bottom then left-to-right; right-to-left lines are
+    /// reconstructed into logical order; CJK vertical columns are
+    /// emitted right-to-left, each column top-to-bottom. See the
+    /// `script_order` module.
     pub fragments: Vec<TextFragment>,
 }
 
@@ -110,7 +119,7 @@ pub fn extract_pdf_text(bytes: &[u8]) -> Result<StructuredText, PdfTextError> {
         let (width_pt, height_pt) = page_size(&doc, page_id);
         let fragments = extract_page(&doc, page_id)
             .map_err(|detail| PdfTextError::Page { page: idx, detail })?;
-        let fragments = sort_reading_order(fragments);
+        let fragments = crate::script_order::reading_order(fragments);
         pages.push(PageText {
             index: idx,
             width_pt,
@@ -261,14 +270,7 @@ fn apply_operator(op: &Operation, state: &mut State, frags: &mut Vec<TextFragmen
                         text.push_str(&s);
                     }
                 }
-                if !text.is_empty() && state.in_text {
-                    frags.push(TextFragment {
-                        x: state.tm[4],
-                        y: state.tm[5],
-                        font_size: state.font_size,
-                        text,
-                    });
-                }
+                push_run(text, state, frags);
             }
         }
         _ => {}
@@ -276,14 +278,18 @@ fn apply_operator(op: &Operation, state: &mut State, frags: &mut Vec<TextFragmen
 }
 
 fn emit(string: Option<&Object>, state: &State, frags: &mut Vec<TextFragment>) {
-    if !state.in_text {
-        return;
-    }
     let Some(obj) = string else { return };
     let Some(text) = decode_string(obj) else {
         return;
     };
-    if text.is_empty() {
+    push_run(text, state, frags);
+}
+
+/// Record one decoded run as a [`TextFragment`] at the current text
+/// position. Drops the run when text positioning is inactive (no open
+/// `BT`/`ET` block) or when the decoded text is empty.
+fn push_run(text: String, state: &State, frags: &mut Vec<TextFragment>) {
+    if !state.in_text || text.is_empty() {
         return;
     }
     frags.push(TextFragment {
@@ -345,22 +351,6 @@ fn matmul(a: &[f32; 6], b: &[f32; 6]) -> [f32; 6] {
         a[4].mul_add(b[0], a[5].mul_add(b[2], b[4])),
         a[4].mul_add(b[1], a[5].mul_add(b[3], b[5])),
     ]
-}
-
-fn sort_reading_order(mut frags: Vec<TextFragment>) -> Vec<TextFragment> {
-    frags.sort_by(|a, b| {
-        // Group fragments into approximate lines: any two fragments
-        // whose y-coords are within half a font-height belong to the
-        // same line and sort left-to-right; otherwise sort top-to-
-        // bottom (larger y first).
-        let line_tol = 0.5 * a.font_size.max(b.font_size).max(8.0);
-        if (a.y - b.y).abs() <= line_tol {
-            a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal)
-        } else {
-            b.y.partial_cmp(&a.y).unwrap_or(std::cmp::Ordering::Equal)
-        }
-    });
-    frags
 }
 
 #[cfg(test)]

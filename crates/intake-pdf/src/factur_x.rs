@@ -162,16 +162,8 @@ fn walk_name_tree(doc: &Document, node: &Dictionary) -> Result<Option<Vec<u8>>, 
 /// keys are inspected, and within the `EF` entry we accept either
 /// `F` (legacy ASCII name) or `UF` (Unicode name).
 fn read_filespec(doc: &Document, filespec: &Dictionary) -> Option<Vec<u8>> {
-    let name = filespec
-        .get(b"F")
-        .ok()
-        .and_then(|o| resolve_object(doc, o).ok().and_then(string_value))
-        .or_else(|| {
-            filespec
-                .get(b"UF")
-                .ok()
-                .and_then(|o| resolve_object(doc, o).ok().and_then(string_value))
-        })?;
+    let name = resolved_string(doc, filespec, b"F")
+        .or_else(|| resolved_string(doc, filespec, b"UF"))?;
     if !is_canonical_factur_x_name(&name) {
         // Wrong attachment name — skip silently, we may be looking
         // at /AF entries that aren't the XML payload.
@@ -204,6 +196,14 @@ fn resolve_object<'a>(doc: &'a Document, obj: &'a Object) -> lopdf::Result<&'a O
         Object::Reference(id) => doc.get_object(*id),
         _ => Ok(obj),
     }
+}
+
+/// Look up `key` in `dict`, follow an indirect reference if present,
+/// and decode the target as a string. `None` when the key is absent
+/// or its value isn't a string/name object.
+fn resolved_string(doc: &Document, dict: &Dictionary, key: &[u8]) -> Option<String> {
+    let obj = dict.get(key).ok()?;
+    resolve_object(doc, obj).ok().and_then(string_value)
 }
 
 fn string_value(obj: &Object) -> Option<String> {

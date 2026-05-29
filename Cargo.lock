@@ -2385,6 +2385,7 @@ version = "0.1.1"
 dependencies = [
  "lopdf",
  "thiserror 2.0.18",
+ "unicode-bidi",
 ]
 
 [[package]]

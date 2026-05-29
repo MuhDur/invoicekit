@@ -283,6 +283,20 @@ pub enum CitationError {
     EmptyModelId,
 }
 
+/// Return `err` when `value` is empty, otherwise `Ok(())`.
+///
+/// Shared guard for the non-empty-string checks the validated
+/// constructors run. The error is only yielded on the empty
+/// branch, so passing a constructed variant is free (the unit
+/// variants carry no payload).
+fn require_non_empty(value: &str, err: CitationError) -> Result<(), CitationError> {
+    if value.is_empty() {
+        Err(err)
+    } else {
+        Ok(())
+    }
+}
+
 /// Discriminated taxonomy of source pointers the intake
 /// layers attach to an extracted value.
 ///
@@ -390,13 +404,9 @@ impl FieldCitation {
         layer: ExtractionLayer,
     ) -> Result<Self, CitationError> {
         let path = path.into();
-        if path.is_empty() {
-            return Err(CitationError::EmptyPath);
-        }
+        require_non_empty(&path, CitationError::EmptyPath)?;
         let value = value.into();
-        if value.is_empty() {
-            return Err(CitationError::EmptyValue);
-        }
+        require_non_empty(&value, CitationError::EmptyValue)?;
         match &source {
             CitationSource::OcrSpan { span_id, .. } if span_id.is_empty() => {
                 return Err(CitationError::EmptyOcrSpanId);
@@ -466,13 +476,9 @@ impl BoundingBoxCitation {
         extractor_id: impl Into<String>,
     ) -> Result<Self, CitationError> {
         let path = path.into();
-        if path.is_empty() {
-            return Err(CitationError::EmptyPath);
-        }
+        require_non_empty(&path, CitationError::EmptyPath)?;
         let extractor_id = extractor_id.into();
-        if extractor_id.is_empty() {
-            return Err(CitationError::EmptyExtractorId);
-        }
+        require_non_empty(&extractor_id, CitationError::EmptyExtractorId)?;
         Ok(Self {
             path,
             bounding_box,
