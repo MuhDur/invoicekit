@@ -668,7 +668,7 @@ performance** skills and closes the residuals.
 | Full end-to-end test coverage | ✅ 2404 tests, every country crate has offline E2E |
 | Skill matrix + skills-used log | ✅ §4 + per-turn entries |
 | Code quality (simplify-and-refactor) | ✅ all 109 crates evaluated to convergence |
-| Audit skills (multi-pass bug hunt) | 🔄 R1: 22/22, R2: 9/9, R3: 9/9 resolved (T24, incl. canonical fixed-forward + now property-tested); trend 22→9→9; R5 = class-exhaustive sweep to force convergence |
+| Audit skills (multi-pass bug hunt) | ✅ CONVERGED (T26): 50 bugs fixed (R1 22, R2 9, R3 9, class-sweep 10); confirming re-sweep 216 sites / 0 unguarded across all 5 classes; trend 22→9→9→0. (1 integer-div-by-zero lead → 6th-class sweep pending) |
 | Performance | ✅ already engineered + CI-gated + budgeted (D19) |
 | Release / build outputs | ✅ v0.1.1 published, all artifacts |
 
@@ -799,3 +799,30 @@ performance** skills and closes the residuals.
 - **Next:** a confirming class re-sweep — if all 5 classes now read zero, the security-audit loop has CONVERGED;
   then move to the deferred strand (D20): the targeted simplify-and-refactor pass over the guard/helper code
   accumulated across rounds 1–5.
+
+### Turn 26 — 2026-05-29 — CONVERGED: confirming class re-sweep reads zero across all 5 classes
+- **Confirming class re-sweep** (read-only, same 5-class enumeration re-run against the now-fixed code, fresh live
+  agents): **216 sites examined, `unique_count = 0` — every class CLEAN.**
+
+  | Class | sites examined | unguarded |
+  |---|---|---|
+  | multibyte `&str` panic | 52 | **0** |
+  | unchecked `Decimal` overflow | 41 | **0** |
+  | unbounded decompression / alloc | 31 | **0** |
+  | markup / URL / path injection | 61 | **0** |
+  | unbounded recursion / loop | 31 | **0** |
+
+- **The loop-until-dry security audit has CONVERGED.** Trend across rounds: **22 → 9 → 9 → 0** confirmed bugs.
+  The Decimal enumerator independently re-verified the boundary defenses: `money` (full checked API),
+  `tax-calculation` (routes through `Money`), every report/format accumulation loop (checked), `validate-ubl-cii`
+  (1e16 magnitude bound at `decimal()`), and confirmed `ir::DecimalValue` is a plain newtype with no hidden
+  unchecked-arithmetic trait impls anywhere in the workspace.
+- **One newly-surfaced lead in a *different* class** (noted in passing by the Decimal enumerator, not part of the
+  5 swept classes): `bridges/stripe-invoicing/src/lib.rs:504` computes `line.amount / quantity` on an untrusted
+  i64 `quantity` → **integer divide-by-zero panic**. Logged for a 6th-class sweep (integer div/rem-by-zero +
+  untrusted-integer overflow) so this class is also driven to zero before the audit phase closes.
+- **Total confirmed bugs found & fixed across the whole audit campaign:** 22 (R1) + 9 (R2) + 9 (R3) + 10
+  (class sweep) = **50**, every one with a reproducing regression test; suite grew 2404 → **2455** green.
+- **Skills used:** `multi-pass-bug-hunting` (convergence confirmation), `verification-before-completion`.
+- **Next:** (1) 6th-class enumeration + fix (integer div/rem-by-zero); (2) then the deferred D20 strand — the
+  targeted `simplify-and-refactor-code-isomorphically` pass over the guard/helper code added across rounds 1–5.
