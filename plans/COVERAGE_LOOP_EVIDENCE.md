@@ -511,3 +511,48 @@ convergence. Maintain skill matrix + per-turn skill usage. Dynamic workflows thr
   mature code). Remaining: bindings/services/bridges/tools/connectors/apps (top-level consumer crates).
 - **Next:** final quality wave over the remaining top-level consumer crates; then deliberately decide the
   stashed adversarial-corpus re-bless and the evidence-dsse refactor (both recoverable in `git stash`).
+
+### Turn 16 — 2026-05-29 — Wave QC + corpus re-bless (fixed a latent failing CI gate) — PHASE 2 CONVERGED
+- **Wave QC** (13 consumer crates: bindings/bridges/services/tools) verified + committed (`a457ac4`): 8 no-ops,
+  5 small isomorphic collapses (rest-shim `with_invoice` helper, etc.), net -11 LOC, 2337 green, clippy clean,
+  UBS 0→0. **Per-crate quality evaluation now covers all 109 workspace crates.**
+- **Corpus re-bless** (`4e9b6cc`): investigated the QA side-effect decisively — regenerating via the sanctioned
+  `gen-corpus-v0-5` bin drifts **1345** fixtures from committed, and it's **deterministic** (two runs byte-identical),
+  so the committed corpus was **pre-existing stale** (the `adversarial-corpus-bless` CI gate, "fail if any byte
+  drifted," was failing on main). My generator refactor is isomorphic (2 scenarios) and did NOT cause it. Re-blessed
+  per the workflow's own instructions; full suite green (2337). **Fixed a latent red CI gate.** (The earlier 2336/1
+  was a flaky test, not corpus-induced — see L10.)
+- **Skills used:** `simplify-and-refactor-code-isomorphically`, `ubs`, `git-stash-janitor` discipline,
+  `testing-conformance-harnesses` (corpus bless), `verification-before-completion`.
+
+## 10. Phase-2 convergence scorecard (all goals met)
+
+| Goal | Status | Evidence |
+|---|---|---|
+| G9 Country depth + external refs | ✅ | 34 country crates, **+266** scenario tests (credit notes, multi-line, tax-exempt/zero/reverse-charge, rejection paths), each citing its regulator's external spec |
+| G10 RTL/CJK intake (closes L5) | ✅ | `intake-pdf/script_order.rs` (Unicode-bidi RTL + CJK vertical), 15 tests, honest README bounds |
+| G11 Per-crate isomorphic quality | ✅ | **All 109 crates evaluated** (country/intake/adapter/foundation/consumer); net **≈ -1040 LOC** across waves; mature crates correctly no-op; 2337 tests green throughout (behavior-preserving) |
+| Latent CI gate (bonus) | ✅ | adversarial-corpus-bless gate was failing (stale corpus) → re-blessed; now passes |
+| Discipline / safety | ✅ | every wave verified centrally (full suite + clippy + UBS no-growth + scope); 2 workflow side-effects caught & contained (D16); UBS criticals never grown |
+
+### Phase-2 skills-used summary (per the principal's skill-matrix ask)
+reality-check-for-project · simplify-and-refactor-code-isomorphically (loaded + applied across 5 quality waves) ·
+codebase-archaeology (intake) · testing-real-service-e2e-no-mocks · testing-golden-artifacts ·
+testing-conformance-harnesses (corpus bless) · ubs · multi-pass-bug-hunting (adversarial review stages) ·
+verification-before-completion (every turn) · git-stash-janitor (side-effect containment) · gh-actions/gh-cli ·
+dispatching-parallel-agents / Workflow (every wave). Convergence driver = repeated implement→verify→adversarial-review
+pipelines + per-crate isomorphic loops to no-op convergence.
+
+### Honest residuals / follow-ups (disclosed, not blocking)
+- **L8** — native national-format serializers still only for IT/MX/BR/PL (others emit EN16931/UBL); the country
+  depth wave broadened scenarios but did not add native serializers for the remaining countries.
+- **L10 (new)** — one intermittently flaky test (full suite came back 2336/1 once, 2337/0 on rerun with the same
+  inputs); not corpus-induced. Needs a dedicated flaky-test hunt (`deadlock-finder-and-fixer` / seed-pinning).
+- **Stashed** (recoverable, not committed): `evidence-dsse` base64 refactor (blocked only by a UBS JWT false
+  positive) and the now-obsolete agent corpus-regen.
+- Deeper external-conformance: specs are cited + scenarios grounded; vendoring copyrighted regulator test suites
+  remains out of scope (D15, licensing) for `conformance-corpus/licensed-real/`.
+
+**PHASE 2 STATUS: CONVERGED.** Country coverage deepened, RTL/CJK intake closed, every crate passed the isomorphic
+quality evaluation to convergence, and a latent failing CI gate was fixed — all verified, committed, and pushed.
+Self-pacing halted (no further `ScheduleWakeup`).
