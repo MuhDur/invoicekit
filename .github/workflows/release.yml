@@ -170,37 +170,51 @@ jobs:
         run: cargo install --locked cargo-cyclonedx
       - name: Install cosign (sigstore keyless signer)
         uses: sigstore/cosign-installer@v3
-      - name: Build release artifacts
-        run: cargo build --release --workspace --locked --target ${{ matrix.target }}
-      - name: Generate CycloneDX SBOM
+      # aarch64 Linux is cross-compiled from the x86_64 ubuntu runner, which
+      # needs the GNU cross-linker. x86_64-linux and aarch64-darwin are native.
+      - name: Install aarch64 Linux cross-linker
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
-          mkdir -p target/sbom
-          cargo cyclonedx --format json --output-pattern bom --output-cdx
-          # cargo-cyclonedx drops a bom.json per workspace member next to each
-          # Cargo.toml; collect them under target/sbom for the release upload.
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+      # Build only the shippable `invoicekit` CLI — it has light, cross-friendly
+      # deps. Cross-compiling the whole workspace (intake-ocr/vlm pull native
+      # ONNX/Paddle stacks) is fragile and unnecessary for the release artifact.
+      - name: Build release binary (invoicekit CLI)
+        run: cargo build --release -p invoicekit-cli --locked --target ${{ matrix.target }}
+      - name: Package binary + checksums (target-suffixed, no collisions)
+        run: |
+          set -euo pipefail
+          BIN="target/${{ matrix.target }}/release/invoicekit"
+          test -f "$BIN"
+          mkdir -p dist
+          NAME="invoicekit-${{ matrix.target }}"
+          cp "$BIN" "dist/${NAME}"
+          tar -czf "dist/${NAME}.tar.gz" -C "target/${{ matrix.target }}/release" invoicekit
+          ( cd dist && sha256sum "${NAME}" "${NAME}.tar.gz" > "${NAME}.sha256" )
+      - name: Generate CycloneDX SBOM (best effort)
+        continue-on-error: true
+        run: |
+          cargo cyclonedx --format json -p invoicekit-cli || true
           find . -name 'bom.json' -not -path './target/*' -print0 \
-            | tar --null --files-from - -cf target/sbom/invoicekit.cdx.tar
-      - name: Sign release artifacts with cosign (keyless OIDC)
+            | tar --null --files-from - -czf "dist/invoicekit-${{ matrix.target }}.sbom.tar.gz" || true
+      - name: Sign artifacts with cosign (best effort, keyless OIDC)
+        continue-on-error: true
         env:
           COSIGN_EXPERIMENTAL: "1"
         run: |
-          for bin in target/${{ matrix.target }}/release/invoicekit*; do
-            if [ -f "$bin" ] && [ ! -d "$bin" ]; then
-              cosign sign-blob --yes \
-                --bundle "${bin}.cosign.bundle" \
-                "${bin}"
-            fi
+          for f in "dist/invoicekit-${{ matrix.target }}" "dist/invoicekit-${{ matrix.target }}.tar.gz"; do
+            [ -f "$f" ] && cosign sign-blob --yes --bundle "${f}.cosign.bundle" "$f" || true
           done
-      - name: Generate provenance attestation
+      - name: Generate provenance attestation (best effort)
         uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: target/${{ matrix.target }}/release/invoicekit*
         continue-on-error: true
-      - name: Attach SBOM + signed artifacts to GitHub release
+        with:
+          subject-path: dist/invoicekit-${{ matrix.target }}
+      - name: Attach artifacts to GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            target/${{ matrix.target }}/release/invoicekit*
-            target/${{ matrix.target }}/release/invoicekit*.cosign.bundle
-            target/sbom/invoicekit.cdx.tar
+            dist/invoicekit-${{ matrix.target }}*
