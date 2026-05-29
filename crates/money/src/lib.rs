@@ -130,19 +130,12 @@ impl Money {
     }
 
     /// Returns the currency as the three-letter ISO 4217 string.
-    ///
-    /// Internally this round-trips through serde because `Iso4217Code`
-    /// does not expose the inner string directly; if serde fails for any
-    /// reason (which should never happen for a validated `Iso4217Code`)
-    /// this returns an empty string.
     #[must_use]
     pub fn currency_code(&self) -> String {
-        // serde-derived `Display`-equivalent: a transparent newtype around
-        // a validated three-letter ASCII string serializes as itself.
-        serde_json::to_value(&self.currency)
-            .ok()
-            .and_then(|v| v.as_str().map(ToOwned::to_owned))
-            .unwrap_or_default()
+        // `Iso4217Code::as_str` exposes the validated inner string directly, so
+        // there is no need to round-trip through serde to recover it. For a
+        // validated code the two produce the same three-letter string.
+        self.currency.as_str().to_owned()
     }
 
     /// Returns zero in the same currency.
