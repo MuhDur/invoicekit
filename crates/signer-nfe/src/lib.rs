@@ -366,14 +366,15 @@ impl NfeProvider for MockNfeProvider {
     }
 }
 
-/// Build a 44-character chave de acesso.
+/// Build a 44-character mock chave de acesso.
 ///
-/// Lays out `UF (2) | AAMM (4) | CNPJ (14) | mod (2) | série
-/// (3) | nNF (9) | tpEmis (1) | cNF (8) | cDV (1)`
-/// deterministically from the inputs. The real SEFAZ flow
-/// computes cNF from the emitting system and cDV via mod-11;
-/// the substrate uses fixed `00000000` + `0` so the
-/// substrate's keys round-trip stably across runs.
+/// Produces a deterministic 44-char key seeded with the IBGE UF
+/// code, the CNPJ, and `nNF` interpolated into a FIXED template
+/// (the remaining positions are literal filler), so the
+/// substrate's keys round-trip stably across runs. This is NOT a
+/// spec-conformant positional chave — the real SEFAZ flow lays out
+/// `UF | AAMM | CNPJ | mod | série | nNF | tpEmis | cNF | cDV`,
+/// computes cNF from the emitting system, and cDV via mod-11.
 #[must_use]
 pub fn build_chave_acesso(uf: UfCode, cnpj: &str, n_nf: u64) -> String {
     let uf_code = uf_numeric_code(uf);
