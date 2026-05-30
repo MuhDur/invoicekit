@@ -1422,7 +1422,13 @@ fn write_invoice_preserved_before_supplier(
         if !preserved {
             write_native_invoice_period(xml, document, element);
         }
-        write_native_document_references(xml, document, element);
+        // cac:OrderReference (BT-13) is 0..1, so a preserved one suppresses the
+        // native emit (preserved wins). cac:BillingReference (BT-25) is 0..n —
+        // preserved and native references legitimately coexist, so it is never
+        // gated.
+        if !(preserved && element == "cac:OrderReference") {
+            write_native_document_references(xml, document, element);
+        }
     }
     Ok(())
 }
@@ -1449,7 +1455,11 @@ fn write_credit_note_preserved_before_supplier(
         if !preserved {
             write_native_invoice_period(xml, document, element);
         }
-        write_native_document_references(xml, document, element);
+        // OrderReference (BT-13) 0..1: preserved wins. BillingReference (BT-25)
+        // 0..n: preserved + native coexist, never gated.
+        if !(preserved && element == "cac:OrderReference") {
+            write_native_document_references(xml, document, element);
+        }
     }
     Ok(())
 }
@@ -2803,6 +2813,60 @@ mod tests {
             "expected preserved-reference replay to be schema valid, findings: {:?}",
             schema_report.findings
         );
+    }
+
+    /// Gating test: a parse-then-enrich document carrying BOTH a preserved
+    /// cac:OrderReference AND a caller-set Order-class IR reference must emit
+    /// cac:OrderReference EXACTLY ONCE (preserved wins) — BT-13 is 0..1, so two
+    /// would be malformed. cac:BillingReference (BT-25) is 0..n and is NOT
+    /// gated: a preserved one and native ones legitimately coexist.
+    #[test]
+    fn both_native_and_preserved_order_reference_emit_once_preserved_wins() {
+        let base = fixture(DocumentType::Invoice, 55);
+        let order = format!(
+            r#"<cac:OrderReference xmlns:cac="{UBL_CAC_NAMESPACE_URI}" xmlns:cbc="{UBL_CBC_NAMESPACE_URI}"><cbc:ID>PRESERVED-PO</cbc:ID></cac:OrderReference>"#
+        );
+        let billing = format!(
+            r#"<cac:BillingReference xmlns:cac="{UBL_CAC_NAMESPACE_URI}" xmlns:cbc="{UBL_CBC_NAMESPACE_URI}"><cac:InvoiceDocumentReference><cbc:ID>PRESERVED-PRIOR</cbc:ID></cac:InvoiceDocumentReference></cac:BillingReference>"#
+        );
+        let seeded = to_xml(&base).unwrap().replacen(
+            "<cac:AccountingSupplierParty",
+            &format!("{order}{billing}<cac:AccountingSupplierParty"),
+            1,
+        );
+        let mut parsed = parse_document(&seeded);
+        assert!(parsed.references.is_empty());
+
+        // Consumer ALSO sets an Order-class and a PrecedingInvoice-class ref.
+        parsed.references = vec![
+            DocumentReference {
+                kind: "purchase-order".to_owned(),
+                id: "NATIVE-PO".to_owned(),
+                issue_date: None,
+            },
+            DocumentReference {
+                kind: "preceding-invoice".to_owned(),
+                id: "NATIVE-PRIOR".to_owned(),
+                issue_date: None,
+            },
+        ];
+
+        let out = to_xml(&parsed).unwrap();
+        // BT-13 (0..1): exactly one cac:OrderReference, the preserved one wins.
+        assert_eq!(
+            out.matches("<cac:OrderReference").count(),
+            1,
+            "exactly one cac:OrderReference (preserved wins, BT-13 is 0..1):\n{out}"
+        );
+        assert!(out.contains(">PRESERVED-PO</cbc:ID></cac:OrderReference>"));
+        assert!(
+            !out.contains("NATIVE-PO"),
+            "native Order ref must be suppressed when a preserved one exists:\n{out}"
+        );
+        // BT-25 (0..n): preserved AND native billing references coexist.
+        assert!(out.contains(">PRESERVED-PRIOR</cbc:ID>"));
+        assert!(out.contains(">NATIVE-PRIOR</cbc:ID>"));
+        assert_eq!(canonicalize_xml(&out).unwrap(), out);
     }
 
     /// Gating test: a fresh `CommercialDocument` carrying a BG-14 invoice period
