@@ -27,7 +27,7 @@
 
 use std::fmt::Write as _;
 
-use invoicekit_ir::{CommercialDocument, DocumentLine, DocumentType, Party};
+use invoicekit_ir::{CommercialDocument, DocumentLine, DocumentType, Party, ReferenceKindClass};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -218,6 +218,30 @@ pub fn to_inv01_json(
     val.insert("IgstVal".to_owned(), json!(fmt_amount(integrated_total)));
     val.insert("TotInvVal".to_owned(), json!(fmt_amount(tax_inclusive)));
     root.insert("ValDtls".to_owned(), Value::Object(val));
+
+    // RefDtls.PrecDocDtls — preceding-document details: the original invoice(s)
+    // a credit/debit note refers to. Mapped verbatim from the IR references
+    // classified as a preceding invoice (`InvNo` = id, `InvDt` = its issue date
+    // as dd/mm/yyyy); no code-list mapping. Emitted only when such a reference
+    // is present, so a document without one serializes exactly as before.
+    let prec_docs: Vec<Value> = document
+        .references
+        .iter()
+        .filter(|r| r.kind_class() == ReferenceKindClass::PrecedingInvoice)
+        .map(|r| {
+            let mut prec = Map::new();
+            prec.insert("InvNo".to_owned(), json!(r.id));
+            if let Some(issue_date) = &r.issue_date {
+                prec.insert("InvDt".to_owned(), json!(fmt_doc_date(issue_date.as_str())));
+            }
+            Value::Object(prec)
+        })
+        .collect();
+    if !prec_docs.is_empty() {
+        let mut ref_dtls = Map::new();
+        ref_dtls.insert("PrecDocDtls".to_owned(), Value::Array(prec_docs));
+        root.insert("RefDtls".to_owned(), Value::Object(ref_dtls));
+    }
 
     // serde_json's `preserve_order` feature keeps `Map` insertion-ordered, so
     // the INV-01 key sequence (and the whole output) is byte-deterministic.
@@ -933,8 +957,8 @@ mod inv01_tests {
     use super::*;
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, CountryCode, DateOnly, DecimalValue,
-        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, Iso4217Code, MonetaryTotal, Party,
-        PartyTaxId, PostalAddress, SchemaVersion, TaxCategorySummary,
+        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference, Iso4217Code,
+        MonetaryTotal, Party, PartyTaxId, PostalAddress, SchemaVersion, TaxCategorySummary,
     };
     use rust_decimal::Decimal;
 
@@ -1221,7 +1245,12 @@ mod inv01_tests {
             tax_summary: std::mem::take(&mut doc.tax_summary),
             monetary_total: doc.monetary_total.clone(),
             attachments: Vec::new(),
-            references: Vec::new(),
+            // A credit note refers back to the original invoice it corrects.
+            references: vec![DocumentReference {
+                kind: "original-invoice".to_owned(),
+                id: "INV-2026-IN-0001".to_owned(),
+                issue_date: Some(DateOnly::new("2026-04-15").unwrap()),
+            }],
             notes: Vec::new(),
             extensions: Vec::new(),
             meta: DocumentMeta {
@@ -1234,6 +1263,15 @@ mod inv01_tests {
         let json = to_inv01_json(&cn, &Inv01Context::default()).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["DocDtls"]["Typ"], "CRN");
+        // RefDtls.PrecDocDtls carries the original-invoice link verbatim
+        // (InvNo = id, InvDt = dd/mm/yyyy of the reference issue date).
+        assert_eq!(v["RefDtls"]["PrecDocDtls"][0]["InvNo"], "INV-2026-IN-0001");
+        assert_eq!(v["RefDtls"]["PrecDocDtls"][0]["InvDt"], "15/04/2026");
+
+        // Behavior-preserving: an invoice with no references emits no RefDtls.
+        let inv_json = to_inv01_json(&inter_state_invoice(), &Inv01Context::default()).unwrap();
+        let iv: serde_json::Value = serde_json::from_str(&inv_json).unwrap();
+        assert!(iv.get("RefDtls").is_none(), "no references must emit no RefDtls");
     }
 
     #[test]
