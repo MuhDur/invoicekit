@@ -93,8 +93,16 @@ pub enum DteXmlError {
 /// (`Encabezado`, `IdDoc`, `TipoDTE`, `Folio`, `FchEmis`, `Emisor`, `RUTEmisor`,
 /// `RznSoc`, `GiroEmis`, `Receptor`, `RUTRecep`, `RznSocRecep`, `Totales`,
 /// `MntNeto`, `TasaIVA`, `IVA`, `MntTotal`, and per-line `Detalle` with
-/// `NroLinDet`, `NmbItem`, `QtyItem`, `PrcItem`, `MontoItem`). It is **not** UBL
-/// relabeled: UBL/CII serializers do not emit this tree.
+/// `NroLinDet`, `CdgItem`, `NmbItem`, `QtyItem`, `PrcItem`, `MontoItem`). It is
+/// **not** UBL relabeled: UBL/CII serializers do not emit this tree.
+///
+/// Each IR line classification is emitted as a SII `Detalle/CdgItem` block with
+/// `TpoCodigo` (the scheme/list identifier) and `VlrCodigo` (the code value),
+/// both copied verbatim from the producer-supplied IR — InvoiceKit does not
+/// derive, translate, or map any national code. Per the SII "Formato DTE", a
+/// `Detalle` may repeat `CdgItem` (one per classification) and it is positioned
+/// after `NroLinDet` and before `NmbItem`. A line with no classifications emits
+/// no `CdgItem`, exactly as before.
 ///
 /// Output is byte-stable by construction: a fixed element order with no maps and
 /// no timestamps. Monetary totals (`MntNeto`, `IVA`, `MntTotal`, `MontoItem`)
@@ -177,6 +185,18 @@ pub fn to_dte_xml(
     for (index, line) in document.lines.iter().enumerate() {
         open(&mut out, 2, "Detalle");
         el(&mut out, 3, "NroLinDet", &(index + 1).to_string());
+        // CdgItem — one per IR classification, positioned after NroLinDet and
+        // before NmbItem per the SII "Formato DTE" Detalle child order. Both
+        // children carry the producer-supplied IR strings verbatim: TpoCodigo is
+        // the classification scheme/list identifier, VlrCodigo the code value.
+        // No national code is derived, mapped, or invented; scheme_version has
+        // no SII Detalle home, so it is not emitted here.
+        for classification in &line.classifications {
+            open(&mut out, 3, "CdgItem");
+            el(&mut out, 4, "TpoCodigo", &classification.scheme_id);
+            el(&mut out, 4, "VlrCodigo", &classification.code);
+            close(&mut out, 3, "CdgItem");
+        }
         el(&mut out, 3, "NmbItem", &line.description);
         el(&mut out, 3, "QtyItem", &fmt_qty(line.quantity.inner()));
         el(&mut out, 3, "PrcItem", &fmt_qty(line.unit_price.inner()));
@@ -773,8 +793,9 @@ mod tests {
 
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, CountryCode, DateOnly, DecimalValue,
-        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentType, Iso4217Code,
-        MonetaryTotal, Party, PartyTaxId, PostalAddress, SchemaVersion, TaxCategorySummary,
+        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference, DocumentType,
+        ItemClassification, Iso4217Code, MonetaryTotal, Party, PartyTaxId, PostalAddress,
+        ReferenceKindClass, SchemaVersion, TaxCategorySummary,
     };
     use rust_decimal::Decimal;
 
@@ -1025,5 +1046,156 @@ mod tests {
             to_dte_xml(&doc, &sample_ctx()).unwrap_err(),
             DteXmlError::MissingReceptorRut
         ));
+    }
+
+    // -----------------------------------------------------------------------
+    // New IR field wiring: line classifications -> Detalle/CdgItem.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn dte_emits_cdgitem_per_line_classification_verbatim() {
+        let mut doc = sample_dte_invoice();
+        // Two classifications on the single line: each becomes one CdgItem with
+        // TpoCodigo = scheme_id and VlrCodigo = code, copied verbatim.
+        doc.lines[0].classifications = vec![
+            ItemClassification {
+                code: "85.12.10".to_owned(),
+                scheme_id: "INTERNO".to_owned(),
+                scheme_version: None,
+            },
+            ItemClassification {
+                code: "81111500".to_owned(),
+                scheme_id: "UNSPSC".to_owned(),
+                // scheme_version has no SII Detalle home; it must not appear. A
+                // distinctive sentinel avoids colliding with dates/amounts.
+                scheme_version: Some("SCHEMEVER-ZZZ".to_owned()),
+            },
+        ];
+        let xml = to_dte_xml(&doc, &sample_ctx()).unwrap();
+
+        // Exactly two CdgItem blocks, carrying the verbatim TpoCodigo/VlrCodigo.
+        assert_eq!(xml.matches("<CdgItem>").count(), 2);
+        for needle in [
+            "<TpoCodigo>INTERNO</TpoCodigo>",
+            "<VlrCodigo>85.12.10</VlrCodigo>",
+            "<TpoCodigo>UNSPSC</TpoCodigo>",
+            "<VlrCodigo>81111500</VlrCodigo>",
+        ] {
+            assert!(xml.contains(needle), "DTE missing {needle:?}:\n{xml}");
+        }
+        // scheme_version is not a SII Detalle element and must not leak.
+        assert!(
+            !xml.contains("SCHEMEVER-ZZZ"),
+            "scheme_version must not be emitted:\n{xml}"
+        );
+    }
+
+    #[test]
+    fn dte_cdgitem_sits_between_nrolindet_and_nmbitem() {
+        // Verify the SII Detalle child order: NroLinDet, CdgItem*, NmbItem.
+        let mut doc = sample_dte_invoice();
+        doc.lines[0].classifications = vec![ItemClassification {
+            code: "C-1".to_owned(),
+            scheme_id: "INTERNO".to_owned(),
+            scheme_version: None,
+        }];
+        let xml = to_dte_xml(&doc, &sample_ctx()).unwrap();
+        let nro = xml.find("<NroLinDet>").expect("NroLinDet present");
+        let cdg = xml.find("<CdgItem>").expect("CdgItem present");
+        let nmb = xml.find("<NmbItem>").expect("NmbItem present");
+        assert!(
+            nro < cdg && cdg < nmb,
+            "CdgItem must sit after NroLinDet and before NmbItem:\n{xml}"
+        );
+    }
+
+    #[test]
+    fn dte_cdgitem_escapes_special_characters() {
+        // Verbatim emission still XML-escapes content (no national mapping, but
+        // the bytes must be well-formed).
+        let mut doc = sample_dte_invoice();
+        doc.lines[0].classifications = vec![ItemClassification {
+            code: "A&B<C".to_owned(),
+            scheme_id: "S&Z".to_owned(),
+            scheme_version: None,
+        }];
+        let xml = to_dte_xml(&doc, &sample_ctx()).unwrap();
+        assert!(xml.contains("<TpoCodigo>S&amp;Z</TpoCodigo>"));
+        assert!(xml.contains("<VlrCodigo>A&amp;B&lt;C</VlrCodigo>"));
+    }
+
+    #[test]
+    fn dte_without_classifications_emits_no_cdgitem() {
+        // Behavior-preserving: every existing fixture has empty classifications,
+        // so the serializer must emit no CdgItem and the rest of the Detalle is
+        // byte-for-byte what it was before this field was wired.
+        let doc = sample_dte_invoice();
+        assert!(doc.lines.iter().all(|l| l.classifications.is_empty()));
+        let xml = to_dte_xml(&doc, &sample_ctx()).unwrap();
+        assert!(
+            !xml.contains("<CdgItem>"),
+            "a line with no classifications must emit no CdgItem:\n{xml}"
+        );
+        // The Detalle still threads NroLinDet straight into NmbItem.
+        assert!(xml.contains("<NroLinDet>1</NroLinDet>\n      <NmbItem>"));
+    }
+
+    // -----------------------------------------------------------------------
+    // SKIPPED national elements (documented refusals).
+    //
+    // These two scenarios are deliberately NOT serialized into the SII DTE
+    // tree, and the tests pin that refusal so a future change can't silently
+    // emit a wrong/invented national element.
+    // -----------------------------------------------------------------------
+
+    /// `references` (PrecedingInvoice) does NOT become a SII `Referencia`.
+    ///
+    /// The SII `Referencia` block makes `TpoDocRef` (the SII document-type code
+    /// of the *referenced* document) mandatory, and the IR `DocumentReference`
+    /// carries only `kind`/`id`/`issue_date` — there is no field telling us the
+    /// referenced document's SII tipo. A credit note may reference a 33, 34, 39,
+    /// 46, 56, ... so no single well-known constant is defensible; inventing one
+    /// (or emitting a `Referencia` missing its mandatory `TpoDocRef`) would be a
+    /// fabricated/invalid national element. So we skip the whole block.
+    #[test]
+    fn dte_preceding_invoice_reference_is_not_emitted_as_referencia() {
+        let mut doc = sample_dte_invoice();
+        doc.document_type = DocumentType::CreditNote;
+        doc.references = vec![DocumentReference {
+            kind: "original-invoice".to_owned(),
+            id: "4242".to_owned(),
+            issue_date: Some(DateOnly::new("2026-05-26").unwrap()),
+        }];
+        // Sanity: the IR really does classify this as the preceding invoice.
+        assert_eq!(
+            doc.references[0].kind_class(),
+            ReferenceKindClass::PrecedingInvoice
+        );
+        let xml = to_dte_xml(&doc, &sample_ctx()).unwrap();
+        assert!(
+            !xml.contains("<Referencia>")
+                && !xml.contains("<FolioRef>")
+                && !xml.contains("<TpoDocRef>")
+                && !xml.contains("<FchRef>"),
+            "no SII Referencia is emitted (TpoDocRef is undefensible):\n{xml}"
+        );
+    }
+
+    /// Tax-summary exemption reason / code are NOT serialized into the DTE.
+    ///
+    /// Chile signals exemption structurally (line-level `IndExe`, document-level
+    /// `MntExe`), not via a free-text reason or a CEF-`VATEX`/IT-`Natura` code.
+    /// There is no SII DTE element that carries BT-120/BT-121 verbatim, so these
+    /// fields are skipped rather than mapped onto an invented element name.
+    #[test]
+    fn dte_exemption_reason_fields_are_not_emitted() {
+        let mut doc = sample_dte_invoice();
+        doc.tax_summary[0].exemption_reason = Some("Exportación de servicios".to_owned());
+        doc.tax_summary[0].exemption_reason_code = Some("VATEX-EU-G".to_owned());
+        let xml = to_dte_xml(&doc, &sample_ctx()).unwrap();
+        assert!(
+            !xml.contains("Exportación de servicios") && !xml.contains("VATEX-EU-G"),
+            "no SII element carries the verbatim exemption reason/code:\n{xml}"
+        );
     }
 }

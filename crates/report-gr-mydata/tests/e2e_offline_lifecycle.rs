@@ -1001,6 +1001,14 @@ fn greece_native_credit_note_maps_to_invoice_type_5_1_and_bundles() {
         "a credit note must map to myDATA invoiceType 5.1, got:\n{xml}"
     );
     assert!(xml.contains("<aa>CN-2026-GR-0001</aa>"));
+    // The fixture references the corrected invoice (kind "invoice" ->
+    // PrecedingInvoice). The associated-credit-note link must reach the wire as
+    // the myDATA correlatedInvoices element, carrying the referenced id verbatim.
+    assert!(
+        xml.contains("<correlatedInvoices>INV-2026-GR-0001</correlatedInvoices>"),
+        "an associated credit note must link the original invoice via \
+         correlatedInvoices, got:\n{xml}"
+    );
 
     let provider = MockMyDataProvider::with_fixed_reported_at(PINNED_REPORTED_AT);
     let mut req = report_request(xml.clone().into_bytes());

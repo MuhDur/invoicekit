@@ -22,7 +22,7 @@
 
 #![allow(clippy::doc_markdown)]
 
-use invoicekit_ir::{CommercialDocument, DocumentType, Party};
+use invoicekit_ir::{CommercialDocument, DocumentType, Party, ReferenceKindClass};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -98,7 +98,13 @@ pub enum MyDataXmlError {
 ///   `EL` EU-VAT prefix is stripped so `vatNumber` is the bare nine-digit AFM,
 ///   per the myDATA convention.
 /// * `invoiceHeader` carries `series`, `aa` (the document number), `issueDate`,
-///   and `invoiceType` (the AADE classification code, e.g. `1.1`).
+///   and `invoiceType` (the AADE classification code, e.g. `1.1`). When the IR
+///   document carries a preceding-invoice [`reference`](CommercialDocument::references)
+///   (a credit/debit note pointing back at the corrected invoice), the
+///   referenced identifier is emitted verbatim as `correlatedInvoices` — the
+///   myDATA `InvoiceHeaderType` element that links a credit note (invoiceType
+///   `5.x`) to the original invoice's MARK. The IR id is emitted byte-for-byte;
+///   the adapter does not derive, parse, or validate it.
 /// * Each `invoiceDetails` row carries `lineNumber`, `netValue`, `vatAmount`,
 ///   `vatCategory` (the integer myDATA code), and — only when `vatCategory` is
 ///   `7` (excluding VAT) — a mandatory `vatExemptionCategory`.
@@ -155,6 +161,18 @@ pub fn to_invoices_doc_xml(
     el(&mut out, 3, "aa", document.document_number.as_str());
     el(&mut out, 3, "issueDate", document.issue_date.as_str());
     el(&mut out, 3, "invoiceType", invoice_type.code());
+    // `correlatedInvoices` (myDATA `InvoiceHeaderType`) links a credit/debit note
+    // to the MARK / number of the original invoice it corrects. We emit the
+    // producer-supplied reference identifier verbatim — no derivation, parsing,
+    // or catalog lookup. The reference is selected by its EN 16931 classification
+    // (`PrecedingInvoice`), so only an original-invoice link is routed here.
+    if let Some(preceding) = document
+        .references
+        .iter()
+        .find(|r| r.kind_class() == ReferenceKindClass::PrecedingInvoice)
+    {
+        el(&mut out, 3, "correlatedInvoices", preceding.id.as_str());
+    }
     close(&mut out, 2, "invoiceHeader");
 
     // --- invoiceDetails (one row per line) ---
@@ -720,8 +738,9 @@ mod tests {
     use super::*;
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, CountryCode, DateOnly, DecimalValue,
-        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentType, Iso4217Code,
-        MonetaryTotal, Party, PartyTaxId, PostalAddress, SchemaVersion, TaxCategorySummary,
+        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference, DocumentType,
+        Iso4217Code, MonetaryTotal, Party, PartyTaxId, PostalAddress, SchemaVersion,
+        TaxCategorySummary,
     };
 
     fn amt(minor: i64) -> DecimalValue {
@@ -905,6 +924,175 @@ mod tests {
         .unwrap();
         let xml = to_invoices_doc_xml(&cn, &MyDataDocContext::default()).unwrap();
         assert!(xml.contains("<invoiceType>5.1</invoiceType>"));
+    }
+
+    /// Build a credit note that points back at the original invoice via an IR
+    /// preceding-invoice reference, and assert the referenced identifier reaches
+    /// the wire verbatim as the myDATA `correlatedInvoices` element inside
+    /// `invoiceHeader`. The value is emitted byte-for-byte (here a MARK-shaped
+    /// id) with no derivation.
+    fn credit_note_with_reference(kind: &str, reference_id: &str) -> CommercialDocument {
+        let mut doc = sample_invoice();
+        let parts = CommercialDocumentParts {
+            schema_version: SchemaVersion::default(),
+            id: DocumentId::new("doc-gr-cn-ref-1").unwrap(),
+            document_type: DocumentType::CreditNote,
+            issue_date: DateOnly::new("2026-06-02").unwrap(),
+            tax_point_date: None,
+            due_date: None,
+            document_number: DocumentNumber::new("CN-2026-GR-0002").unwrap(),
+            currency: Iso4217Code::new("EUR").unwrap(),
+            supplier: greek_party("Acme Hellas AE", "EL123456789", "Athina"),
+            customer: greek_party("Beta EPE", "EL987654321", "Thessaloniki"),
+            payee: None,
+            payment_terms: None,
+            payment_instructions: Vec::new(),
+            lines: std::mem::take(&mut doc.lines),
+            tax_summary: doc.tax_summary.clone(),
+            monetary_total: doc.monetary_total.clone(),
+            attachments: Vec::new(),
+            references: vec![DocumentReference {
+                kind: kind.to_owned(),
+                id: reference_id.to_owned(),
+                issue_date: Some(DateOnly::new("2026-05-26").unwrap()),
+            }],
+            notes: Vec::new(),
+            extensions: Vec::new(),
+            meta: DocumentMeta {
+                tenant_id: "tenant_gr".to_owned(),
+                trace_id: "trace_gr".to_owned(),
+                source_system: Some("unit".to_owned()),
+            },
+        };
+        CommercialDocument::new(parts).unwrap()
+    }
+
+    #[test]
+    fn invoices_doc_emits_correlated_invoices_verbatim_for_preceding_reference() {
+        // A MARK-shaped referenced-invoice id: must reach the wire byte-for-byte.
+        let mark = "400001234567890";
+        let doc = credit_note_with_reference("invoice", mark);
+        let xml = to_invoices_doc_xml(&doc, &MyDataDocContext::default()).unwrap();
+        assert!(
+            xml.contains(&format!("<correlatedInvoices>{mark}</correlatedInvoices>")),
+            "the preceding-invoice reference must be emitted verbatim as \
+             correlatedInvoices, got:\n{xml}"
+        );
+        // Placement: inside invoiceHeader, after invoiceType, before the close.
+        let header_start = xml.find("<invoiceHeader>").expect("invoiceHeader present");
+        let header_end = xml.find("</invoiceHeader>").expect("invoiceHeader closed");
+        let type_pos = xml.find("<invoiceType>").expect("invoiceType present");
+        let corr_pos = xml.find("<correlatedInvoices>").expect("correlatedInvoices present");
+        assert!(
+            header_start < corr_pos && corr_pos < header_end,
+            "correlatedInvoices must sit inside invoiceHeader"
+        );
+        assert!(
+            type_pos < corr_pos,
+            "correlatedInvoices must follow invoiceType in XSD sequence order"
+        );
+    }
+
+    #[test]
+    fn invoices_doc_correlated_invoices_value_is_not_derived() {
+        // An arbitrary, non-MARK-shaped id is still emitted verbatim: the adapter
+        // must not parse, validate, or rewrite the producer's reference id.
+        let raw = "Original Invoice INV-2026-GR-0001 & Co";
+        let doc = credit_note_with_reference("original-invoice", raw);
+        let xml = to_invoices_doc_xml(&doc, &MyDataDocContext::default()).unwrap();
+        // The element carries the XML-escaped verbatim value (the escaper is the
+        // only transform applied to text content).
+        assert!(
+            xml.contains(
+                "<correlatedInvoices>Original Invoice INV-2026-GR-0001 &amp; Co</correlatedInvoices>"
+            ),
+            "correlatedInvoices must carry the producer id verbatim (XML-escaped), got:\n{xml}"
+        );
+    }
+
+    #[test]
+    fn invoices_doc_omits_correlated_invoices_when_no_preceding_reference() {
+        // The default sample invoice has empty `references`: behaviour-preserving,
+        // no correlatedInvoices element is emitted (every existing fixture).
+        let xml = to_invoices_doc_xml(&sample_invoice(), &MyDataDocContext::default()).unwrap();
+        assert!(
+            !xml.contains("correlatedInvoices"),
+            "no preceding-invoice reference => no correlatedInvoices element"
+        );
+    }
+
+    #[test]
+    fn invoices_doc_omits_correlated_invoices_for_non_preceding_reference_kind() {
+        // A purchase-order reference classifies as `Order`, not `PrecedingInvoice`,
+        // so it is NOT routed to correlatedInvoices (which is the original-invoice
+        // link only). The element stays absent.
+        let doc = credit_note_with_reference("purchase-order", "PO-7788");
+        let xml = to_invoices_doc_xml(&doc, &MyDataDocContext::default()).unwrap();
+        assert!(
+            !xml.contains("correlatedInvoices"),
+            "a non-preceding reference kind must not emit correlatedInvoices"
+        );
+        assert!(
+            !xml.contains("PO-7788"),
+            "the order reference id must not leak into the InvoicesDoc"
+        );
+    }
+
+    /// SKIP DOCUMENTATION (D18): `DocumentLine.classifications` carries EN 16931
+    /// BT-158 commodity/HS-style codes. myDATA's per-line classification elements
+    /// (`incomeClassification`/`expensesClassification`) take AADE income/expense
+    /// catalog codes (`classificationType`, `classificationCategory`), an entirely
+    /// different national catalog — mapping a BT-158 code onto one would be
+    /// invention. There is no myDATA element that carries a BT-158 code verbatim,
+    /// so a populated `classifications` must NOT change the InvoicesDoc output.
+    #[test]
+    fn invoices_doc_ignores_line_classifications() {
+        let baseline = to_invoices_doc_xml(&sample_invoice(), &MyDataDocContext::default()).unwrap();
+        let mut doc = sample_invoice();
+        doc.lines[0].classifications = vec![invoicekit_ir::ItemClassification {
+            code: "85176200".to_owned(),
+            scheme_id: "HS".to_owned(),
+            scheme_version: None,
+        }];
+        let with_classification =
+            to_invoices_doc_xml(&doc, &MyDataDocContext::default()).unwrap();
+        assert_eq!(
+            baseline, with_classification,
+            "BT-158 classifications have no verbatim myDATA target; output must be unchanged"
+        );
+    }
+
+    /// SKIP DOCUMENTATION (D18): myDATA encodes VAT exemption only as the CODED
+    /// integer `vatExemptionCategory` (already emitted from the rate mapping).
+    /// There is no myDATA element that carries the free-text BT-120
+    /// `exemption_reason`, and the BT-121 `exemption_reason_code` (a VATEX/Natura
+    /// code) is not the myDATA integer — mapping it would be invention. So a
+    /// populated exemption reason / code must NOT change the InvoicesDoc output.
+    #[test]
+    fn invoices_doc_ignores_exemption_reason_text_and_code() {
+        let mut doc = sample_invoice();
+        doc.lines[0].tax_category = Some("E".to_owned());
+        doc.tax_summary = vec![TaxCategorySummary {
+            category_code: "E".to_owned(),
+            taxable_amount: amt(10000),
+            tax_amount: amt(0),
+            tax_rate: Some(DecimalValue::new(Decimal::new(0, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
+        }];
+        let baseline = to_invoices_doc_xml(&doc, &MyDataDocContext::default()).unwrap();
+
+        let mut with_reason = doc.clone();
+        with_reason.tax_summary[0].exemption_reason =
+            Some("Exempt under Article 22 of the Greek VAT Code".to_owned());
+        with_reason.tax_summary[0].exemption_reason_code = Some("VATEX-EU-132-1F".to_owned());
+        let with_reason_xml =
+            to_invoices_doc_xml(&with_reason, &MyDataDocContext::default()).unwrap();
+
+        assert_eq!(
+            baseline, with_reason_xml,
+            "free-text/coded exemption reason has no verbatim myDATA target; output unchanged"
+        );
     }
 
     #[test]

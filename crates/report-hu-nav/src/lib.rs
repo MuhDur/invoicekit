@@ -19,7 +19,7 @@
 
 #![allow(clippy::doc_markdown)]
 
-use invoicekit_ir::{CommercialDocument, DocumentType, Party};
+use invoicekit_ir::{CommercialDocument, DocumentType, Party, ReferenceKindClass};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -116,6 +116,9 @@ pub fn to_invoice_data_xml(document: &CommercialDocument) -> Result<String, Invo
 
     open(&mut out, 1, "invoiceMain");
     open(&mut out, 2, "invoice");
+
+    // --- invoiceReference: the original invoice a MODIFY/STORNO corrects ---
+    write_invoice_reference(&mut out, document);
 
     // --- invoiceHead: issuer/recipient + general invoice data ---
     open(&mut out, 3, "invoiceHead");
@@ -233,6 +236,45 @@ fn invoice_category(document_type: DocumentType) -> Result<&'static str, Invoice
             Err(InvoiceDataError::UnsupportedDocumentType(other))
         }
     }
+}
+
+/// The verbatim id of the first document reference that classifies as a
+/// preceding invoice (the original invoice a credit/debit note or correction
+/// refers to), or `None` when the document carries no such reference. The id is
+/// emitted verbatim into NAV `originalInvoiceNumber`; no value is derived.
+fn preceding_invoice_id(document: &CommercialDocument) -> Option<&str> {
+    document
+        .references
+        .iter()
+        .find(|r| r.kind_class() == ReferenceKindClass::PrecedingInvoice)
+        .map(|r| r.id.as_str())
+}
+
+/// Write the NAV `invoiceReference` linking a MODIFY/STORNO to the original
+/// invoice it corrects, when the IR carries a preceding-invoice reference.
+///
+/// NAV `invoiceData.xsd` v3.0 models `InvoiceType` as
+/// `(invoiceReference?, invoiceHead, invoiceLines?, productFeeSummary*,
+/// invoiceSummary)`, so `invoiceReference` is the FIRST child of `invoice`,
+/// before `invoiceHead`. `InvoiceReferenceType` is
+/// `(originalInvoiceNumber, modifyWithoutMaster, modificationIndex)`, all
+/// mandatory. `originalInvoiceNumber` carries the producer's verbatim reference
+/// id; `modifyWithoutMaster` is `false` because an original invoice number IS
+/// present (the master exists); `modificationIndex` is the minimal defensible
+/// structural value `1` (the IR carries no modification sequence, and `1` is the
+/// canonical index of a single/first modification). No national code is derived.
+///
+/// When no preceding-invoice reference is present (every existing fixture) this
+/// emits nothing, so the document is byte-identical to the prior output.
+fn write_invoice_reference(out: &mut String, document: &CommercialDocument) {
+    let Some(original_invoice_number) = preceding_invoice_id(document) else {
+        return;
+    };
+    open(out, 3, "invoiceReference");
+    el(out, 4, "originalInvoiceNumber", original_invoice_number);
+    el(out, 4, "modifyWithoutMaster", "false");
+    el(out, 4, "modificationIndex", "1");
+    close(out, 3, "invoiceReference");
 }
 
 /// Extract a Hungarian `taxNumber` from a party: prefer a `vat` scheme id, else
@@ -618,8 +660,8 @@ mod tests {
     use super::*;
     use invoicekit_ir::{
         CommercialDocumentParts, CountryCode, DateOnly, DecimalValue, DocumentId, DocumentLine,
-        DocumentMeta, DocumentNumber, Iso4217Code, MonetaryTotal, PartyTaxId, PostalAddress,
-        SchemaVersion, TaxCategorySummary,
+        DocumentMeta, DocumentNumber, DocumentReference, Iso4217Code, MonetaryTotal, PartyTaxId,
+        PostalAddress, SchemaVersion, TaxCategorySummary,
     };
 
     fn amt(minor: i64) -> DecimalValue {
@@ -944,6 +986,94 @@ mod tests {
         let err = to_invoice_data_xml(&doc)
             .expect_err("MAX * 27 VAT product must overflow before the divide");
         assert!(matches!(err, InvoiceDataError::TotalsUnrepresentable(_)));
+    }
+
+    /// A MODIFY/STORNO that references the original invoice emits a NAV
+    /// `invoiceReference` carrying the producer's verbatim `originalInvoiceNumber`,
+    /// placed as the first child of `invoice` (before `invoiceHead`), with the
+    /// minimal defensible `modifyWithoutMaster=false` + `modificationIndex=1`.
+    #[test]
+    fn invoice_data_emits_invoice_reference_for_preceding_invoice() {
+        let mut doc = sample_invoice();
+        doc.document_type = DocumentType::CreditNote;
+        doc.references = vec![DocumentReference {
+            kind: "original-invoice".to_owned(),
+            id: "INV-2026-HU-0001".to_owned(),
+            issue_date: Some(DateOnly::new("2026-05-26").unwrap()),
+        }];
+        let xml = to_invoice_data_xml(&doc).unwrap();
+        // Verbatim original invoice number reaches NAV's originalInvoiceNumber.
+        assert!(
+            xml.contains("<originalInvoiceNumber>INV-2026-HU-0001</originalInvoiceNumber>"),
+            "invoiceReference must carry the verbatim original invoice number:\n{xml}"
+        );
+        assert!(xml.contains("<invoiceReference>"));
+        assert!(xml.contains("<modifyWithoutMaster>false</modifyWithoutMaster>"));
+        assert!(xml.contains("<modificationIndex>1</modificationIndex>"));
+        // Placement: invoiceReference precedes invoiceHead inside <invoice>.
+        let ref_pos = xml.find("<invoiceReference>").unwrap();
+        let head_pos = xml.find("<invoiceHead>").unwrap();
+        assert!(
+            ref_pos < head_pos,
+            "invoiceReference must precede invoiceHead per NAV InvoiceType order:\n{xml}"
+        );
+    }
+
+    /// The original invoice number is taken verbatim from the IR; the serializer
+    /// does not normalize, prefix, or otherwise transform it.
+    #[test]
+    fn invoice_data_invoice_reference_is_verbatim() {
+        let mut doc = sample_invoice();
+        doc.references = vec![DocumentReference {
+            kind: "preceding".to_owned(),
+            id: "weird/Original No. 42".to_owned(),
+            issue_date: None,
+        }];
+        let xml = to_invoice_data_xml(&doc).unwrap();
+        assert!(
+            xml.contains("<originalInvoiceNumber>weird/Original No. 42</originalInvoiceNumber>"),
+            "originalInvoiceNumber must be emitted verbatim:\n{xml}"
+        );
+    }
+
+    /// A non-preceding reference (e.g. a purchase order) must NOT synthesize an
+    /// `invoiceReference`: NAV's invoiceReference is the corrected-original link
+    /// only. The serializer emits no `invoiceReference` element for it.
+    #[test]
+    fn invoice_data_order_reference_does_not_emit_invoice_reference() {
+        let mut doc = sample_invoice();
+        doc.references = vec![DocumentReference {
+            kind: "purchase-order".to_owned(),
+            id: "PO-7".to_owned(),
+            issue_date: None,
+        }];
+        let xml = to_invoice_data_xml(&doc).unwrap();
+        assert!(
+            !xml.contains("<invoiceReference>"),
+            "an order reference must not produce a NAV invoiceReference:\n{xml}"
+        );
+    }
+
+    /// Behavior-preserving: the default fixture carries an empty `references`
+    /// vector (as every existing fixture does), so the serializer emits NO
+    /// `invoiceReference` element and the output is byte-identical to today's.
+    #[test]
+    fn invoice_data_absent_references_emit_no_invoice_reference() {
+        let doc = sample_invoice();
+        assert!(doc.references.is_empty());
+        let xml = to_invoice_data_xml(&doc).unwrap();
+        assert!(
+            !xml.contains("invoiceReference"),
+            "an empty references vector must not introduce any invoiceReference output:\n{xml}"
+        );
+        // The whole InvoiceType still begins with invoiceHead as its first child.
+        let invoice_open = xml.find("<invoice>").unwrap();
+        let head_pos = xml.find("<invoiceHead>").unwrap();
+        let between = &xml[invoice_open..head_pos];
+        assert!(
+            !between.contains('<') || between.trim_end().ends_with("<invoice>"),
+            "no element may sit between <invoice> and <invoiceHead> when references are empty:\n{between}"
+        );
     }
 
     #[test]

@@ -614,8 +614,9 @@ mod tests {
     use super::*;
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, CountryCode, DateOnly, DecimalValue,
-        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, Iso4217Code, MonetaryTotal, Party,
-        PartyTaxId, PostalAddress, SchemaVersion, TaxCategorySummary,
+        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference, ItemClassification,
+        Iso4217Code, MonetaryTotal, Party, PartyTaxId, PostalAddress, SchemaVersion,
+        TaxCategorySummary,
     };
     use invoicekit_signer::SoftwareSigner;
 
@@ -889,6 +890,78 @@ mod tests {
             provider().report(&req).unwrap_err(),
             KsefReportError::BadXml(_)
         ));
+    }
+
+    #[test]
+    fn fa3_ignores_unconfirmable_ir_fields_byte_for_byte() {
+        // D18 guard outcome for the three new IR fields routed to this crate.
+        //
+        // The FA(3) (wzor 06251) national element names that would carry these
+        // values — the faktura-korygujaca block (DaneFaKorygowanej /
+        // NrFaKorygowanej / DataWystFaKorygowanej), the exemption legal-basis
+        // field (P_19C / P_19), and a FaWiersz commodity-classification element
+        // (CN / PKWiU) — are NOT confirmable from any authoritative in-repo
+        // source (no FA(3) XSD is vendored, and the crate's module doc-comment +
+        // existing emission name none of them). A wrong national element name is
+        // worse than an omission, so the serializer faithfully emits nothing for
+        // these fields. This test pins that contract: populating
+        // `references` (a PrecedingInvoice link), `tax_summary.exemption_reason`
+        // / `exemption_reason_code`, and `lines.classifications` (a CN code)
+        // must leave the FA(3) bytes byte-identical to the same document with
+        // those fields empty/None.
+        let ctx = Fa3Context::default();
+        let baseline = to_fa3_xml(&sample_invoice(), &ctx).unwrap();
+
+        let mut enriched = sample_invoice();
+        // (1) A correction's preceding-invoice reference (would feed
+        // DaneFaKorygowanej / NrFaKorygowanej / DataWystFaKorygowanej).
+        enriched.references = vec![DocumentReference {
+            kind: "original-invoice".to_owned(),
+            id: "FV-2025-9999".to_owned(),
+            issue_date: Some(DateOnly::new("2025-12-31").unwrap()),
+        }];
+        // sanity: this is exactly the reference the task says feeds the KOR link.
+        assert_eq!(
+            enriched.references[0].kind_class(),
+            invoicekit_ir::ReferenceKindClass::PrecedingInvoice
+        );
+        // (2) Exemption legal-basis free text + code (would feed P_19C / P_19).
+        enriched.tax_summary[0].exemption_reason =
+            Some("art. 43 ust. 1 ustawy o VAT".to_owned());
+        enriched.tax_summary[0].exemption_reason_code = Some("VATEX-EU-AE".to_owned());
+        // (3) A line CN classification (would feed a FaWiersz CN/PKWiU element).
+        enriched.lines[0].classifications = vec![ItemClassification {
+            code: "85176200".to_owned(),
+            scheme_id: "CN".to_owned(),
+            scheme_version: None,
+        }];
+
+        let enriched_xml = to_fa3_xml(&enriched, &ctx).unwrap();
+        assert_eq!(
+            baseline, enriched_xml,
+            "populating the three new IR fields must NOT change FA(3) output \
+             until their national element names are confirmed from an \
+             authoritative source"
+        );
+        // And none of the candidate (unconfirmed) element names leaked in.
+        for forbidden in [
+            "DaneFaKorygowanej",
+            "NrFaKorygowanej",
+            "DataWystFaKorygowanej",
+            "P_19C",
+            "<P_19>",
+            "art. 43",
+            "VATEX-EU-AE",
+            "FV-2025-9999",
+            "85176200",
+            "<CN>",
+            "PKWiU",
+        ] {
+            assert!(
+                !enriched_xml.contains(forbidden),
+                "FA(3) must not emit unconfirmed element/value {forbidden:?}:\n{enriched_xml}"
+            );
+        }
     }
 
     #[test]

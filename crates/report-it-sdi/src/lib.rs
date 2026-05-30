@@ -37,7 +37,7 @@
 
 use std::sync::Arc;
 
-use invoicekit_ir::{CommercialDocument, DocumentType, Party};
+use invoicekit_ir::{CommercialDocument, DocumentType, Party, ReferenceKindClass};
 use invoicekit_signer::Signer;
 use invoicekit_signer_sdi::{MockSdiProvider, SdiProvider, SdiSubmitRequest};
 use rust_decimal::Decimal;
@@ -155,6 +155,7 @@ pub fn to_fattura_pa_xml(
         &fmt_amount(document.monetary_total.payable_amount.inner()),
     );
     close(&mut out, 3, "DatiGeneraliDocumento");
+    write_dati_fatture_collegate(&mut out, document);
     close(&mut out, 2, "DatiGenerali");
 
     open(&mut out, 2, "DatiBeniServizi");
@@ -162,6 +163,18 @@ pub fn to_fattura_pa_xml(
         let aliquota = line_tax_rate(document, line);
         open(&mut out, 3, "DettaglioLinee");
         el(&mut out, 4, "NumeroLinea", &(index + 1).to_string());
+        // `CodiceArticolo` (FatturaPA v1.2 element 2.2.1.3) is an optional,
+        // repeatable item-code group sitting between `NumeroLinea` (2.2.1.1) and
+        // `Descrizione` (2.2.1.4) in XSD order. Emit one per IR line
+        // classification, carrying the scheme identifier verbatim as `CodiceTipo`
+        // (2.2.1.3.1) and the classification code verbatim as `CodiceValore`
+        // (2.2.1.3.2). No national catalogue lookup is performed.
+        for classification in &line.classifications {
+            open(&mut out, 4, "CodiceArticolo");
+            el(&mut out, 5, "CodiceTipo", &classification.scheme_id);
+            el(&mut out, 5, "CodiceValore", &classification.code);
+            close(&mut out, 4, "CodiceArticolo");
+        }
         el(&mut out, 4, "Descrizione", &line.description);
         el(&mut out, 4, "Quantita", &fmt_amount(line.quantity.inner()));
         // `UnitaMisura` follows `Quantita` in the FatturaPA `DettaglioLinee`
@@ -193,6 +206,17 @@ pub fn to_fattura_pa_xml(
             &fmt_amount(summary.taxable_amount.inner()),
         );
         el(&mut out, 4, "Imposta", &fmt_amount(summary.tax_amount.inner()));
+        // `RiferimentoNormativo` (FatturaPA v1.2 element 2.2.2.8) is the free-text
+        // legal/normative reference for an exempt or reverse-charge band. It is
+        // the last child of `DatiRiepilogo` in XSD order, after `Imposta`
+        // (2.2.2.6) and `EsigibilitaIVA` (2.2.2.7, not emitted), so placing it
+        // last among the emitted siblings is order-correct. It carries the IR
+        // `exemption_reason` (EN 16931 BT-120) verbatim when present. The coded
+        // `Natura` (2.2.2.2) is NOT emitted — that is a controlled-list value the
+        // crate does not derive or map.
+        if let Some(reason) = &summary.exemption_reason {
+            el(&mut out, 4, "RiferimentoNormativo", reason);
+        }
         close(&mut out, 3, "DatiRiepilogo");
     }
     close(&mut out, 2, "DatiBeniServizi");
@@ -200,6 +224,34 @@ pub fn to_fattura_pa_xml(
 
     out.push_str("</p:FatturaElettronica>\n");
     Ok(out)
+}
+
+/// Emit `DatiGenerali/DatiFattureCollegate` (FatturaPA v1.2 element 2.1.6) for
+/// each preceding-invoice reference.
+///
+/// `DatiFattureCollegate` links this document to a preceding invoice — the
+/// original invoice a TD04 credit note / TD05 debit note refers back to. It is a
+/// sibling of `DatiGeneraliDocumento` (2.1.1) inside `DatiGenerali`, after it in
+/// XSD order (the intervening 2.1.2..2.1.5 optional blocks are not emitted, so
+/// the caller emits this directly after the `DatiGeneraliDocumento` close).
+///
+/// One block is emitted per IR reference that classifies as a preceding invoice;
+/// `IdDocumento` (2.1.6.2) carries the reference id verbatim and `Data` (2.1.6.3)
+/// the referenced issue date when the producer supplied one. No national code is
+/// derived. When the document has no preceding-invoice reference (every existing
+/// fixture) nothing is emitted.
+fn write_dati_fatture_collegate(out: &mut String, document: &CommercialDocument) {
+    for reference in &document.references {
+        if reference.kind_class() != ReferenceKindClass::PrecedingInvoice {
+            continue;
+        }
+        open(out, 3, "DatiFattureCollegate");
+        el(out, 4, "IdDocumento", &reference.id);
+        if let Some(date) = &reference.issue_date {
+            el(out, 4, "Data", date.as_str());
+        }
+        close(out, 3, "DatiFattureCollegate");
+    }
 }
 
 /// Map an IR [`DocumentType`] to a FatturaPA `TipoDocumento` code.
@@ -571,8 +623,9 @@ mod tests {
     use super::*;
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, CountryCode, DateOnly, DecimalValue,
-        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, Iso4217Code, MonetaryTotal, Party,
-        PartyTaxId, PostalAddress, SchemaVersion, TaxCategorySummary,
+        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference,
+        ItemClassification, Iso4217Code, MonetaryTotal, Party, PartyTaxId, PostalAddress,
+        SchemaVersion, TaxCategorySummary,
     };
     use invoicekit_signer::SoftwareSigner;
 
@@ -719,6 +772,163 @@ mod tests {
             to_fattura_pa_xml(&doc, &ctx).unwrap(),
             to_fattura_pa_xml(&doc, &ctx).unwrap()
         );
+    }
+
+    /// Behavior-preserving guard: when none of the new IR fields are populated
+    /// (every existing fixture), the serializer emits **no** new national
+    /// elements — output is exactly what the crate produced before this change.
+    #[test]
+    fn fatturapa_absent_new_fields_emit_nothing_extra() {
+        let xml = to_fattura_pa_xml(&sample_invoice(), &FatturaPaContext::default()).unwrap();
+        for forbidden in [
+            "<DatiFattureCollegate>",
+            "<IdDocumento>",
+            "<CodiceArticolo>",
+            "<CodiceTipo>",
+            "<CodiceValore>",
+            "<RiferimentoNormativo>",
+        ] {
+            assert!(
+                !xml.contains(forbidden),
+                "absent-field doc should not emit {forbidden:?}:\n{xml}"
+            );
+        }
+    }
+
+    /// Opportunity (1): a TD04 credit note carrying a `PrecedingInvoice`
+    /// reference emits `DatiGenerali/DatiFattureCollegate` with the reference id
+    /// verbatim in `IdDocumento` and its issue date in `Data`.
+    #[test]
+    fn fatturapa_emits_dati_fatture_collegate_for_preceding_invoice() {
+        let mut doc = sample_invoice();
+        doc.document_type = DocumentType::CreditNote;
+        doc.references = vec![DocumentReference {
+            kind: "original-invoice".to_owned(),
+            id: "INV-2026-0001".to_owned(),
+            issue_date: Some(DateOnly::new("2026-05-26").unwrap()),
+        }];
+        let xml = to_fattura_pa_xml(&doc, &FatturaPaContext::default()).unwrap();
+        assert!(xml.contains("<TipoDocumento>TD04</TipoDocumento>"));
+        assert!(
+            xml.contains(
+                "<DatiFattureCollegate>\n        <IdDocumento>INV-2026-0001</IdDocumento>\n        <Data>2026-05-26</Data>\n      </DatiFattureCollegate>"
+            ),
+            "DatiFattureCollegate not emitted as expected:\n{xml}"
+        );
+        // Placement: the block sits inside DatiGenerali, after
+        // DatiGeneraliDocumento and before DatiGenerali's close.
+        let after_documento = xml.find("</DatiGeneraliDocumento>").unwrap();
+        let collegate = xml.find("<DatiFattureCollegate>").unwrap();
+        let generali_close = xml.find("</DatiGenerali>").unwrap();
+        assert!(after_documento < collegate && collegate < generali_close);
+    }
+
+    /// A reference that does NOT classify as a preceding invoice (e.g. a
+    /// purchase order) must not produce a `DatiFattureCollegate` block.
+    #[test]
+    fn fatturapa_skips_dati_fatture_collegate_for_non_preceding_reference() {
+        let mut doc = sample_invoice();
+        doc.references = vec![DocumentReference {
+            kind: "purchase-order".to_owned(),
+            id: "PO-42".to_owned(),
+            issue_date: None,
+        }];
+        let xml = to_fattura_pa_xml(&doc, &FatturaPaContext::default()).unwrap();
+        assert!(!xml.contains("<DatiFattureCollegate>"), "{xml}");
+        assert!(!xml.contains("PO-42"), "{xml}");
+    }
+
+    /// A preceding-invoice reference with no issue date emits `IdDocumento`
+    /// without a `Data` child (faithful: `Data` is only emitted when supplied).
+    #[test]
+    fn fatturapa_dati_fatture_collegate_omits_data_when_absent() {
+        let mut doc = sample_invoice();
+        doc.references = vec![DocumentReference {
+            kind: "preceding-invoice".to_owned(),
+            id: "INV-PRIOR-9".to_owned(),
+            issue_date: None,
+        }];
+        let xml = to_fattura_pa_xml(&doc, &FatturaPaContext::default()).unwrap();
+        assert!(
+            xml.contains(
+                "<DatiFattureCollegate>\n        <IdDocumento>INV-PRIOR-9</IdDocumento>\n      </DatiFattureCollegate>"
+            ),
+            "DatiFattureCollegate should omit Data when absent:\n{xml}"
+        );
+    }
+
+    /// Opportunity (2): a line classification emits `DettaglioLinee/CodiceArticolo`
+    /// with `CodiceTipo` = scheme_id and `CodiceValore` = code, both verbatim,
+    /// positioned between `NumeroLinea` and `Descrizione`.
+    #[test]
+    fn fatturapa_emits_codice_articolo_for_line_classification() {
+        let mut doc = sample_invoice();
+        doc.lines[0].classifications = vec![ItemClassification {
+            code: "85superseded".to_owned(),
+            scheme_id: "TARIC".to_owned(),
+            scheme_version: None,
+        }];
+        let xml = to_fattura_pa_xml(&doc, &FatturaPaContext::default()).unwrap();
+        assert!(
+            xml.contains(
+                "<CodiceArticolo>\n          <CodiceTipo>TARIC</CodiceTipo>\n          <CodiceValore>85superseded</CodiceValore>\n        </CodiceArticolo>"
+            ),
+            "CodiceArticolo not emitted as expected:\n{xml}"
+        );
+        // Placement: after NumeroLinea, before Descrizione, within the line.
+        let numero = xml.find("<NumeroLinea>").unwrap();
+        let codice = xml.find("<CodiceArticolo>").unwrap();
+        let descr = xml.find("<Descrizione>").unwrap();
+        assert!(numero < codice && codice < descr, "{xml}");
+    }
+
+    /// Multiple classifications on one line emit multiple `CodiceArticolo`
+    /// groups, each carrying its own scheme/code verbatim.
+    #[test]
+    fn fatturapa_emits_one_codice_articolo_per_classification() {
+        let mut doc = sample_invoice();
+        doc.lines[0].classifications = vec![
+            ItemClassification {
+                code: "12345678".to_owned(),
+                scheme_id: "TARIC".to_owned(),
+                scheme_version: None,
+            },
+            ItemClassification {
+                code: "SRV-7".to_owned(),
+                scheme_id: "CPV".to_owned(),
+                scheme_version: None,
+            },
+        ];
+        let xml = to_fattura_pa_xml(&doc, &FatturaPaContext::default()).unwrap();
+        assert_eq!(xml.matches("<CodiceArticolo>").count(), 2, "{xml}");
+        assert!(xml.contains("<CodiceTipo>TARIC</CodiceTipo>"));
+        assert!(xml.contains("<CodiceValore>12345678</CodiceValore>"));
+        assert!(xml.contains("<CodiceTipo>CPV</CodiceTipo>"));
+        assert!(xml.contains("<CodiceValore>SRV-7</CodiceValore>"));
+    }
+
+    /// Opportunity (3): a tax band exemption reason emits
+    /// `DatiRiepilogo/RiferimentoNormativo` with the free text verbatim, as the
+    /// last child of the summary (after `Imposta`).
+    #[test]
+    fn fatturapa_emits_riferimento_normativo_from_exemption_reason() {
+        let mut doc = sample_invoice();
+        doc.tax_summary[0].exemption_reason =
+            Some("Operazione in reverse charge ex art. 17".to_owned());
+        let xml = to_fattura_pa_xml(&doc, &FatturaPaContext::default()).unwrap();
+        assert!(
+            xml.contains(
+                "<RiferimentoNormativo>Operazione in reverse charge ex art. 17</RiferimentoNormativo>"
+            ),
+            "RiferimentoNormativo not emitted verbatim:\n{xml}"
+        );
+        // Placement: last child of DatiRiepilogo, after Imposta.
+        let imposta = xml.find("<Imposta>").unwrap();
+        let rif = xml.find("<RiferimentoNormativo>").unwrap();
+        let close = xml.find("</DatiRiepilogo>").unwrap();
+        assert!(imposta < rif && rif < close, "{xml}");
+        // The coded Natura value is NOT derived/emitted.
+        assert!(!xml.contains("<Natura>"), "{xml}");
     }
 
     #[test]
