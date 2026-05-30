@@ -16,9 +16,10 @@ use invoicekit_canonical::{canonicalize_xml, XmlCanonicalizeError};
 use invoicekit_ir::{
     Attachment, CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly,
     DecimalValue, DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference,
-    DocumentType, IrError, Iso4217Code, JurisdictionExtension, LocalizedString, LossinessLedger,
-    MonetaryTotal, MoneyAmount, Party, PartyTaxId, PaymentInstruction, PaymentInstructionKind,
-    PaymentTerms, PostalAddress, Quantity, SchemaVersion, TaxCategorySummary,
+    DocumentType, IrError, Iso4217Code, ItemClassification, JurisdictionExtension, LocalizedString,
+    LossinessLedger, MonetaryTotal, MoneyAmount, Party, PartyTaxId, PaymentInstruction,
+    PaymentInstructionKind, PaymentTerms, PostalAddress, Quantity, SchemaVersion,
+    TaxCategorySummary,
 };
 use quick_xml::events::{attributes::AttrError, BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
@@ -485,6 +486,21 @@ impl ParseState {
             if name == "BilledQuantity" || name == "CreditedQuantity" {
                 line.unit_code = attr_value(attrs, "unitCode").map(ToOwned::to_owned);
             }
+            // EN 16931 BT-158 bindings: ram:DesignatedProductClassification wraps a
+            // single ram:ClassCode whose text is the code (BT-158), @listID the
+            // scheme (BT-158-1) and @listVersionID the version (BT-158-2).
+            if name == "DesignatedProductClassification"
+                && in_any(stack, &["SpecifiedTradeProduct"])
+            {
+                line.current_classification = Some(ClassificationBuilder::default());
+            }
+            if name == "ClassCode" {
+                if let Some(classification) = line.current_classification.as_mut() {
+                    classification.scheme_id = attr_value(attrs, "listID").map(ToOwned::to_owned);
+                    classification.scheme_version =
+                        attr_value(attrs, "listVersionID").map(ToOwned::to_owned);
+                }
+            }
         }
         Ok(())
     }
@@ -500,6 +516,15 @@ impl ParseState {
                 .take()
                 .ok_or(CiiError::MissingElement("ram:DocumentContextParameter"))?;
             self.apply_context_parameter(parameter)?;
+        }
+        if name == "DesignatedProductClassification" {
+            if let Some(line) = self.current_line.as_mut() {
+                if let Some(classification) =
+                    line.current_classification.take().and_then(ClassificationBuilder::build)
+                {
+                    line.classifications.push(classification);
+                }
+            }
         }
         if name == "IncludedSupplyChainTradeLineItem" {
             let line = self
@@ -585,6 +610,12 @@ impl ParseState {
             if path_ends(stack, &["SpecifiedTradeProduct", "Description"]) {
                 if line.description.is_none() {
                     line.description = Some(value.to_owned());
+                }
+                return Ok(());
+            }
+            if path_ends(stack, &["DesignatedProductClassification", "ClassCode"]) {
+                if let Some(classification) = line.current_classification.as_mut() {
+                    classification.code = Some(value.to_owned());
                 }
                 return Ok(());
             }
@@ -1166,6 +1197,31 @@ struct LineBuilder {
     unit_price: Option<MoneyAmount>,
     line_extension_amount: Option<MoneyAmount>,
     tax_category: Option<String>,
+    classifications: Vec<ItemClassification>,
+    current_classification: Option<ClassificationBuilder>,
+}
+
+/// Accumulates a single EN 16931 BT-158 commodity classification while the
+/// parser walks `ram:DesignatedProductClassification/ram:ClassCode`.
+#[derive(Default)]
+struct ClassificationBuilder {
+    /// BT-158: the classification code text.
+    code: Option<String>,
+    /// BT-158-1: the `@listID` scheme identifier.
+    scheme_id: Option<String>,
+    /// BT-158-2: the optional `@listVersionID`.
+    scheme_version: Option<String>,
+}
+
+impl ClassificationBuilder {
+    fn build(self) -> Option<ItemClassification> {
+        let code = self.code?;
+        Some(ItemClassification {
+            code,
+            scheme_id: self.scheme_id.unwrap_or_default(),
+            scheme_version: self.scheme_version,
+        })
+    }
 }
 
 impl LineBuilder {
@@ -1188,7 +1244,7 @@ impl LineBuilder {
                 "ram:SpecifiedTradeSettlementLineMonetarySummation/ram:LineTotalAmount",
             ))?,
             tax_category: self.tax_category,
-            classifications: Vec::new(),
+            classifications: self.classifications,
             extensions: Vec::new(),
         })
     }
@@ -2310,15 +2366,7 @@ fn write_line(
         Some(&line.id),
         "SpecifiedTradeProduct",
     )?;
-    xml.push_str("<ram:SpecifiedTradeProduct>");
-    write_text_element(xml, "ram:Name", &line.description);
-    write_preserved_xml_after_all(
-        xml,
-        document,
-        &format!("{line_path}/SpecifiedTradeProduct"),
-        Some(&line.id),
-    )?;
-    xml.push_str("</ram:SpecifiedTradeProduct>");
+    write_specified_trade_product(xml, line, document, line_path)?;
     write_preserved_xml_before(
         xml,
         document,
@@ -2383,6 +2431,63 @@ fn write_line(
     write_preserved_xml_after_all(xml, document, line_path, Some(&line.id))?;
     xml.push_str("</ram:IncludedSupplyChainTradeLineItem>");
     Ok(())
+}
+
+/// Emit `<ram:SpecifiedTradeProduct>` with its `ram:Name`, the native EN 16931
+/// BT-158 classifications, and any preserved siblings replayed in schema order.
+///
+/// The native `ram:DesignatedProductClassification` emission is bracketed by the
+/// preserved replay: children that precede it (in CII schema order) are replayed
+/// first via `write_preserved_xml_before`, then the native classifications land
+/// at their slot, then `write_preserved_xml_after_all` replays the trailing
+/// children. This keeps element order valid even when a line also carries a
+/// lower-order preserved `SpecifiedTradeProduct` sibling.
+fn write_specified_trade_product(
+    xml: &mut String,
+    line: &DocumentLine,
+    document: &CommercialDocument,
+    line_path: &str,
+) -> Result<(), CiiError> {
+    xml.push_str("<ram:SpecifiedTradeProduct>");
+    write_text_element(xml, "ram:Name", &line.description);
+    let product_path = format!("{line_path}/SpecifiedTradeProduct");
+    write_preserved_xml_before(
+        xml,
+        document,
+        &product_path,
+        Some(&line.id),
+        "DesignatedProductClassification",
+    )?;
+    write_designated_product_classifications(xml, &line.classifications);
+    write_preserved_xml_after_all(xml, document, &product_path, Some(&line.id))?;
+    xml.push_str("</ram:SpecifiedTradeProduct>");
+    Ok(())
+}
+
+/// Emit the EN 16931 BT-158 commodity classifications as
+/// `ram:DesignatedProductClassification/ram:ClassCode[@listID,@listVersionID]`.
+/// Empty when the line carries no classifications, so unclassified lines
+/// serialize byte-identically to before this binding existed.
+fn write_designated_product_classifications(
+    xml: &mut String,
+    classifications: &[ItemClassification],
+) {
+    for classification in classifications {
+        xml.push_str("<ram:DesignatedProductClassification><ram:ClassCode");
+        if !classification.scheme_id.is_empty() {
+            xml.push_str(r#" listID=""#);
+            write_xml_attr(&classification.scheme_id, xml);
+            xml.push('"');
+        }
+        if let Some(scheme_version) = &classification.scheme_version {
+            xml.push_str(r#" listVersionID=""#);
+            write_xml_attr(scheme_version, xml);
+            xml.push('"');
+        }
+        xml.push('>');
+        write_xml_text(&classification.code, xml);
+        xml.push_str("</ram:ClassCode></ram:DesignatedProductClassification>");
+    }
 }
 
 fn write_note(
@@ -2805,7 +2910,7 @@ fn known_cii_children(parent: &str) -> Option<&'static [&'static str]> {
             "SpecifiedLineTradeSettlement",
         ]),
         "AssociatedDocumentLineDocument" => Some(&["LineID"]),
-        "SpecifiedTradeProduct" => Some(&["Name", "Description"]),
+        "SpecifiedTradeProduct" => Some(&["Name", "Description", "DesignatedProductClassification"]),
         "SpecifiedLineTradeAgreement" => Some(&["NetPriceProductTradePrice"]),
         "NetPriceProductTradePrice" => Some(&["ChargeAmount"]),
         "SpecifiedLineTradeDelivery" => Some(&["BilledQuantity", "CreditedQuantity"]),
@@ -3856,9 +3961,9 @@ mod tests {
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly, DecimalValue,
         DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentType, Iso4217Code,
-        JurisdictionExtension, LocalizedString, MonetaryTotal, Party, PartyTaxId,
-        PaymentInstruction, PaymentInstructionKind, PaymentTerms, PostalAddress, SchemaVersion,
-        TaxCategorySummary,
+        ItemClassification, JurisdictionExtension, LocalizedString, MonetaryTotal, Party,
+        PartyTaxId, PaymentInstruction, PaymentInstructionKind, PaymentTerms, PostalAddress,
+        SchemaVersion, TaxCategorySummary,
     };
     use rust_decimal::Decimal;
 
@@ -4495,6 +4600,130 @@ mod tests {
         assert!(scenario_pos < application_pos);
         assert!(application_pos < guideline_pos);
         assert_eq!(parse_document(&serialized), parsed);
+    }
+
+    /// BT-158 round-trip: a CII line carrying a
+    /// `ram:DesignatedProductClassification/ram:ClassCode[@listID,@listVersionID]`
+    /// must parse into `line.classifications`, serialize back identically, and
+    /// appear exactly once (mapped, never also preserved-raw).
+    #[test]
+    fn designated_product_classification_round_trips_once() {
+        let document = fixture(DocumentType::Invoice, 41);
+        let xml = to_xml(&document).unwrap();
+        let classification = format!(
+            r#"<ram:DesignatedProductClassification xmlns:ram="{CII_RAM_NAMESPACE_URI}"><ram:ClassCode listID="HS" listVersionID="2023">8471.30</ram:ClassCode></ram:DesignatedProductClassification>"#
+        );
+        // Insert the classification inside SpecifiedTradeProduct, after ram:Name.
+        let with_classification = xml.replacen(
+            "</ram:SpecifiedTradeProduct>",
+            &format!("{classification}</ram:SpecifiedTradeProduct>"),
+            1,
+        );
+
+        let parsed = parse_document(&with_classification);
+        let line = parsed.lines.first().expect("line");
+        assert_eq!(line.classifications.len(), 1);
+        let mapped = &line.classifications[0];
+        assert_eq!(mapped.code, "8471.30");
+        assert_eq!(mapped.scheme_id, "HS");
+        assert_eq!(mapped.scheme_version.as_deref(), Some("2023"));
+
+        let serialized = to_xml(&parsed).unwrap();
+        // Mapped, not also preserved-raw: appears exactly once.
+        assert_eq!(serialized.matches("<ram:DesignatedProductClassification>").count(), 1);
+        assert_eq!(serialized.matches("<ram:ClassCode").count(), 1);
+        assert!(serialized.contains(
+            r#"<ram:DesignatedProductClassification><ram:ClassCode listID="HS" listVersionID="2023">8471.30</ram:ClassCode></ram:DesignatedProductClassification>"#
+        ));
+        // No preserved_xml fragment captured the classification.
+        let preserved_has_classification = parsed
+            .extensions
+            .iter()
+            .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
+            .and_then(|extension| extension.payload.get("preserved_xml"))
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item.get("element").and_then(Value::as_str)
+                        == Some("DesignatedProductClassification")
+                })
+            });
+        assert!(
+            !preserved_has_classification,
+            "BT-158 must be mapped, never also preserved-raw"
+        );
+
+        // Idempotent canonical serialization (schema order holds) and stable parse.
+        assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
+        assert_eq!(parse_document(&serialized), parsed);
+    }
+
+    /// MIXED case: a line with BOTH a native BT-158 classification AND preserved
+    /// `SpecifiedTradeProduct` siblings at a lower schema order
+    /// (`ram:ApplicableProductCharacteristic`, order 24 < 26) and a higher one
+    /// (`ram:OriginTradeCountry`, order 31 > 26). The native classification must
+    /// land in its correct schema slot so the emitted document is canonical and
+    /// no preserved element is dropped.
+    #[test]
+    fn designated_product_classification_emits_in_schema_order_with_preserved_siblings() {
+        let mut document = fixture(DocumentType::Invoice, 42);
+        document.lines.first_mut().unwrap().classifications = vec![ItemClassification {
+            code: "8471.30".to_owned(),
+            scheme_id: "HS".to_owned(),
+            scheme_version: Some("2023".to_owned()),
+        }];
+        let product_container = "CrossIndustryInvoice/SupplyChainTradeTransaction/IncludedSupplyChainTradeLineItem/SpecifiedTradeProduct";
+        let line_id = document.lines.first().unwrap().id.clone();
+        document.extensions.push(
+            JurisdictionExtension::new(
+                mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN,
+                json!({
+                    "preserved_xml": [
+                        {
+                            "container": product_container,
+                            "element": "OriginTradeCountry",
+                            "line_id": line_id,
+                            "xml": format!(r#"<ram:OriginTradeCountry xmlns:ram="{CII_RAM_NAMESPACE_URI}"><ram:ID>DE</ram:ID></ram:OriginTradeCountry>"#)
+                        },
+                        {
+                            "container": product_container,
+                            "element": "ApplicableProductCharacteristic",
+                            "line_id": line_id,
+                            "xml": format!(r#"<ram:ApplicableProductCharacteristic xmlns:ram="{CII_RAM_NAMESPACE_URI}"><ram:Description>Colour</ram:Description><ram:Value>Blue</ram:Value></ram:ApplicableProductCharacteristic>"#)
+                        }
+                    ]
+                }),
+            )
+            .unwrap(),
+        );
+
+        let serialized = to_xml(&document).unwrap();
+
+        // Canonical idempotence: schema order holds across the native + preserved mix.
+        assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
+
+        // Correct schema order: ApplicableProductCharacteristic (24) precedes
+        // DesignatedProductClassification (26) precedes OriginTradeCountry (31).
+        let characteristic_pos = serialized
+            .find("<ram:ApplicableProductCharacteristic")
+            .expect("preserved lower-order sibling present");
+        let classification_pos = serialized
+            .find("<ram:DesignatedProductClassification>")
+            .expect("native classification present");
+        let origin_pos = serialized
+            .find("<ram:OriginTradeCountry")
+            .expect("preserved higher-order sibling present");
+        assert!(characteristic_pos < classification_pos);
+        assert!(classification_pos < origin_pos);
+
+        // No element dropped: each appears exactly once, plus a stable round-trip.
+        assert_eq!(serialized.matches("<ram:DesignatedProductClassification>").count(), 1);
+        assert_eq!(serialized.matches("<ram:ApplicableProductCharacteristic").count(), 1);
+        assert_eq!(serialized.matches("<ram:OriginTradeCountry").count(), 1);
+
+        let parsed = parse_document(&serialized);
+        assert_eq!(parsed.lines[0].classifications, document.lines[0].classifications);
+        assert_eq!(to_xml(&parsed).unwrap(), serialized);
     }
 
     #[test]

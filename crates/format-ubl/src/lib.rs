@@ -445,6 +445,26 @@ impl ParseState {
             if name == "InvoicedQuantity" || name == "CreditedQuantity" {
                 line.unit_code = attr_value(attrs, "unitCode").map(ToOwned::to_owned);
             }
+            // EN 16931 BT-158 binding: cac:Item/cac:CommodityClassification opens a
+            // mapped (not preserved) classification slot, so it routes to the line's
+            // `classifications` vec instead of any raw-XML passthrough. The
+            // scheme identifier (BT-158-1 listID) and optional version (BT-158-2
+            // listVersionID) live on the cbc:ItemClassificationCode start event;
+            // the code text arrives separately and is captured in `text`.
+            if path_ends(stack, &["Item"]) && name == "CommodityClassification" {
+                line.current_classification = Some(ClassificationBuilder::default());
+            }
+            if path_ends(stack, &["Item", "CommodityClassification"])
+                && name == "ItemClassificationCode"
+            {
+                if let Some(classification) = line.current_classification.as_mut() {
+                    attr_value(attrs, "listID")
+                        .unwrap_or_default()
+                        .clone_into(&mut classification.scheme_id);
+                    classification.scheme_version =
+                        attr_value(attrs, "listVersionID").map(ToOwned::to_owned);
+                }
+            }
         }
         Ok(())
     }
@@ -462,6 +482,18 @@ impl ParseState {
             return Ok(());
         }
         let name = element.local_name.as_str();
+        // EN 16931 BT-158: a cac:CommodityClassification closes, so flush the
+        // in-progress classification (attributes + code text) into the line's
+        // `classifications` vec. This routes the mapped element to the IR only;
+        // it is never captured as preserved/raw XML, so re-serialization emits it
+        // exactly once.
+        if name == "CommodityClassification" {
+            if let Some(line) = self.current_line.as_mut() {
+                if let Some(classification) = line.current_classification.take() {
+                    line.classifications.push(classification.build());
+                }
+            }
+        }
         if name == "InvoiceLine" || name == "CreditNoteLine" {
             let line = self
                 .current_line
@@ -496,6 +528,22 @@ impl ParseState {
     fn text(&mut self, stack: &[ParsedElement], raw: &str) -> Result<(), UblError> {
         if let Some(capture) = self.capture.as_mut() {
             capture.text(raw);
+            return Ok(());
+        }
+        // BT-158 code text accumulates the *raw* (untrimmed) fragments. A code
+        // such as "65 & up" arrives as several events ("65 ", the `&` entity, then
+        // " up"), so we append rather than overwrite and defer trimming to
+        // `ClassificationBuilder::build`. This runs before the whitespace-only
+        // early-return below so significant interior spaces survive.
+        if path_ends(
+            stack,
+            &["Item", "CommodityClassification", "ItemClassificationCode"],
+        ) {
+            if let Some(line) = self.current_line.as_mut() {
+                if let Some(classification) = line.current_classification.as_mut() {
+                    classification.code.push_str(raw);
+                }
+            }
             return Ok(());
         }
         let value = raw.trim();
@@ -976,6 +1024,42 @@ struct LineBuilder {
     unit_price: Option<MoneyAmount>,
     line_extension_amount: Option<MoneyAmount>,
     tax_category: Option<String>,
+    /// Finalized EN 16931 BT-158 item classifications for this line, in document
+    /// order. Each entry is mapped from a `cac:Item/cac:CommodityClassification`.
+    classifications: Vec<ItemClassification>,
+    /// The classification currently being read. Populated from the
+    /// `cbc:ItemClassificationCode` start attributes (`listID`/`listVersionID`)
+    /// and its text, then pushed to [`Self::classifications`] when the enclosing
+    /// `cac:CommodityClassification` closes.
+    current_classification: Option<ClassificationBuilder>,
+}
+
+/// In-progress EN 16931 BT-158 item classification.
+///
+/// The UBL syntax splits the classification across an element's attributes and
+/// its text node, which arrive as separate parser events. This accumulator
+/// stashes the `listID`/`listVersionID` attributes seen on the
+/// `cbc:ItemClassificationCode` start event and the code text seen on the text
+/// event, so [`LineBuilder`] can assemble a complete [`ItemClassification`] once
+/// the surrounding `cac:CommodityClassification` closes.
+#[derive(Default)]
+struct ClassificationBuilder {
+    code: String,
+    scheme_id: String,
+    scheme_version: Option<String>,
+}
+
+impl ClassificationBuilder {
+    fn build(self) -> ItemClassification {
+        ItemClassification {
+            // Trim once over the fully accumulated text: insignificant whitespace
+            // around the code is dropped while interior spaces (e.g. "65 & up")
+            // are preserved.
+            code: self.code.trim().to_owned(),
+            scheme_id: self.scheme_id,
+            scheme_version: self.scheme_version,
+        }
+    }
 }
 
 impl LineBuilder {
@@ -998,7 +1082,7 @@ impl LineBuilder {
                 .line_extension_amount
                 .ok_or(UblError::MissingElement("cbc:LineExtensionAmount"))?,
             tax_category: self.tax_category,
-            classifications: Vec::new(),
+            classifications: self.classifications,
             extensions: Vec::new(),
         })
     }
@@ -2322,6 +2406,100 @@ mod tests {
 
         // The enriched document still serializes to canonical, byte-stable XML.
         assert_eq!(canonicalize_xml(&xml).unwrap(), xml);
+    }
+
+    /// BT-158 parse side: a UBL invoice carrying `cac:CommodityClassification`
+    /// must surface every classification on the IR line (code from the element
+    /// text, scheme from `listID`, version from `listVersionID`). The element is
+    /// a *mapped* element, not preserved/raw XML, so re-serializing the parsed
+    /// document emits each `cac:CommodityClassification` exactly once — no
+    /// double-emit — and the full round-trip is lossless.
+    #[test]
+    fn line_classification_round_trips_from_commodity_classification() {
+        use invoicekit_ir::ItemClassification;
+
+        // Start from a real serialized UBL invoice so we do not hand-guess element
+        // names: the emitter (already shipped) produces the canonical
+        // cac:Item/cac:CommodityClassification/cbc:ItemClassificationCode binding.
+        let mut document = fixture(DocumentType::Invoice, 31);
+        document.lines[0].classifications = vec![
+            ItemClassification {
+                code: "65 & up".to_owned(),
+                scheme_id: "HS".to_owned(),
+                scheme_version: Some("2017".to_owned()),
+            },
+            ItemClassification {
+                code: "SRV".to_owned(),
+                scheme_id: "TST".to_owned(),
+                scheme_version: None,
+            },
+        ];
+        let xml = to_xml(&document).unwrap();
+
+        // The source UBL string genuinely contains the classification elements:
+        // two CommodityClassification wrappers on the single fixture line.
+        assert_eq!(
+            xml.matches("<cac:CommodityClassification>").count(),
+            2,
+            "source UBL must carry exactly the two emitted classifications:\n{xml}"
+        );
+
+        // Parse side under test: the mapped element routes to line.classifications.
+        let parsed = parse_document(&xml);
+        assert_eq!(
+            parsed.lines[0].classifications,
+            vec![
+                ItemClassification {
+                    code: "65 & up".to_owned(),
+                    scheme_id: "HS".to_owned(),
+                    scheme_version: Some("2017".to_owned()),
+                },
+                ItemClassification {
+                    code: "SRV".to_owned(),
+                    scheme_id: "TST".to_owned(),
+                    scheme_version: None,
+                },
+            ],
+            "parser must read code/listID/listVersionID into line.classifications"
+        );
+
+        // Full document round-trip is lossless: classifications carried, nothing
+        // else perturbed.
+        assert_eq!(parsed, document);
+
+        // No double-emit: re-serializing the parsed IR yields each
+        // CommodityClassification exactly once. If the element had also been
+        // captured as preserved/raw XML, this count would double.
+        let reserialized = to_xml(&parsed).unwrap();
+        assert_eq!(
+            reserialized.matches("<cac:CommodityClassification>").count(),
+            2,
+            "re-serialization must emit each classification exactly once:\n{reserialized}"
+        );
+        // Byte-identical round-trip: the mapped element is the single source of
+        // the emitted XML.
+        assert_eq!(reserialized, xml);
+    }
+
+    /// A line with NO classification must be untouched on the parse side: the IR
+    /// carries an empty `classifications` vec, and re-serialization is
+    /// byte-identical to the source (the behavior-preservation proof that backs
+    /// every existing golden/corpus fixture with unclassified lines).
+    #[test]
+    fn unclassified_line_round_trips_byte_identically() {
+        let document = fixture(DocumentType::Invoice, 32);
+        let xml = to_xml(&document).unwrap();
+        assert!(
+            !xml.contains("CommodityClassification"),
+            "the unclassified fixture must not emit cac:CommodityClassification"
+        );
+        let parsed = parse_document(&xml);
+        assert!(
+            parsed.lines.iter().all(|line| line.classifications.is_empty()),
+            "an unclassified UBL line must parse to an empty classifications vec"
+        );
+        assert_eq!(parsed, document);
+        assert_eq!(to_xml(&parsed).unwrap(), xml);
     }
 
     #[test]
