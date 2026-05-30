@@ -18,9 +18,11 @@
 //!   `store` call so tests + cassette-replay can assert on
 //!   the captured bundles.
 //!
-//! GCS retention and IPFS-hash backends land in follow-up
-//! beads; they share this trait surface so a tenant can
-//! switch backends without touching call sites.
+//! Google Cloud Storage (GCS) retention and IPFS-hash
+//! backends are not implemented here; they are noted as
+//! possible follow-up work that would share this trait
+//! surface, so a tenant could switch backends without
+//! touching call sites.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -32,10 +34,14 @@ use invoicekit_evidence::{pack, unpack, BundleError, EvidenceBundle};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// Opaque, stable identifier for one archived bundle. Backends
-/// pick the scheme ([`LocalFsArchive`] uses the bundle's BLAKE3 hash;
-/// S3 returns the object key + version-id; IPFS returns the
-/// CID).
+/// Opaque, stable identifier for one archived bundle.
+///
+/// Each backend picks the scheme: [`LocalFsArchive`] uses the
+/// bundle's BLAKE3 hash, while the object-lock backends
+/// ([`S3ObjectLockArchive`] / [`AzureWormArchive`]) use a
+/// composite `scheme://namespace/object#versionId=…` id (the
+/// `#versionId=…` suffix is present only when the backing store
+/// returns a version id).
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ArchiveId(pub String);

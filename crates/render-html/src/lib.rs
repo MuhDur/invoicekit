@@ -1,8 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The InvoiceKit Authors
 
-//! `invoicekit-render-html` — WCAG 2.1 AA conformant HTML5 invoice
-//! renderer.
+//! `invoicekit-render-html` — accessibility-oriented HTML5 invoice
+//! renderer (WCAG 2.1 AA contrast-targeted palette + a
+//! [`palette::contrast_ratio`] helper).
+//!
+//! This crate is not a WCAG conformance checker: it ships a set of
+//! accessibility-oriented construction rules (semantic landmarks,
+//! table header scoping, language tags, a contrast-targeted default
+//! palette, script-free output) and unit-tests a subset of them. It
+//! does not run a conformance checker, and there is no audit against
+//! the full set of WCAG 2.1 AA success criteria. Treat the output as
+//! accessibility-minded HTML, not as certified-conformant HTML.
 //!
 //! Customers asked for an HTML5 render of every invoice for
 //! email-safe display and archival viewing alongside the PDF/A
@@ -16,11 +25,15 @@
 //!   with `<caption>`, `<thead>`, and `<th scope>` for line items
 //!   and totals; `<dl>` for key-value party detail rows. No
 //!   `<div>` soup, no presentational tags.
-//! - **Color contrast ≥ 4.5:1**: the default palette uses
-//!   `#1a1a1a` text on `#fff` and `#fff` on `#0a4d8c` for primary
-//!   accent. The constants in [`palette`] drive the inline
-//!   stylesheet; the [`palette::contrast_ratio`] helper makes the
-//!   relationship testable.
+//! - **Contrast-targeted default palette**: the hand-tuned default
+//!   palette targets the WCAG 2.1 AA contrast minimum (≥ 4.5:1 for
+//!   normal text) — `#1a1a1a` text on `#fff` and `#fff` on `#0a4d8c`
+//!   for the primary accent. The constants in [`palette`] drive the
+//!   inline stylesheet, and unit tests assert that the default text,
+//!   muted-text, and accent-band pairs clear 4.5:1; the
+//!   [`palette::contrast_ratio`] helper makes the relationship
+//!   testable. The palette is fixed — there is no API to inject a
+//!   custom palette.
 //! - **Language tag** is always set on `<html lang>` (`en` by
 //!   default; the first localized note's language wins when present)
 //!   so screen readers select the right voice.

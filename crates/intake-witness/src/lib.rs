@@ -4,14 +4,19 @@
 //! `invoicekit-intake-witness` — deterministic cross-examination
 //! of AI-extracted invoice fields.
 //!
-//! Every value the AI intake layers (PaddleOCR, SmolDocling,
-//! Qwen2.5-VL) emit gets re-validated by the deterministic
-//! checks in this crate before the engine commits the
-//! [`ExtractedDocument`] to the canonical IR. Mismatches block
-//! AI-only emission and surface as [`WitnessFailure`] entries
-//! with a stable rule id and the citation paths of the
-//! offending fields, so the audit UI can highlight the wrong
-//! values for human review.
+//! A pure validation library over an in-memory
+//! [`ExtractedDocument`]. It runs no models, reads no PDFs, and
+//! performs no commit: the AI intake layers (PaddleOCR,
+//! SmolDocling, Qwen2.5-VL) are the upstream producers of the
+//! values, named here only for context. Given an already-
+//! extracted document, [`cross_examine`] re-derives the
+//! arithmetic and identifier shapes the AI's reported values
+//! must satisfy and returns a [`WitnessOutcome`]. Mismatches
+//! surface as [`WitnessFailure`] entries with a stable rule id
+//! and the citation paths of the offending fields, so a caller
+//! (e.g. an engine deciding whether to commit to the canonical
+//! IR) can block AI-only emission and an audit UI can highlight
+//! the wrong values for human review.
 //!
 //! # Rules shipped today
 //!

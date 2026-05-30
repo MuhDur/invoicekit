@@ -5,9 +5,10 @@
 //!
 //! Currently houses the T-052 veraPDF adapter that parses the
 //! validator-verapdf sidecar's `validator.validate_pdf` JSON
-//! response into a typed [`verapdf::PdfAReport`]. Additional
-//! render verifiers (PDF/A signature checks, font-embedding
-//! audits, etc.) will land here as sibling modules.
+//! response into a typed [`verapdf::ValidatePdfResult`] (which
+//! carries a nested [`verapdf::PdfAReport`]). Additional render
+//! verifiers (PDF/A signature checks, font-embedding audits, etc.)
+//! will land here as sibling modules.
 
 pub mod verapdf;
 

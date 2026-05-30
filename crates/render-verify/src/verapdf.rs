@@ -4,11 +4,12 @@
 //!
 //! The validator-verapdf sidecar wraps the JVM-only veraPDF library
 //! and exposes a `validator.validate_pdf` JSON-RPC method that
-//! takes a base64-encoded PDF body and returns a JSON `PdfAReport`.
-//! This module is the Rust side of that contract: it parses the
-//! sidecar's response into a typed [`PdfAReport`] and exposes a
-//! `parse_response` helper that callers wrap in their own
-//! HTTP/transport layer.
+//! takes a base64-encoded PDF body and returns a JSON result object
+//! carrying a nested `PdfAReport`. This module is the Rust side of
+//! that contract: it parses the sidecar's response into a typed
+//! [`ValidatePdfResult`] (whose `report` field is the nested
+//! [`PdfAReport`]) and exposes a `parse_response` helper that
+//! callers wrap in their own HTTP/transport layer.
 //!
 //! The wire format is owned by this file. The sidecar's Java side
 //! produces it via `services/validator-common/src/main/java/dev/

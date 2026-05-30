@@ -221,10 +221,10 @@ impl TimestampClient for MockTimestampClient {
         let serial = *serial_guard;
         *serial_guard += 1;
         drop(serial_guard);
-        // The "token" is just the serialised envelope; the
-        // real ASN.1 codec lands in a follow-up. The token's
-        // BLAKE3 hash is content-addressed so a tampered
-        // imprint produces a different token.
+        // The "token" is just a deterministic `serde_json`
+        // envelope of the request fields (it embeds the imprint
+        // bytes verbatim — it is not hashed or content-addressed);
+        // the real ASN.1 codec lands in a follow-up.
         let envelope = serde_json::json!({
             "tsa_name": self.tsa_name,
             "generated_at": self.fixed_time,

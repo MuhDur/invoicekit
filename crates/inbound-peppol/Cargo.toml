@@ -10,7 +10,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Inbound Peppol invoice pipeline: format-detect -> parse -> validate -> archive. Library half of the eventual services/inbound-peppol axum binary."
+description = "Inbound Peppol invoice pipeline: format-detect -> parse -> IR-envelope validate -> archive via an injected trait. Validation is the IR's own CommercialDocument::validate envelope checks only; the EN 16931 / Peppol rule pack (T-031 JVM-validator bridge) is a follow-up, and the only archive impl here is an in-memory MockArchive. Library half of the eventual services/inbound-peppol axum binary."
 publish = false
 
 [lib]

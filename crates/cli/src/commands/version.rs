@@ -8,17 +8,22 @@
 //!
 //! Two output modes:
 //!
-//! * default — one human line: `invoicekit <ver> (<commit>, <rustc>)`.
+//! * default — one human line: `<name> <ver> (<build_profile>)`.
 //! * `--json` — structured fields for scripts:
 //!
 //!   ```json
 //!   {
-//!     "name": "invoicekit",
+//!     "name": "invoicekit-cli",
 //!     "version": "0.0.0",
-//!     "build_profile": "release",
-//!     "rustc_version": "rustc 1.95.0 (...)"
+//!     "build_profile": "release"
 //!   }
 //!   ```
+//!
+//! `build_profile` is `dev` or `release`, derived from
+//! `debug_assertions`. We do not emit a commit hash or rustc
+//! version: there is no build script to capture them, and the
+//! crate carries only the fields [`VersionInfo`] actually holds
+//! (`name`, `version`, `build_profile`).
 //!
 //! Always exits `0`. Usage error exits `2`.
 

@@ -4,23 +4,37 @@
 //! InvoiceKit intake **OCR** substrate.
 //!
 //! Typed surface for the document-OCR layer of the intake
-//! pipeline. The full intake stack ships in layers
+//! pipeline. The full intake stack is planned in layers
 //! per PLAN.md §3.5:
 //!
 //! * Layer 1 — digital PDF text extraction (lives in
 //!   `crates/intake-pdf`).
 //! * Layer 2 — Factur-X embedded XML extraction (lives in
 //!   `crates/intake-pdf`).
-//! * **Layer 3 — server-side PaddleOCR** (this crate's
-//!   `PaddleOcrProvider`).
-//! * **Layer 4 — SmolDocling-256M ONNX** (this crate's
-//!   `SmolDoclingProvider`).
+//! * Layer 3 — server-side PaddleOCR, the slot this crate's
+//!   [`PaddleOcrProvider`] holds.
+//! * Layer 4 — SmolDocling-256M ONNX, the slot this crate's
+//!   [`SmolDoclingProvider`] holds.
 //! * Layer 5 — Qwen2.5-VL cloud inference (lives in
 //!   `crates/intake-vlm`).
 //!
-//! Every layer satisfies the same [`OcrProvider`] trait so
-//! the engine's intake pipeline picks the cheapest layer
-//! that returns acceptable confidence.
+//! This crate ships the typed [`OcrProvider`] surface plus a
+//! deterministic [`MockOcrProvider`] for tests. The Layer 3
+//! and Layer 4 providers are stubs: neither runs real
+//! recognition. [`PaddleOcrProvider`] never contacts a
+//! PaddleOCR sidecar and [`SmolDoclingProvider`] never loads
+//! an ONNX model; both ignore the document content and return
+//! a fixed synthetic token whose text only encodes the layer
+//! name and input byte length. The real recognition path — a
+//! PaddleOCR sidecar call and an ONNX runtime — is not
+//! implemented here; it lands in a follow-up `intake-ocr-onnx`
+//! crate.
+//!
+//! Every provider satisfies the same [`OcrProvider`] trait so
+//! that, once real recognition exists, the engine's intake
+//! pipeline can pick the cheapest layer that returns
+//! acceptable confidence. That confidence-driven layer
+//! selection lives in the engine, not in this crate.
 
 #![allow(clippy::doc_markdown)]
 

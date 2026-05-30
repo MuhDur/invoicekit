@@ -10,7 +10,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit intake VLM substrate — Layer 5 Qwen2.5-VL-7B cloud inference adapter. Live HTTP wiring lands in a follow-up intake-vlm-http crate."
+description = "InvoiceKit intake VLM substrate — typed VlmProvider trait + Mock impl + a Qwen2.5-VL-7B provider wrapper (retry/backoff/cost telemetry over an injectable transport seam; no cloud inference or HTTP client in this crate). Live HTTP wiring lands in a follow-up intake-vlm-http crate."
 publish = false
 
 [lib]

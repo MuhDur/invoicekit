@@ -19,23 +19,25 @@
 //! }
 //! ```
 //!
-//! Guarantees:
+//! Behavior (best-effort):
 //!
-//! 1. **Reading order preserved, script-aware.** Fragments inside a
-//!    page are grouped into visual lines top-to-bottom (PDF Y-axis is
-//!    bottom-up, so larger `y` is higher) and ordered within each
-//!    line by writing system. Left-to-right Latin lines sort
-//!    left-to-right. Right-to-left lines (Arabic, Hebrew) are
-//!    detected with the Unicode Bidirectional Algorithm and rebuilt
-//!    into logical (reading) order. CJK vertical pages are detected
-//!    and read column-by-column right-to-left, each column
-//!    top-to-bottom. Pages are emitted in PDF page order. The
-//!    reconstruction assumes each show-text run stores its glyphs in
-//!    logical order (the universal producer behaviour); a run that
-//!    bakes in visual-order glyphs still routes through the OCR /
-//!    vision fallback, which can re-align using the
-//!    `(x, y, font_size)` triplet. See the `script_order` module for
-//!    the precise bounds.
+//! 1. **Script-aware reading order (heuristic, not a guarantee).**
+//!    Fragments inside a page are grouped into visual lines
+//!    top-to-bottom (PDF Y-axis is bottom-up, so larger `y` is higher)
+//!    and ordered within each line by writing system. Left-to-right
+//!    Latin lines sort left-to-right. Right-to-left lines (Arabic,
+//!    Hebrew) are detected with the Unicode Bidirectional Algorithm
+//!    and rebuilt into logical (reading) order. CJK vertical pages are
+//!    detected and read column-by-column right-to-left, each column
+//!    top-to-bottom. Pages are emitted in PDF page order. This
+//!    reconstruction is a heuristic with documented bounds, not an
+//!    exact guarantee: it assumes each show-text run stores its glyphs
+//!    in logical order (the universal producer behaviour); a run that
+//!    bakes in visual-order glyphs is not reconstructed and still
+//!    routes through the OCR / vision fallback, which can re-align
+//!    using the `(x, y, font_size)` triplet. See the `script_order`
+//!    module ("Not handled (honest bounds)") for the precise cases
+//!    that fall outside the heuristic.
 //! 2. **Encrypted PDFs are rejected** with [`PdfTextError::Encrypted`].
 //!    A future bead can supply credentials.
 //! 3. **Position information is in PDF user-space units** (1 unit =

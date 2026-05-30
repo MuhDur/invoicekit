@@ -10,7 +10,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Pathological invoice generator for differential / fuzz testing across every InvoiceKit serializer."
+description = "Pathological invoice generator for differential testing across every InvoiceKit serializer."
 publish = false
 
 [lib]

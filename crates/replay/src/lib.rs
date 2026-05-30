@@ -22,10 +22,12 @@
 //!
 //! Plain-English version of the contract:
 //! given an audit `.invoicekit` bundle and the same engine
-//! version, replay produces byte-identical output. Any diff
-//! means either the engine changed behaviour or the bundle
-//! was tampered with after recording — both are operator
-//! signals worth alerting on.
+//! version, replay produces byte-identical output. A diff
+//! means the re-emitted bytes no longer match the recorded
+//! bytes (it does not attribute the cause — replay only
+//! compares BLAKE3 hashes and cannot distinguish an engine
+//! behaviour change from tampering). Any diff is an operator
+//! signal worth alerting on.
 
 use std::collections::{BTreeMap, BTreeSet};
 

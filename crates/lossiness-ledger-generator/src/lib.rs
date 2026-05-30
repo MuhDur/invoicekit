@@ -15,9 +15,16 @@
 //!    emits a ledger.
 //! 2. **Format projections** (UBL, CII) — serialize the source IR
 //!    through the target's adapter, reparse the emitted bytes
-//!    back into IR, and compare the two trees. Every field that
-//!    survived the round-trip is `preserved`; every field that
-//!    drifted (or vanished) is `lost`.
+//!    back into IR, and compare the two trees via
+//!    [`LossinessLedger::from_roundtrip_comparison`]. This is not
+//!    an exhaustive per-field guarantee: the diff compares a fixed
+//!    set of top-level IR fields (identity fields such as `/id`,
+//!    `/document_number`, `/currency`, and dates; payload fields
+//!    such as `/lines`, `/tax_summary`, `/notes`, `/extensions`)
+//!    by whole-field equality. A top-level field whose value
+//!    survived the round-trip lands in `preserved`; one that
+//!    drifted (or vanished) lands in `lost`, identified by its
+//!    top-level path rather than the specific element that changed.
 //!
 //! Both paths surface the result as a [`LossinessLedger`] so the
 //! evidence bundle (T-080) can attach the ledger verbatim.

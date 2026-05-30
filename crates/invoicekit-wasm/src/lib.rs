@@ -15,14 +15,22 @@
 //! Country bundles (`country-de`, `country-fr`, `country-it`,
 //! `country-pl`, `country-sa`, etc.) and format bundles (`format-ubl`,
 //! `format-cii`, `format-peppol`, `format-factur-x`, `format-xrechnung`,
-//! `format-fatturapa`) let a downstream customer compile only what
-//! they ship. `default` is intentionally empty so the leanest
-//! consumer (e.g. a serverless function that only needs the engine
-//! ABI scaffold) gets the smallest artifact.
+//! `format-fatturapa`) are currently advertising-only placeholders. In
+//! `Cargo.toml` each one is defined as an empty list (`= []`) and the
+//! `invoicekit-engine` dependency is declared with no `features = [...]`
+//! wiring, so enabling a flag changes only what
+//! [`compiled_country_bundles`] / [`compiled_format_bundles`] report at
+//! runtime — it does **not** toggle any `report-*` / `format-*` feature
+//! on the engine, and the compiled engine behaviour (which countries and
+//! formats actually work) is identical regardless of which flags are set.
+//! Per-bundle code stripping is a no-op pending the engine feature
+//! wiring landing in a follow-up. `default` is intentionally empty so the
+//! leanest consumer (e.g. a serverless function that only needs the
+//! engine ABI scaffold) gets the same artifact as everyone else.
 //!
-//! The `full` meta-flag toggles every country and format; the CI
-//! workflow uses it to assert the "full bundle" still fits the
-//! < 5 MB acceptance gate.
+//! The `full` meta-flag enables every country and format advertising
+//! flag; the CI workflow uses it to assert the "full bundle" still fits
+//! the < 5 MB acceptance gate.
 //!
 //! Build for a target country set:
 //!

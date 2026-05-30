@@ -16,23 +16,35 @@
 //!
 //! # Layered intake
 //!
-//! InvoiceKit's intake pipeline runs three layers in order
-//! (PLAN.md §3.4 / §4.4):
+//! This crate is schema only: it carries citations the intake
+//! layers emit but runs no extraction itself. The intake
+//! pipeline is designed around layers (PLAN.md §3.4 / §4.4),
+//! and this crate tags every citation with the layer that
+//! produced it:
 //!
-//! 1. **Digital-PDF text** — extract from a PDF's embedded
-//!    text layer. Bounding boxes come straight from the PDF's
-//!    content stream. Zero OCR, zero ML.
-//! 2. **Server-side OCR** — `PaddleOCR` (Layer 3, T-062) for
-//!    scanned PDFs. Bounding boxes come from the OCR
-//!    engine's word-box output.
+//! 1. **Digital-PDF text** — text lifted from a PDF's embedded
+//!    text layer, with bounding boxes from the PDF's content
+//!    stream. No OCR, no machine learning.
+//! 2. **Server-side OCR** — `PaddleOCR` (Layer 3, T-062),
+//!    intended for scanned PDFs. The provider in
+//!    `invoicekit-intake-ocr` is a stub today (it returns a
+//!    fixed token so engine wiring stays stable); a live
+//!    sidecar that emits real word-box bounding boxes is not
+//!    implemented yet.
 //! 3. **Vision-language model** — `SmolDocling`-256M ONNX
-//!    (Layer 4, T-063) for low-confidence regions left over
-//!    after Layers 1+2. Bounding boxes come from the VLM's
-//!    attention map.
+//!    (Layer 4, T-063), intended for low-confidence regions
+//!    left over after Layers 1+2. The provider in
+//!    `invoicekit-intake-ocr` / `invoicekit-intake-vlm` is a
+//!    stub/mock today; live model inference and any bounding
+//!    boxes derived from it are not implemented yet.
 //!
-//! Each layer emits citations with the same [`BoundingBoxCitation`]
-//! shape but a different [`ExtractionLayer`] tag, so the
-//! audit UI can colour-code provenance.
+//! The model and engine names above (`PaddleOCR`,
+//! `SmolDocling`) are the layer tags and example
+//! `extractor_id` / `model_id` strings this schema records,
+//! not engines this crate runs. Each layer emits citations
+//! with the same [`BoundingBoxCitation`] shape but a different
+//! [`ExtractionLayer`] tag, so the audit UI can colour-code
+//! provenance.
 
 use std::collections::BTreeMap;
 
@@ -300,8 +312,13 @@ fn require_non_empty(value: &str, err: CitationError) -> Result<(), CitationErro
 /// Discriminated taxonomy of source pointers the intake
 /// layers attach to an extracted value.
 ///
-/// The audit UI walks one of these per [`FieldCitation`] to
-/// reconstruct *exactly* where the value came from:
+/// This is the schema each layer is meant to populate. Layers
+/// 3 (OCR) and 4 (VLM) are stubs/mocks today (see
+/// `invoicekit-intake-ocr` / `invoicekit-intake-vlm`), so the
+/// per-layer mappings below describe the intended provenance,
+/// not extraction that runs end-to-end yet. The audit UI walks
+/// one of these per [`FieldCitation`] to reconstruct *exactly*
+/// where the value came from:
 ///
 /// * [`CitationSource::PdfObject`] — index into the source
 ///   PDF's object table. Layer 1 (digital-PDF text) uses this
@@ -310,12 +327,13 @@ fn require_non_empty(value: &str, err: CitationError) -> Result<(), CitationErro
 ///   1, 2, 3 use this on top of (or instead of) the PDF object
 ///   id; Layer 4 (VLM) uses it on its own.
 /// * [`CitationSource::OcrSpan`] — span id that points into a
-///   prior OCR run's structured output. Layer 3 emits this so
-///   a re-run can correlate audit edits with the OCR text.
+///   prior OCR run's structured output. Layer 3 is meant to
+///   emit this so a re-run can correlate audit edits with the
+///   OCR text.
 /// * [`CitationSource::Model`] — stable model id (e.g.
-///   `smol-docling-256m-int8`). Layer 4 emits this on every
-///   citation; lower layers can attach it as the *extractor*
-///   that produced a confidence score.
+///   `smol-docling-256m-int8`). Layer 4 is meant to emit this
+///   on every citation; lower layers can attach it as the
+///   *extractor* that produced a confidence score.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum CitationSource {
@@ -343,7 +361,11 @@ pub enum CitationSource {
     Model {
         /// Stable model id (e.g. `smol-docling-256m-int8`).
         model_id: String,
-        /// Optional bounding box from the model's attention map.
+        /// Optional bounding box the model layer attaches (for
+        /// example, derived from an attention map). The VLM
+        /// layer that would supply this is a stub/mock today
+        /// (see `invoicekit-intake-vlm`), so in practice this
+        /// is usually `None`.
         bounding_box: Option<BoundingBox>,
     },
 }

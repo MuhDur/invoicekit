@@ -10,7 +10,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Model Context Protocol (MCP) server substrate. Exposes invoicekit verify / replay / show / pack as MCP tools so MCP-aware clients (Claude Code, Cursor, etc.) can drive the engine over JSON-RPC. The live stdio glue lands in a follow-up invoicekit-mcp-server-bin binary."
+description = "Model Context Protocol (MCP) server substrate: tool definitions and a deterministic mock for invoicekit verify / replay / show / pack, plus the MCP wire types an MCP-aware client (Claude Code, Cursor, etc.) would use. Mock tool results are placeholder JSON; there is no engine wiring and no live stdio JSON-RPC server — that glue lands in a follow-up invoicekit-mcp-server-bin binary."
 publish = false
 
 [lib]

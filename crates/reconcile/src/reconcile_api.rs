@@ -37,12 +37,14 @@
 //!
 //! ## Tenant isolation
 //!
-//! Every request carries a [`TenantId`]; the store must scope every
-//! query by tenant. A buggy store impl that returned rows for
-//! another tenant would surface as `delivered`/`failed` rows that
-//! don't match the customer's fingerprint, but the handler also
-//! re-checks the per-row tenant_id as a defense-in-depth and bucket
-//! mismatches into `unknown`.
+//! Every request carries a [`TenantId`]. Tenant isolation is
+//! enforced by the store query: [`OutboxLookup::buckets_for`] is
+//! tenant-scoped (it receives the `tenant` and its impl MUST scope
+//! every query by it), so the handler delegates isolation to the
+//! store and does NOT re-check the per-row `tenant_id` itself. A
+//! buggy store impl that returned rows for another tenant would
+//! surface as `delivered`/`failed` buckets the handler trusts
+//! verbatim; the handler has no second tenant guard of its own.
 
 #![allow(
     clippy::option_if_let_else,

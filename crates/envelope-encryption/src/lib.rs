@@ -15,11 +15,13 @@
 //!
 //! The [`KmsAdapter`] trait is the integration boundary:
 //!
-//! - [`InMemoryKms`] is a deterministic test impl built around a
-//!   BLAKE3-derived "master key" per tenant. **It is not for
-//!   production** — the constructor takes a `domain_secret` and
-//!   the trait impl panics if any caller tries to use it from
-//!   non-test code by accident (`assert!(cfg!(test))`).
+//! - [`InMemoryKms`] is a deterministic test/dev in-memory impl
+//!   built around a BLAKE3-derived "master key" per tenant, with the
+//!   DEK wrap being a plain `XOR(DEK, master)` that is not
+//!   cryptographically meaningful. **It is not for production** — the
+//!   constructor takes a `domain_secret`, but there is no runtime
+//!   guard: nothing asserts the call site is test code, so keeping it
+//!   out of production rests on convention, not on an `assert!`.
 //! - [`AwsKmsScaffold`] documents the AWS-SDK integration shape but
 //!   refuses every call with [`KmsError::AdapterNotBuilt`]. Switching
 //!   to real AWS KMS is one Cargo dep + 30-line wrapper away; we
@@ -319,10 +321,11 @@ fn xor32(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
 /// Wrapping is XOR(DEK, master); not cryptographically meaningful,
 /// only deterministic for round-trip and rotation tests.
 ///
-/// Constructing one outside of test code is allowed (the constructor
-/// itself doesn't panic) but every adapter call asserts the call site
-/// is in test code so a production deploy can't accidentally route
-/// through this impl.
+/// There is no runtime guard against production use: the constructor
+/// does not panic, and neither do the adapter calls — nothing asserts
+/// the call site is test code. Keeping a production deploy from
+/// routing through this impl is a matter of convention (and the XOR
+/// wrap being unfit for real key protection), not an enforced check.
 pub struct InMemoryKms {
     domain_secret: [u8; 32],
     served_regions: Vec<Region>,

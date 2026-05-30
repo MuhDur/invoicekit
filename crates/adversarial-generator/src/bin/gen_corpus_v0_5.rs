@@ -4,7 +4,7 @@
 //! T-122: deterministic generator for the v0.5 synthetic public
 //! corpus.
 //!
-//! Produces 504 fixtures under
+//! Produces 840 fixtures under
 //! `conformance-corpus/synthetic/adversarial-v0-5/` — one per
 //! (scenario, serializer, variation) triple — and a sibling
 //! `metadata.json` per fixture that satisfies the InvoiceKit
@@ -45,8 +45,8 @@ fn main() -> Result<(), AdversarialError> {
         // The serializer outcomes are deterministic per scenario,
         // so we materialise them once and then vary the surrounding
         // envelope (trace_id, document_number prefix) inside the
-        // emit loop to reach 504 distinct fixtures without
-        // generating 504 distinct serialiser runs.
+        // emit loop to reach 840 distinct fixtures without
+        // generating 840 distinct serialiser runs.
         let outcomes = emit_through_every_serializer(&document);
 
         for variation in 0..VARIATIONS_PER_SCENARIO {

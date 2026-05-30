@@ -10,7 +10,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "InvoiceKit language server substrate. Provides LSP request/response types, diagnostic shape, and a parse+validate harness IDE extensions wire to over stdio. The live tower-lsp glue lands in a follow-up invoicekit-lsp-server crate."
+description = "InvoiceKit language server substrate. Provides LSP request/response types, diagnostic shape, and a parse harness (JSON syntax diagnostics; rule validation is a follow-up) IDE extensions wire to. The live tower-lsp glue lands in a follow-up invoicekit-lsp-server crate."
 publish = false
 
 [lib]

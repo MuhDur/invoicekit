@@ -240,11 +240,16 @@ impl CostTelemetrySink for InMemoryTelemetry {
     }
 }
 
-/// Live-bound Qwen2.5-VL-7B provider.
+/// Qwen2.5-VL-7B provider wrapper.
 ///
-/// Wraps a [`VlmTransport`] with retry-on-rate-limit, a
-/// hard deadline, auth-failure surfacing, and cost
-/// telemetry.
+/// Wraps an injectable [`VlmTransport`] with
+/// retry-on-rate-limit, a hard deadline, auth-failure
+/// surfacing, and cost telemetry. This crate ships no live
+/// transport: the actual network call is whatever transport
+/// you hand it (a scripted one in tests; the live
+/// `reqwest`-backed client lands in the follow-up
+/// `intake-vlm-http` crate). On its own this provider cannot
+/// reach a real model.
 pub struct Qwen25Vl7bProvider {
     /// HTTPS endpoint the live transport will POST to. Kept
     /// here so operators can validate config before wiring a

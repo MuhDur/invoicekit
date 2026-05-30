@@ -3,9 +3,11 @@
 
 //! `invoicekit-engine` — deterministic InvoiceKit engine entry points.
 //!
-//! This crate owns the byte-level ABI contract shared by native bindings,
-//! WebAssembly, and service shims. The v1 contract accepts canonicalizable
-//! JSON request bytes and returns canonical JSON response bytes.
+//! This crate defines the byte-level ABI contract that the separate
+//! native-binding (`invoicekit-ffi`), WebAssembly (`invoicekit-wasm`), and
+//! service-shim (`services/*`) crates consume. The v1 contract accepts
+//! canonicalizable JSON request bytes and returns canonical JSON response
+//! bytes.
 
 use std::str;
 

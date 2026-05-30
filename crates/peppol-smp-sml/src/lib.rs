@@ -326,8 +326,14 @@ impl<R: Resolver, H: HttpClient> PeppolClient<R, H> {
     }
 }
 
-/// Parse an SMP `SignedServiceMetadata` XML document and extract
-/// the first matching `EndpointURI` + `TransportProfile` pair.
+/// Extract the first matching `EndpointURI` + `TransportProfile`
+/// pair from an SMP metadata XML body.
+///
+/// The SMP wraps its payload in a `SignedServiceMetadata` element,
+/// but this function does **not** verify the SMP signature: it reads
+/// the `EndpointURI`/`TransportProfile` text only and performs no
+/// XML-DSig signature check. The authenticity of the returned
+/// [`AccessPoint`] is therefore not established here.
 ///
 /// # Errors
 ///

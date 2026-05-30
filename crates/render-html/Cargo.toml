@@ -9,7 +9,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "WCAG 2.1 AA conformant HTML5 invoice renderer."
+description = "Accessibility-oriented HTML5 invoice renderer (WCAG 2.1 AA contrast-targeted palette + a contrast_ratio helper)."
 publish = false
 
 [lib]

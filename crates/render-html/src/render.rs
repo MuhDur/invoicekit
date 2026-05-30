@@ -4,9 +4,10 @@
 //!
 //! Hand-rolled string templating instead of pulling in tera/askama:
 //! the invoice document is small (~30 fields and a line array), and
-//! the WCAG-conformance contract means every output element has to
-//! be hand-audited anyway. A templating engine wouldn't simplify
-//! the audit and would add a dep + a syntax to learn.
+//! the accessibility-oriented construction rules mean every output
+//! element has to be hand-audited anyway. A templating engine
+//! wouldn't simplify the audit and would add a dep + a syntax to
+//! learn.
 
 use std::fmt::Write as _;
 
@@ -33,14 +34,15 @@ pub struct RenderOptions {
 #[derive(Debug, Error)]
 pub enum RenderError {
     /// The document failed IR validation; we refuse to render an
-    /// invalid invoice because the WCAG-conformance contract
-    /// assumes every advertised field is present.
+    /// invalid invoice because the accessibility-oriented construction
+    /// rules assume every advertised field is present.
     #[error("invoice failed IR validation: {0}")]
     InvalidInvoice(#[from] invoicekit_ir::IrError),
 }
 
-/// Render `doc` to a self-contained, WCAG 2.1 AA conformant HTML5
-/// document.
+/// Render `doc` to a self-contained, accessibility-oriented HTML5
+/// document (WCAG 2.1 AA contrast-targeted palette; not audited for
+/// full WCAG conformance).
 ///
 /// The output is one string with no external resources; styling is
 /// inline so a customer can drop it into an email body without

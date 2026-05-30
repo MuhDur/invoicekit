@@ -15,9 +15,11 @@
 //! No two-version pair exists yet, so every well-formed migration call is
 //! either a no-op identity (`V1_0 → V1_0`) or an explicit
 //! [`MigrationError::UnknownTargetVersion`]. The framework, the typed
-//! report, the reversibility marker, and the CLI surface ship today so
+//! report, the reversibility marker, and the [`Registry`] ship today so
 //! that the day a `V1_1` or `V2_0` variant lands, only a single
 //! [`Migration`] implementation needs to be written and registered.
+//! This crate is library-only: it ships no command-line interface and no
+//! binary.
 //!
 //! ## API shape
 //!
