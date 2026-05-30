@@ -163,6 +163,7 @@ fn egyptian_invoice() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: e2e_meta(),
     })
     .unwrap()
@@ -377,6 +378,7 @@ fn egyptian_multiline_invoice() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: e2e_meta(),
     })
     .unwrap()
@@ -443,6 +445,7 @@ fn egyptian_credit_note(original_uuid: &str) -> CommercialDocument {
         }],
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: e2e_meta(),
     })
     .unwrap()
@@ -502,6 +505,7 @@ fn egyptian_exempt_invoice() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: e2e_meta(),
     })
     .unwrap()
@@ -577,6 +581,7 @@ fn egyptian_export_invoice() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: e2e_meta(),
     })
     .unwrap()

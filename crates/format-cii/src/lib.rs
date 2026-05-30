@@ -206,6 +206,7 @@ pub enum CiiError {
 /// #         references: Vec::new(),
 /// #         notes: Vec::new(),
 /// #         extensions: Vec::new(),
+/// #         allowance_charges: Vec::new(),
 /// #         meta: DocumentMeta {
 /// #             tenant_id: "tenant".to_owned(),
 /// #             trace_id: "trace".to_owned(),
@@ -1012,6 +1013,7 @@ impl ParseState {
             references: Vec::<DocumentReference>::new(),
             notes: self.notes,
             extensions,
+            allowance_charges: Vec::new(),
             meta: DocumentMeta {
                 tenant_id,
                 trace_id,
@@ -5757,6 +5759,7 @@ mod tests {
                 text: format!("Fixture note {seed}"),
             }],
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
             meta: DocumentMeta {
                 tenant_id: format!("tenant-{seed}"),
                 trace_id: format!("trace-{seed}"),

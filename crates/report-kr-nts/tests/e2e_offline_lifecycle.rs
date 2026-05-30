@@ -127,6 +127,7 @@ fn korean_invoice() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -244,6 +245,7 @@ fn korean_exempt_invoice() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -309,6 +311,7 @@ fn korean_correction_note() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -383,6 +386,7 @@ fn korean_multiline_invoice() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),

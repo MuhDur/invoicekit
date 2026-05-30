@@ -192,6 +192,7 @@ fn dominican_credit_note() -> CommercialDocument {
         }],
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -339,6 +340,7 @@ fn factura_consumo_type_32_multiline_18pct_itbis() {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -442,6 +444,7 @@ fn exportacion_type_46_is_itbis_exempt_zero_rated() {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),

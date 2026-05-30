@@ -118,6 +118,7 @@ fn malaysian_invoice() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -351,6 +352,7 @@ fn malaysian_credit_note() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -467,6 +469,7 @@ fn malaysian_multiline_invoice() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -570,6 +573,7 @@ fn malaysia_tax_exempt_invoice_carries_zero_tax_and_exempt_category() {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),

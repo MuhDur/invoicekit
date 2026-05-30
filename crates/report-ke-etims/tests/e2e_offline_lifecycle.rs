@@ -117,6 +117,7 @@ fn kenyan_invoice() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -324,6 +325,7 @@ fn kenyan_invoice_with_tax(
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -509,6 +511,7 @@ fn kenya_mixed_b_and_a_lines_sum_only_taxable_vat() {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -614,6 +617,7 @@ fn kenya_credit_note_references_original_cu_invoice_and_clears() {
         }],
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),

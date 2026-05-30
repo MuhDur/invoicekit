@@ -698,6 +698,51 @@ pub struct MonetaryTotal {
     pub payable_amount: MoneyAmount,
 }
 
+/// Document-level allowance (EN 16931 BG-20) or charge (BG-21).
+///
+/// Both groups share an identical structure distinguished by `is_charge`; only
+/// the business-term numbers differ (allowance BT-92..98 / charge BT-99..105).
+/// The detail is carried verbatim from the producer — InvoiceKit serializes the
+/// supplied amounts/codes faithfully and does not recompute or reconcile them
+/// against the document totals (that is the reference validator's responsibility).
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct DocumentAllowanceCharge {
+    /// `true` = charge (BG-21), `false` = allowance (BG-20).
+    pub is_charge: bool,
+    /// Allowance/charge amount (BT-92 / BT-99).
+    pub amount: MoneyAmount,
+    /// Optional base amount the percentage applies to (BT-93 / BT-100).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_amount: Option<MoneyAmount>,
+    /// Optional percentage of the base amount (BT-94 / BT-101).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub percentage: Option<DecimalValue>,
+    /// Optional VAT category code for the allowance/charge (BT-95 / BT-102).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tax_category: Option<String>,
+    /// Optional VAT rate (BT-96 / BT-103).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tax_rate: Option<DecimalValue>,
+    /// Optional reason text (BT-97 / BT-104).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Optional reason code (BT-98 / BT-105), from UNCL 5189 (allowances) or
+    /// UNCL 7161 (charges); carried verbatim.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<String>,
+}
+
+impl DocumentAllowanceCharge {
+    fn validate(&self) -> Result<(), IrError> {
+        // EN 16931 BR-33 (allowance) / BR-38 (charge): a document-level
+        // allowance or charge must carry a reason text or a reason code.
+        if self.reason.is_none() && self.reason_code.is_none() {
+            return Err(IrError::MissingRequiredField("allowance_charges.reason"));
+        }
+        Ok(())
+    }
+}
+
 /// Content-addressed attachment reference.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Attachment {
@@ -919,6 +964,9 @@ pub struct CommercialDocumentParts {
     /// Jurisdiction extension envelopes.
     #[serde(default)]
     pub extensions: Vec<JurisdictionExtension>,
+    /// Document-level allowances (EN 16931 BG-20) and charges (BG-21).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowance_charges: Vec<DocumentAllowanceCharge>,
     /// Operational metadata.
     pub meta: DocumentMeta,
 }
@@ -983,6 +1031,9 @@ pub struct CommercialDocument {
     /// Jurisdiction extension envelopes.
     #[serde(default)]
     pub extensions: Vec<JurisdictionExtension>,
+    /// Document-level allowances (EN 16931 BG-20) and charges (BG-21).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowance_charges: Vec<DocumentAllowanceCharge>,
     /// Operational metadata.
     pub meta: DocumentMeta,
 }
@@ -1018,6 +1069,7 @@ impl CommercialDocument {
             references: parts.references,
             notes: parts.notes,
             extensions: parts.extensions,
+            allowance_charges: parts.allowance_charges,
             meta: parts.meta,
         };
         document.validate()?;
@@ -1108,6 +1160,9 @@ impl CommercialDocument {
         }
         for extension in &self.extensions {
             extension.validate()?;
+        }
+        for allowance_charge in &self.allowance_charges {
+            allowance_charge.validate()?;
         }
         self.meta.validate()
     }
@@ -1798,6 +1853,63 @@ mod tests {
         assert_eq!(out["invoice_period"]["start_date"], json!("2026-05-01"));
         assert_eq!(out["invoice_period"]["end_date"], json!("2026-05-31"));
         assert_eq!(out["delivery_date"], json!("2026-05-28"));
+    }
+
+    #[test]
+    fn allowance_charges_round_trip_and_default_to_empty() {
+        // Absent allowance_charges deserializes to an empty vec (additive,
+        // backward-compatible).
+        let baseline = CommercialDocument::try_from_value(synthetic_document_json()).unwrap();
+        assert!(baseline.allowance_charges.is_empty());
+
+        // A present allowance (BG-20) + charge (BG-21) round-trips verbatim
+        // through from_value -> to_value.
+        let mut input = synthetic_document_json();
+        input["allowance_charges"] = json!([
+            {
+                "is_charge": false,
+                "amount": "10.00",
+                "base_amount": "100.00",
+                "percentage": "10.00",
+                "tax_category": "S",
+                "tax_rate": "19.00",
+                "reason": "Loyalty discount",
+                "reason_code": "95"
+            },
+            {
+                "is_charge": true,
+                "amount": "5.00",
+                "tax_category": "S",
+                "tax_rate": "19.00",
+                "reason_code": "FC"
+            }
+        ]);
+        let doc = CommercialDocument::try_from_value(input).unwrap();
+        assert_eq!(doc.allowance_charges.len(), 2);
+        let allowance = &doc.allowance_charges[0];
+        assert!(!allowance.is_charge);
+        assert_eq!(allowance.amount.inner().to_string(), "10.00");
+        assert_eq!(allowance.reason.as_deref(), Some("Loyalty discount"));
+        let charge = &doc.allowance_charges[1];
+        assert!(charge.is_charge);
+        assert_eq!(charge.reason_code.as_deref(), Some("FC"));
+
+        let out = doc.to_value().unwrap();
+        assert_eq!(out["allowance_charges"][0]["amount"], json!("10.00"));
+        assert_eq!(out["allowance_charges"][1]["is_charge"], json!(true));
+    }
+
+    #[test]
+    fn allowance_charge_requires_a_reason_or_code() {
+        // EN 16931 BR-33 / BR-38: a document-level allowance/charge must carry a
+        // reason or a reason code.
+        let mut input = synthetic_document_json();
+        input["allowance_charges"] = json!([{ "is_charge": false, "amount": "10.00" }]);
+        let err = CommercialDocument::try_from_value(input).unwrap_err();
+        assert!(matches!(
+            err,
+            IrError::MissingRequiredField("allowance_charges.reason")
+        ));
     }
 
     #[test]

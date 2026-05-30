@@ -120,6 +120,7 @@ fn romanian_invoice() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -199,6 +200,7 @@ fn romanian_credit_note() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -290,6 +292,7 @@ fn romanian_multiline_mixed_rate_invoice() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -355,6 +358,7 @@ fn romanian_reverse_charge_invoice() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),

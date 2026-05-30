@@ -494,6 +494,7 @@ mod tests {
                 text: "Adversarial fixture note.".to_owned(),
             }],
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
             meta: DocumentMeta {
                 tenant_id: "tenant-factur-x".to_owned(),
                 trace_id: "trace-factur-x".to_owned(),

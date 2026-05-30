@@ -561,6 +561,7 @@ mod tests {
                 text: "Thank you for your business.".into(),
             }],
             extensions: vec![],
+            allowance_charges: Vec::new(),
             meta: DocumentMeta {
                 tenant_id: "tenant-x".into(),
                 trace_id: "trace-001".into(),

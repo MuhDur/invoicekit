@@ -137,6 +137,7 @@ fn vietnamese_invoice() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: vn_meta(),
     })
     .unwrap()
@@ -338,6 +339,7 @@ fn vietnamese_credit_note() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: vn_meta(),
     })
     .unwrap()
@@ -422,6 +424,7 @@ fn vietnamese_multiline_mixed_rate_invoice() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: vn_meta(),
     })
     .unwrap()
@@ -483,6 +486,7 @@ fn vietnamese_export_zero_rated_invoice() -> CommercialDocument {
         references: Vec::new(),
         notes: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
         meta: vn_meta(),
     })
     .unwrap()

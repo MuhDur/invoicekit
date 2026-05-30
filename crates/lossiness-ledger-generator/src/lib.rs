@@ -245,6 +245,7 @@ mod tests {
                 text: "Ledger fixture note.".to_owned(),
             }],
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
             meta: DocumentMeta {
                 tenant_id: "tenant-ledger".to_owned(),
                 trace_id: "trace-ledger".to_owned(),

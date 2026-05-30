@@ -471,6 +471,7 @@ pub fn from_gobl(payload: &Value) -> Result<GoblEnvelope, GoblError> {
         references,
         notes,
         extensions,
+        allowance_charges: Vec::new(),
         meta: DocumentMeta {
             tenant_id,
             trace_id,
@@ -1022,6 +1023,7 @@ mod tests {
             references: vec![],
             notes: vec![],
             extensions: vec![],
+            allowance_charges: Vec::new(),
             meta: DocumentMeta {
                 tenant_id: "tenant-x".into(),
                 trace_id: "trace-001".into(),
