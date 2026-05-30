@@ -1362,3 +1362,20 @@ The ungated EN 16931 **document-level** surface is now comprehensively covered b
   - `verapdf --flavour 3u`: 30/30 compliant, 0 non-compliant, 0 no-verdict.
   - Every PDF produced a real verdict (re-validated with unique report names to rule out overwrite/empty-report false positives).
 - **Battle-test scorecard so far:** XML EN16931 parity 722/722 core 1.0 (KoSIT+phive) · fuzz 5/5 clean · PDF/A-3 30/30 (3b+3u) · FFI/unsafe review clean. Pending: Miri runtime UB check on the FFI crate; final `cargo test --workspace`; CII-path live-validator parity (harness is UBL-only — honest gap to close).
+
+### Turn 58 (2026-05-30) — Phase 4 COMPLETE: full gate confirmation + Miri
+- **FFI UB — Miri runtime verification PASSED:** `cargo +nightly miri test -p invoicekit-ffi` → 11 unit tests + 7 doc-tests OK under Miri's UB detector (null-pointer accessors, `slice::from_raw_parts`, `Box::from_raw`/free cycles, panic-containment across the extern "C" boundary). Zero UB. Confirms the read-only audit at runtime.
+- **Full workspace test (release gate) — AUTHORITATIVE GREEN:** `cargo test --workspace` → exit 0, **279 test binaries all ok, 2,544 tests passed, 0 failed**, 0 FAILED tokens (full-log capture, not tail). No Rust crate changed this turn, so this matches the last known-green state.
+- **113 release-check gates — ALL PASS** (`pytest tools/release-checks/`: IR schema match, CII/EN16931 coverage, conformance corpus, capabilities matrix, country manifests, TS types).
+
+**PHASE 4 BATTLE-TEST SCORECARD (all real oracles, no fabrication):**
+| Front | Result | Oracle |
+|---|---|---|
+| XML EN 16931 parity | 722/722 core parity 1.0 | live KoSIT XRechnung 3.0.2 + phive Peppol BIS 3.0 |
+| Fuzzing | 5/5 targets clean (ubl_from_xml 2.38M runs) | cargo-fuzz/libFuzzer + ASAN, nightly |
+| PDF/A-3 conformance | 30/30 at flavour 3b AND 3u | veraPDF 1.30.1 reference verifier |
+| FFI/unsafe UB | review + Miri clean | Miri UB detector |
+| Workspace tests | 2,544 passed / 0 failed | cargo test |
+| Release-check gates | 113/113 | pytest |
+
+**Honest residual gaps (documented, not faked):** (a) CII-path live-validator parity — the parity harness projects UBL only; KoSIT validates CII XRechnung too, so a CII projection path is the next battle-test extension. (b) EN 16931 rule-diversity — the corpora exercise ~11 distinct core rules; a rule-diversity corpus would broaden coverage toward all ~200. (c) `validator-verapdf` sidecar can't build (veraPDF not on Maven Central; pom lacks the veraPDF repo) — the canonical CLI gate is unaffected.
