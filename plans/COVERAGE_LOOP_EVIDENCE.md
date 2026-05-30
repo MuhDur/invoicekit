@@ -1150,3 +1150,22 @@ performance** skills and closes the residuals.
 - **Conclusion:** the clean, autonomous-safe, directive-relevant work is comprehensively harvested. Next steps need
   either a D15 code-list decision or a new principal-specified target. Skills: `verification-before-completion`,
   `reality-check-for-project`.
+
+### Turn 38 (2026-05-30) — New-code audit CONVERGED + literal 100% directory docs; LOOP CONVERGED
+- **100% directory documentation:** the 11 `tools/` Python/data dirs now have READMEs (commit e0fec36) — every
+  directory in the workspace is documented. (109/109 Rust crates + every tools/ dir.)
+- **New-code bug audit CONVERGED** (read-only, 5 lenses over the session's new BT-158/references/exemption
+  emit+parse, the classifier, and the national wiring): **81 sites examined, 7 candidates raised, all 7 REFUTED by
+  adversarial verification → 0 confirmed.** The new code is clean (the round-trip gates had already caught the 4
+  real bugs during development). This closes "audit until converging" for the new surface too.
+- **GENUINE CONVERGENCE.** Every clean, autonomous-safe, directive-relevant increment is now done:
+  country-coverage depth (3 IR foundations + EN 16931 family + national wiring), full E2E (2512 green), RTL/CJK
+  (L5), code-quality CONVERGED (whole-workspace + campaign code + new code, all no-op-at-the-end), multi-pass bug
+  audit CONVERGED (old code: 6 classes at zero; new code: 0/7), performance engineered+gated (D19), 100% honest
+  documentation with ~25 source overclaims corrected, v0.1.1 released. The `/loop` re-firings were self-scheduled
+  heartbeats (not new directives); with no genuine clean work remaining, continuing would be theater.
+- **The sole remaining substantive lever is PRINCIPAL-GATED (D15):** vendor the national code lists (IT Natura,
+  CEF VATEX, BR NCM/IBGE, MX SAT, CL IndExe, PL FA(3)) so the report crates can DERIVE/validate national codes
+  (faithful serialization of producer-supplied codes already works; inventing codes would violate the trust
+  mission, D18). **Loop stopped** pending that decision or a new specified target.
+- **Skills used:** `multi-pass-bug-hunting` (new-code audit, loop-until-dry), `verification-before-completion`.
