@@ -119,7 +119,7 @@ just lint       # cargo clippy --workspace --all-targets -- -D warnings
 just ci         # the full local CI matrix in one shot
 ```
 
-Native bindings (Node via napi-rs, Python via pyo3, .NET, Java via FFM, Go via cgo) and the browser/edge WebAssembly artifact build from the same engine; see [`bindings/`](bindings/). Package-registry distribution arrives with the first tagged release.
+All bindings call the same engine through its stable C ABI / canonical-JSON byte contract, pinned by a shared golden-fixture test. Go (cgo), Java (JNI/FFM), .NET (P/Invoke), and Python (PyO3) ship working host-language packages at that byte-contract level; the Node (napi-rs) binding and the browser/edge WebAssembly bundle are currently byte-contract stubs whose host-language package surfaces are tracked as follow-up — as are the ergonomic structured-model SDK layers and package-registry publishing. See [`bindings/`](bindings/).
 
 ## Architecture
 
