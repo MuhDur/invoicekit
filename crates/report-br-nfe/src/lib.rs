@@ -291,12 +291,30 @@ fn write_det(out: &mut String, numero: usize, line: &DocumentLine) {
     open(out, 3, "prod");
     el(out, 4, "cProd", &line.id);
     el(out, 4, "xProd", &line.description);
+    // `NCM` (NF-e 4.00 tag I05): the 8-digit Mercosur Common Nomenclature code.
+    // It follows `xProd` and precedes `uCom`/`CFOP` in the `<prod>` layout, and
+    // is sourced from the EN 16931 BT-158 line classification whose scheme_id is
+    // `NCM`. Emitted only when such a classification is present; a line with no
+    // NCM classification serializes exactly as before (behavior-preserving).
+    if let Some(ncm) = ncm_code(line) {
+        el(out, 4, "NCM", ncm);
+    }
     el(out, 4, "uCom", line.unit_code.as_deref().unwrap_or("UN"));
     el(out, 4, "qCom", &fmt_amount(line.quantity.inner()));
     el(out, 4, "vUnCom", &fmt_amount(line.unit_price.inner()));
     el(out, 4, "vProd", &fmt_amount(line.line_extension_amount.inner()));
     close(out, 3, "prod");
     close(out, 2, "det");
+}
+
+/// The NF-e `NCM` code for a line: the first classification whose `scheme_id`
+/// is `NCM` (case-insensitive). Returns `None` when no NCM classification is
+/// present, so the caller omits the `<NCM>` element entirely.
+fn ncm_code(line: &DocumentLine) -> Option<&str> {
+    line.classifications
+        .iter()
+        .find(|c| c.scheme_id.eq_ignore_ascii_case("NCM"))
+        .map(|c| c.code.as_str())
 }
 
 /// Sum the tax-summary entries into `(vBC, vICMS)` totals at scale 2.
@@ -741,7 +759,8 @@ mod tests {
     use super::*;
     use invoicekit_ir::{
         CommercialDocumentParts, CountryCode, DateOnly, DocumentId, DocumentMeta, DocumentNumber,
-        Iso4217Code, MonetaryTotal, PartyTaxId, PostalAddress, SchemaVersion, TaxCategorySummary,
+        ItemClassification, Iso4217Code, MonetaryTotal, PartyTaxId, PostalAddress, SchemaVersion,
+        TaxCategorySummary,
     };
     use invoicekit_ir::DecimalValue;
     use invoicekit_signer::SoftwareSigner;
@@ -885,6 +904,54 @@ mod tests {
         ] {
             assert!(xml.contains(needle), "infNFe missing {needle:?}:\n{xml}");
         }
+    }
+
+    #[test]
+    fn inf_nfe_omits_ncm_when_no_classification() {
+        // The sample invoice's line has empty `classifications`; the serialized
+        // <prod> block must carry no <NCM> element (behavior-preserving).
+        let xml = to_inf_nfe_xml(&sample_invoice(), &NfeContext::default()).unwrap();
+        assert!(!xml.contains("<NCM>"), "no NCM classification => no <NCM>:\n{xml}");
+    }
+
+    #[test]
+    fn inf_nfe_emits_ncm_from_classification_in_prod_position() {
+        // A line carrying an EN 16931 BT-158 classification with scheme_id "NCM"
+        // must surface as <NCM>{code}</NCM> inside <prod>, positioned after
+        // <xProd> and before <uCom> per the NF-e 4.00 layout (tag I05).
+        let mut doc = sample_invoice();
+        doc.lines[0].classifications = vec![
+            // A non-NCM scheme must be ignored by the NF-e adapter.
+            ItemClassification {
+                code: "9983".to_owned(),
+                scheme_id: "SAC".to_owned(),
+                scheme_version: None,
+            },
+            // Scheme id is matched case-insensitively ("ncm" == "NCM").
+            ItemClassification {
+                code: "85285200".to_owned(),
+                scheme_id: "ncm".to_owned(),
+                scheme_version: Some("2022".to_owned()),
+            },
+        ];
+        let xml = to_inf_nfe_xml(&doc, &NfeContext::default()).unwrap();
+
+        // The 8-digit Mercosur code appears exactly as given.
+        assert!(
+            xml.contains("<NCM>85285200</NCM>"),
+            "expected <NCM>85285200</NCM> in:\n{xml}"
+        );
+        // The non-NCM (SAC) classification is not surfaced by this national adapter.
+        assert!(!xml.contains("9983"), "SAC code must not leak into NF-e:\n{xml}");
+        // Position: <xProd> ... <NCM> ... <uCom>, all inside the first <prod>.
+        let prod = xml.find("<prod>").expect("prod block present");
+        let xprod = xml.find("<xProd>").expect("xProd present");
+        let ncm = xml.find("<NCM>").expect("NCM present");
+        let ucom = xml.find("<uCom>").expect("uCom present");
+        assert!(
+            prod < xprod && xprod < ncm && ncm < ucom,
+            "NCM must sit after xProd and before uCom inside prod"
+        );
     }
 
     #[test]

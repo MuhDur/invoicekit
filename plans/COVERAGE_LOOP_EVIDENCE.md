@@ -948,3 +948,37 @@ performance** skills and closes the residuals.
 - **Skills used:** `multi-pass-bug-hunting` (census), `reality-check-for-project` (verify-before-act, caught the
   census false positives; D18 held — declined to guess element names), `testing-real-service-e2e-no-mocks`,
   `verification-before-completion`.
+
+### Turn 31 (2026-05-30) — IR `ItemClassification` foundation + 4 consumers wired (the #1 gated unlock)
+- **Decision executed:** the principal said "resume with the best decision" → implemented gated tier item #1,
+  a **first-class `ItemClassification` on `DocumentLine`** (EN 16931 BT-158/-1/-2: `code` + `scheme_id` +
+  `scheme_version`), the widest coverage unlock. Chose the correct first-class field over the expedient
+  extension-URN hack; accepted the homogeneous, compiler-verified, behavior-preserving 189-literal ripple.
+- **Foundation (commit 539eb94):** type + validation (BR-65: code requires a scheme), round-trip proptest now
+  generates classifications, 2 IR unit tests. A 42-agent mechanical workflow added `classifications: Vec::new()`
+  to all 189 `DocumentLine` literals across 41 crates (one site the agent missed, fixed by hand). Additive
+  (`#[serde(default)]`, empty by default) ⇒ all existing output/goldens byte-identical. Workspace 2459/0 green.
+- **Consumers wired (Phase-3 workflow, 4/5 clean, this commit):**
+  - **format-ubl** — `cac:Item/cac:CommodityClassification/cbc:ItemClassificationCode` with `listID`(scheme_id) +
+    optional `listVersionID`(scheme_version). Reviewer verified element + placement against the **vendored OASIS
+    UBL 2.1 XSD** and `validate-ubl-cii` BR-65; goldens proven byte-identical via sha256 over all 50 corpus
+    fixtures. (EN 16931 BT-158 now emitted for the whole UBL family — ~35 countries.)
+  - **report-in-gst** — real `HsnCd` from the line classification (prefers `HSN`/`SAC` scheme, `"9983"` fallback
+    only when unclassified); `IsServc` derived from the chosen classification. **Closes the last IN GST residual.**
+  - **report-br-nfe** — `<NCM>` (NF-e 4.00 tag I05, bare scalar) from the `NCM`-scheme classification.
+  - **report-mx-cfdi** — `cfdi:Concepto/@ClaveProdServ` bare attribute from the `ClaveProdServ`-scheme classification.
+- **format-cii — DEFERRED (reverted to a stash, NOT shipped):** the wiring logic was correct but emitted
+  `ram:DesignatedProductClassification` unconditionally after `ram:Name`, BEFORE the preserved-XML replay. Since
+  `canonicalize_xml` doesn't reorder sibling elements, a line mixing a native classification with a preserved
+  lower-schema-order `SpecifiedTradeProduct` child would violate CII element order ⇒ a canonical-output-invariant
+  break (only reachable via hand-constructed docs — the CII parser never populates `classifications` — so all 43
+  tests pass). Correctness-first call: do NOT ship a canonical violation, and do NOT risk the heavily-tested CII
+  round-trip path with a rushed interleave fix. **Follow-up:** emit CII BT-158 bracketed within the
+  `SpecifiedTradeProduct` preserved-replay schema-order window (stash holds the helper + test as a starting point).
+- **Other follow-up (non-blocking, noted by the UBL reviewer):** the UBL/CII **parsers** don't read BT-158 back,
+  so a from_xml round-trip would silently DROP classifications without a `LossinessEntry` — a parse-side task.
+- **Verification:** `cargo build --workspace --all-targets` clean; `cargo test --workspace` = **2466 passed / 0
+  failed** (+7 classified-line tests over 2459); `cargo clippy --workspace --all-targets -D warnings` clean.
+- **Skills used:** `feature-dev` design judgment (first-class vs extension), `testing-real-service-e2e-no-mocks`
+  (classified-line assertions + sha256 golden-stability proof), `reality-check-for-project` / D18 (CII reviewer
+  caught the real placement bug; reverted rather than shipped), `verification-before-completion`.

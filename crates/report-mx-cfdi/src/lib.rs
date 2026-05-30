@@ -195,7 +195,14 @@ pub fn to_cfdi_xml(
         let cantidad = fmt_amount(line.quantity.inner());
         out.push_str("    <cfdi:Concepto");
         // ClaveProdServ / ClaveUnidad are SAT product/unit catalogue codes.
-        attr(&mut out, "ClaveProdServ", "01010101");
+        // Prefer the line's own SAT product/service key (EN 16931 BT-158 with
+        // scheme_id "ClaveProdServ"); fall back to the generic catch-all when
+        // the line carries no such classification.
+        attr(
+            &mut out,
+            "ClaveProdServ",
+            clave_prod_serv(line).unwrap_or("01010101"),
+        );
         attr(&mut out, "ClaveUnidad", line.unit_code.as_deref().unwrap_or("H87"));
         attr(&mut out, "Cantidad", &cantidad);
         attr(&mut out, "Descripcion", &line.description);
@@ -293,6 +300,20 @@ fn strip_mx_prefix(value: &str) -> String {
     } else {
         value.to_owned()
     }
+}
+
+/// The line's SAT product/service key (`ClaveProdServ`) from its EN 16931
+/// BT-158 classifications.
+///
+/// Selects the classification whose `scheme_id` is `ClaveProdServ`
+/// (case-insensitive — `c_ClaveProdServ` is the SAT catalogue, but UBL/CII
+/// `listID` casing varies in the wild). Returns `None` when the line carries no
+/// such classification, so the caller can keep the generic catch-all key.
+fn clave_prod_serv(line: &invoicekit_ir::DocumentLine) -> Option<&str> {
+    line.classifications
+        .iter()
+        .find(|c| c.scheme_id.eq_ignore_ascii_case("ClaveProdServ"))
+        .map(|c| c.code.as_str())
 }
 
 /// The `(rate, tax_amount)` for a line, looked up from the tax summary entry
@@ -899,6 +920,80 @@ mod tests {
         ] {
             assert!(xml.contains(needle), "CFDI missing {needle:?}:\n{xml}");
         }
+    }
+
+    #[test]
+    fn concepto_clave_prod_serv_comes_from_classification() {
+        use invoicekit_ir::ItemClassification;
+
+        // Baseline: a line with EMPTY classifications keeps the generic SAT
+        // catch-all key — behavior preservation for every existing document.
+        let baseline = to_cfdi_xml(&sample_invoice(), &CfdiContext::default()).unwrap();
+        assert!(
+            baseline.contains("ClaveProdServ=\"01010101\""),
+            "unclassified line must keep the catch-all ClaveProdServ:\n{baseline}"
+        );
+
+        // Classify the line with a real SAT product/service key (BT-158 with
+        // scheme_id ClaveProdServ). It must surface on cfdi:Concepto verbatim.
+        let mut doc = sample_invoice();
+        doc.lines[0].classifications = vec![
+            // A non-SAT scheme that must be ignored by this national report.
+            ItemClassification {
+                code: "0901".to_owned(),
+                scheme_id: "HSN".to_owned(),
+                scheme_version: Some("2017".to_owned()),
+            },
+            ItemClassification {
+                code: "80101500".to_owned(),
+                scheme_id: "ClaveProdServ".to_owned(),
+                scheme_version: None,
+            },
+        ];
+        let xml = to_cfdi_xml(&doc, &CfdiContext::default()).unwrap();
+        assert!(
+            xml.contains("ClaveProdServ=\"80101500\""),
+            "ClaveProdServ must carry the classification code:\n{xml}"
+        );
+        // The generic catch-all key must NOT appear once a real key is present.
+        assert!(
+            !xml.contains("ClaveProdServ=\"01010101\""),
+            "classified line must replace the catch-all key:\n{xml}"
+        );
+        // The non-SAT classification must not leak into the SAT key.
+        assert!(
+            !xml.contains("ClaveProdServ=\"0901\""),
+            "non-SAT (HSN) scheme must not be used for ClaveProdServ:\n{xml}"
+        );
+    }
+
+    #[test]
+    fn clave_prod_serv_scheme_match_is_case_insensitive() {
+        use invoicekit_ir::{DateOnly, DecimalValue, DocumentLine, ItemClassification};
+
+        let mut doc = sample_invoice();
+        doc.lines = vec![DocumentLine {
+            id: "1".to_owned(),
+            description: "Consultoria".to_owned(),
+            quantity: DecimalValue::new(Decimal::from(1)),
+            unit_code: Some("E48".to_owned()),
+            unit_price: amt(100_000),
+            line_extension_amount: amt(100_000),
+            tax_category: Some("S".to_owned()),
+            classifications: vec![ItemClassification {
+                code: "84111506".to_owned(),
+                scheme_id: "claveprodserv".to_owned(), // lowercase listID
+                scheme_version: None,
+            }],
+            extensions: Vec::new(),
+        }];
+        // Touch the issue date so the helper is exercised on a fresh document.
+        doc.issue_date = DateOnly::new("2026-05-27").unwrap();
+        let xml = to_cfdi_xml(&doc, &CfdiContext::default()).unwrap();
+        assert!(
+            xml.contains("ClaveProdServ=\"84111506\""),
+            "case-insensitive scheme_id match must still bind ClaveProdServ:\n{xml}"
+        );
     }
 
     #[test]

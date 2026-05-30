@@ -101,11 +101,13 @@ pub enum Inv01Error {
 /// fields mapped from the IR: `SellerDtls`/`BuyerDtls.Addr1` (+ optional
 /// `Addr2`), `BuyerDtls.Pos` (place of supply), and per-item `PrdDesc`,
 /// `IsServc`, and `Unit` (the IR unit code mapped to the IRP UQC set via
-/// [`unit_uqc`]). The one remaining placeholder is the per-line `HsnCd`: the IR
-/// carries no first-class HSN/SAC classification field, so the serializer emits
-/// the generic SAC heading `"9983"` rather than inventing line-level data — a
-/// real `HsnCd` waits on an IR classification field. `IsServc` is derived from
-/// the resolved `HsnCd` (chapter 99 ⇒ service) so it always agrees with it.
+/// [`unit_uqc`]). The per-line `HsnCd` is sourced from the IR line
+/// classification (EN 16931 BT-158, e.g. an `HSN`/`SAC`-scheme classification):
+/// the serializer uses the chosen classification's `code` as `HsnCd`, falling
+/// back to the generic SAC heading `"9983"` only when the line carries no
+/// classification. `IsServc` is derived from the chosen classification (a `SAC`
+/// scheme or a chapter-99 code ⇒ service), falling back to the chapter-99 rule
+/// on the resolved code, so it always agrees with `HsnCd`.
 ///
 /// Output is byte-stable by construction: a fixed key order via an explicit
 /// [`serde_json::Map`] insertion sequence, amounts rendered at fixed scale 2,
@@ -342,18 +344,20 @@ fn item_block(
         .and_then(|x| x.checked_add(igst))
         .ok_or_else(|| Inv01Error::BadContext("TotItemVal overflowed".to_owned()))?;
 
-    let hsn = hsn_code(line);
+    let (hsn, is_service) = hsn_code(line);
     let mut item = Map::new();
     // `SlNo` (serial number) is a string in the IRP schema.
     item.insert("SlNo".to_owned(), json!((index + 1).to_string()));
     // `PrdDesc` (product description) is IRP-mandatory; map the IR line text.
     item.insert("PrdDesc".to_owned(), json!(line.description));
     // `IsServc` (Y/N) flags a service line. SAC headings (services) sit in
-    // chapter 99; HSN codes (goods) sit elsewhere — derive the flag from the
-    // resolved code so it always agrees with `HsnCd`.
+    // chapter 99; HSN codes (goods) sit elsewhere. When the line carries an IR
+    // classification, the flag comes from the chosen classification (SAC scheme
+    // or a chapter-99 code); otherwise it falls back to the chapter-99 rule on
+    // the resolved code so it always agrees with `HsnCd`.
     item.insert(
         "IsServc".to_owned(),
-        json!(if hsn.starts_with("99") { "Y" } else { "N" }),
+        json!(if is_service { "Y" } else { "N" }),
     );
     item.insert("HsnCd".to_owned(), json!(hsn));
     item.insert("Qty".to_owned(), json!(fmt_qty(line.quantity.inner())));
@@ -417,16 +421,35 @@ fn line_tax_amounts(
     }
 }
 
-/// The line's `HsnCd`: the unit code is not an HSN, so we look for an explicit
-/// HSN-bearing tax category, falling back to the placeholder `"9983"` (the SAC
-/// heading for "Other professional, technical and business services"), which
-/// keeps the field a valid 4-digit code without inventing line-level data the
-/// IR does not carry.
-fn hsn_code(line: &DocumentLine) -> String {
-    // A future IR extension may carry an explicit HSN; until then emit the
-    // generic services heading so the field shape is schema-valid.
-    let _ = line;
-    "9983".to_owned()
+/// The line's `(HsnCd, is_service)`, sourced from the IR line classification
+/// (EN 16931 BT-158 *Item classification identifier* + BT-158-1 scheme id).
+///
+/// When the line carries one or more classifications we pick one — preferring a
+/// classification whose `scheme_id` is `HSN`/`SAC` (case-insensitive), else the
+/// first — and use its `code` as `HsnCd`. The service flag is `true` when the
+/// chosen scheme is `SAC` (case-insensitive) or the code sits in chapter 99
+/// (the SAC range), so `IsServc` always agrees with `HsnCd`.
+///
+/// When the line has NO classification we fall back to the placeholder `"9983"`
+/// (the SAC heading for "Other professional, technical and business services"),
+/// which keeps the field a valid 4-digit code without inventing line-level data
+/// the IR does not carry; its chapter-99 prefix makes it a service.
+fn hsn_code(line: &DocumentLine) -> (String, bool) {
+    let chosen = line
+        .classifications
+        .iter()
+        .find(|c| c.scheme_id.eq_ignore_ascii_case("HSN") || c.scheme_id.eq_ignore_ascii_case("SAC"))
+        .or_else(|| line.classifications.first());
+    chosen.map_or_else(
+        // No classification: the generic SAC services heading (chapter 99 ⇒
+        // service) keeps the field schema-valid and matches the prior behavior.
+        || ("9983".to_owned(), true),
+        |classification| {
+            let is_service = classification.scheme_id.eq_ignore_ascii_case("SAC")
+                || classification.code.starts_with("99");
+            (classification.code.clone(), is_service)
+        },
+    )
 }
 
 /// Map an IR unit code (typically a UN/ECE Recommendation 20 code) onto the IRP
@@ -1077,6 +1100,70 @@ mod inv01_tests {
         assert_eq!(v["ValDtls"]["CgstVal"], "0.00");
         assert_eq!(v["ValDtls"]["SgstVal"], "0.00");
         assert_eq!(v["ValDtls"]["TotInvVal"], "11800.00");
+    }
+
+    #[test]
+    fn inv01_hsn_code_comes_from_ir_classification() {
+        use invoicekit_ir::ItemClassification;
+
+        // A goods line classified under the HSN scheme: `HsnCd` is the
+        // classification code (not the "9983" placeholder) and `IsServc` is "N"
+        // because the scheme is HSN and the code (0901, coffee) is not chapter 99.
+        let mut doc = inter_state_invoice();
+        doc.lines[0].classifications = vec![ItemClassification {
+            code: "0901".to_owned(),
+            scheme_id: "HSN".to_owned(),
+            scheme_version: Some("2017".to_owned()),
+        }];
+        let json = to_inv01_json(&doc, &Inv01Context::default()).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let item = &v["ItemList"][0];
+        assert_eq!(item["HsnCd"], "0901", "HsnCd sourced from the IR classification");
+        assert_eq!(item["IsServc"], "N", "HSN-scheme non-chapter-99 code is goods");
+
+        // A SAC-scheme classification flags a service even when its code does
+        // not start with 99 — the flag derives from the chosen scheme.
+        doc.lines[0].classifications = vec![ItemClassification {
+            code: "00440406".to_owned(),
+            scheme_id: "sac".to_owned(), // case-insensitive
+            scheme_version: None,
+        }];
+        let json = to_inv01_json(&doc, &Inv01Context::default()).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let item = &v["ItemList"][0];
+        assert_eq!(item["HsnCd"], "00440406");
+        assert_eq!(item["IsServc"], "Y", "SAC-scheme classification is a service");
+
+        // Preference: an HSN/SAC classification wins over an unrelated leading
+        // entry, so `HsnCd` carries the HSN code, not the first (UNSPSC) one.
+        doc.lines[0].classifications = vec![
+            ItemClassification {
+                code: "50161509".to_owned(),
+                scheme_id: "UNSPSC".to_owned(),
+                scheme_version: None,
+            },
+            ItemClassification {
+                code: "0901".to_owned(),
+                scheme_id: "HSN".to_owned(),
+                scheme_version: None,
+            },
+        ];
+        let json = to_inv01_json(&doc, &Inv01Context::default()).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["ItemList"][0]["HsnCd"], "0901", "HSN/SAC scheme is preferred");
+    }
+
+    #[test]
+    fn inv01_unclassified_line_falls_back_to_placeholder_hsn() {
+        // Behavior-preservation proof: a line with NO classification still emits
+        // the legacy "9983" placeholder and `IsServc` "Y" (chapter-99 service),
+        // byte-identical to the pre-classification behavior.
+        let doc = inter_state_invoice();
+        assert!(doc.lines[0].classifications.is_empty());
+        let json = to_inv01_json(&doc, &Inv01Context::default()).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["ItemList"][0]["HsnCd"], "9983");
+        assert_eq!(v["ItemList"][0]["IsServc"], "Y");
     }
 
     #[test]

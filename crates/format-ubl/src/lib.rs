@@ -15,7 +15,8 @@ use invoicekit_canonical::{canonicalize_xml, XmlCanonicalizeError};
 use invoicekit_ir::{
     Attachment, CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly,
     DecimalValue, DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference,
-    DocumentType, IrError, Iso4217Code, JurisdictionExtension, LocalizedString, LossinessEntry,
+    DocumentType, IrError, Iso4217Code, ItemClassification, JurisdictionExtension, LocalizedString,
+    LossinessEntry,
     LossinessLedger, MonetaryTotal, MoneyAmount, Party, PartyTaxId, PaymentInstruction,
     PaymentInstructionKind, PaymentTerms, PostalAddress, Quantity, SchemaVersion,
     TaxCategorySummary,
@@ -1820,6 +1821,13 @@ fn write_line(xml: &mut String, document_type: DocumentType, line: &DocumentLine
     );
     xml.push_str("<cac:Item>");
     write_text_element(xml, "cbc:Name", &line.description);
+    // EN 16931 BT-158 (UBL syntax binding): one cac:CommodityClassification per
+    // line classification, after cbc:Name/item identifications and before
+    // cac:ClassifiedTaxCategory. Absent classifications emit nothing, preserving
+    // the prior byte-for-byte output for unclassified lines.
+    for classification in &line.classifications {
+        write_commodity_classification(xml, classification);
+    }
     if let Some(category) = &line.tax_category {
         xml.push_str("<cac:ClassifiedTaxCategory>");
         write_text_element(xml, "cbc:ID", category);
@@ -1831,6 +1839,28 @@ fn write_line(xml: &mut String, document_type: DocumentType, line: &DocumentLine
     write_amount_element(xml, "cbc:PriceAmount", line.unit_price.inner(), currency);
     xml.push_str("</cac:Price>");
     write!(xml, "</{container}>").expect("writing to a String cannot fail");
+}
+
+/// Emit a single EN 16931 BT-158 item classification as a UBL
+/// `cac:CommodityClassification`. The classification code is carried on
+/// `cbc:ItemClassificationCode` with the scheme identifier in `listID`
+/// (BT-158-1) and, when present, the scheme version in `listVersionID`
+/// (BT-158-2). Both attribute values and the code text are XML-escaped via the
+/// crate's existing escaping helpers.
+fn write_commodity_classification(xml: &mut String, classification: &ItemClassification) {
+    xml.push_str("<cac:CommodityClassification>");
+    xml.push_str(r#"<cbc:ItemClassificationCode listID=""#);
+    write_xml_attr(&classification.scheme_id, xml);
+    xml.push('"');
+    if let Some(version) = &classification.scheme_version {
+        xml.push_str(r#" listVersionID=""#);
+        write_xml_attr(version, xml);
+        xml.push('"');
+    }
+    xml.push('>');
+    write_xml_text(&classification.code, xml);
+    xml.push_str("</cbc:ItemClassificationCode>");
+    xml.push_str("</cac:CommodityClassification>");
 }
 
 fn write_note(xml: &mut String, note: &LocalizedString) {
@@ -2216,6 +2246,82 @@ mod tests {
         let second = to_xml(&document).unwrap();
         assert_eq!(first, second);
         assert_eq!(canonicalize_xml(&first).unwrap(), first);
+    }
+
+    #[test]
+    fn line_classification_emits_commodity_classification_under_item() {
+        use invoicekit_ir::ItemClassification;
+
+        // Unclassified control: the fixture line carries no classifications, so
+        // the serializer must emit no cac:CommodityClassification at all. This is
+        // the behavior-preservation proof for every existing fixture/golden.
+        let baseline = fixture(DocumentType::Invoice, 30);
+        let baseline_xml = to_xml(&baseline).unwrap();
+        assert!(
+            !baseline_xml.contains("CommodityClassification"),
+            "an unclassified line must not emit cac:CommodityClassification"
+        );
+
+        // Classified line: one classification with a scheme version, one without.
+        // BT-158 carries the code; BT-158-1 the scheme in listID; BT-158-2 the
+        // optional version in listVersionID. The "&" forces the escaping path.
+        let mut document = fixture(DocumentType::Invoice, 30);
+        document.lines[0].classifications = vec![
+            ItemClassification {
+                code: "65 & up".to_owned(),
+                scheme_id: "HS".to_owned(),
+                scheme_version: Some("2017".to_owned()),
+            },
+            ItemClassification {
+                code: "SRV".to_owned(),
+                scheme_id: "TST".to_owned(),
+                scheme_version: None,
+            },
+        ];
+
+        let xml = to_xml(&document).unwrap();
+
+        // The canonical serializer pins an inline xmlns:cbc declaration on the
+        // element (canonical attribute order: xmlns:cbc, then listID, then
+        // listVersionID), so assert against the canonicalized shape.
+        let cbc_ns = format!(r#" xmlns:cbc="{UBL_CBC_NAMESPACE_URI}""#);
+
+        // Versioned classification: listID, listVersionID, escaped code text.
+        assert!(
+            xml.contains(&format!(
+                r#"<cac:CommodityClassification><cbc:ItemClassificationCode{cbc_ns} listID="HS" listVersionID="2017">65 &amp; up</cbc:ItemClassificationCode></cac:CommodityClassification>"#
+            )),
+            "versioned BT-158 classification did not serialize as expected:\n{xml}"
+        );
+        // Unversioned classification: listID only, no listVersionID.
+        assert!(
+            xml.contains(&format!(
+                r#"<cac:CommodityClassification><cbc:ItemClassificationCode{cbc_ns} listID="TST">SRV</cbc:ItemClassificationCode></cac:CommodityClassification>"#
+            )),
+            "unversioned BT-158 classification did not serialize as expected:\n{xml}"
+        );
+
+        // Placement: cac:CommodityClassification sits after cbc:Name and before
+        // cac:ClassifiedTaxCategory inside cac:Item (UBL ItemType child order).
+        let item_open = xml.find("<cac:Item>").expect("item element present");
+        // The canonicalizer may pin an inline xmlns on cbc:Name, so match the
+        // open-tag prefix rather than the bare element.
+        let name_pos = xml[item_open..]
+            .find("<cbc:Name")
+            .expect("item name present");
+        let commodity_pos = xml[item_open..]
+            .find("<cac:CommodityClassification>")
+            .expect("commodity classification present");
+        let tax_category_pos = xml[item_open..]
+            .find("<cac:ClassifiedTaxCategory>")
+            .expect("classified tax category present");
+        assert!(
+            name_pos < commodity_pos && commodity_pos < tax_category_pos,
+            "cac:CommodityClassification must sit after cbc:Name and before cac:ClassifiedTaxCategory"
+        );
+
+        // The enriched document still serializes to canonical, byte-stable XML.
+        assert_eq!(canonicalize_xml(&xml).unwrap(), xml);
     }
 
     #[test]
