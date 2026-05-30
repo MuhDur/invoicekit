@@ -1092,3 +1092,34 @@ performance** skills and closes the residuals.
 - **Skills used:** `multi-pass-bug-hunting` (census), `testing-real-service-e2e-no-mocks` (verbatim-emission +
   absent-field guard tests), `reality-check-for-project` (D18 — pl-ksef/cl-dte/Natura skips over guessing),
   `verification-before-completion`.
+
+### Turn 36 (2026-05-30) — Documentation honesty audit: READMEs for all crates + ~25 source overclaims fixed
+- Wrote honest READMEs for every remaining `crates/` library (34 national report crates, 16 signer/transmit
+  capability crates, 27 intake/infra/engine/tooling crates) — distilled from real source, stating the ACTUAL
+  coverage/mode (native serializer vs EN 16931-family vs opaque-payload BYOK; real crypto vs deterministic mock).
+  Combined with the earlier 19 foundation/format READMEs, **all ~96 `crates/` libraries are now documented.**
+- **The README pass doubled as a documentation HONESTY AUDIT and surfaced ~25 real overclaims** — doc-comments /
+  Cargo.toml descriptions / inline comments claiming things the code does not do. All corrected to match the code
+  (behaviour unchanged, build+clippy-gated). Notable catches:
+  - `envelope-encryption`: a documented `assert!(cfg!(test))` runtime guard that does not exist.
+  - `render-html`: "WCAG 2.1 AA conformant" with no conformance checker (only a contrast helper + palette).
+  - `timestamping`: a "BLAKE3 content-addressed" comment with no BLAKE3 computed.
+  - `es-verifactu`: mock hash described as "BLAKE3-derived" with no blake3 dependency.
+  - `intake-ocr`/`-vlm`/`-citation`/`-witness`/`-pdf`: PaddleOCR/SmolDocling/Qwen2.5-VL + "Guarantees" framed as
+    live recognition when they are mocks/stubs/heuristics.
+  - `archive`: documented IPFS/CID + GCS backends that are unimplemented.
+  - `adversarial-generator`: "fuzz testing" (no fuzzer) + a "504 fixtures" count that is actually 840.
+  - `signer-cfdi`/`signer-nfe`/`transmit-peppol`/`signer-france-ctc`: cadena prefix, chave layout, SML expansion
+    ("Service Metadata Locator", not "Signing Markup Language"), and a "re-export" that was a private import.
+  - `lsp`/`mcp-server`/`inbound-peppol`/`migration`/`peppol-smp-sml`/`replay`/`render-verify`/`invoicekit-engine`/
+    `invoicekit-wasm`: descriptions softened to the real scope (parse-only, tool-defs, no sig verify, no CLI, etc.).
+- **Why this matters:** for a *trust toolkit*, documentation that overclaims is itself a defect. Sweeping the
+  doc-comments of overclaims is a direct integrity win, complementing the converged engineering. Reinforces the
+  campaign theme: claims must match code (the same discipline as D18 fabrication-avoidance, applied to docs).
+- **Verification:** `cargo build --workspace --all-targets` clean; `cargo test --workspace` = **2512 passed /
+  0 failed** (doc-only, behaviour-preserving); clippy `-D warnings` clean. Commits 0d197b5, ab5a541, 3776cbb.
+- **Remaining (not `crates/` libraries):** `bindings/`, `bridges/`, `services/`, `tools/` lack READMEs (and may
+  carry their own overclaims) — a lower-priority docs+audit tail. The substantive coverage residual stays the
+  D15-gated national code-list mappings.
+- **Skills used:** documentation generation + `reality-check-for-project` (the audit lens that caught the
+  overclaims), `verification-before-completion`, `de-slopify`-style honesty discipline.
