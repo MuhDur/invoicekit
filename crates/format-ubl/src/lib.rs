@@ -1352,7 +1352,7 @@ fn write_document_parties(xml: &mut String, document: &CommercialDocument) -> Re
     // emit two cac:Delivery elements.
     let delivery_preserved = write_preserved_top_level(xml, document, "cac:Delivery")?;
     if !delivery_preserved {
-        write_native_delivery(xml, document);
+        write_native_delivery(xml, document)?;
     }
     write_preserved_top_level(xml, document, "cac:DeliveryTerms")?;
     Ok(())
@@ -1613,22 +1613,45 @@ fn write_native_invoice_period(xml: &mut String, document: &CommercialDocument, 
     }
 }
 
-/// Emit the EN 16931 BT-72 actual delivery date from the native IR at the
-/// `cac:Delivery` document slot.
+/// Emit the EN 16931 delivery group from the native IR at the `cac:Delivery`
+/// document slot: BT-72 actual delivery date, plus BG-13/BG-15 deliver-to
+/// information (`cac:DeliveryLocation` carrying BT-71 id + BG-15 address, and
+/// `cac:DeliveryParty` carrying BT-70 name), in UBL `DeliveryType` child order
+/// (`cbc:ActualDeliveryDate`, `cac:DeliveryLocation`, `cac:DeliveryParty`).
 ///
 /// Same preserve-vs-native split as [`write_native_invoice_period`]: the parser
 /// preserves any input `cac:Delivery` as raw XML and never populates
-/// [`CommercialDocument::delivery_date`], so a parsed document replays the
-/// preserved fragment and a fresh IR document emits a minimal `cac:Delivery`
-/// carrying only the delivery date. The caller gates this on the preserved-write
-/// signal (preserved wins), so a parse-then-enrich document emits `cac:Delivery`
-/// exactly once.
-fn write_native_delivery(xml: &mut String, document: &CommercialDocument) {
-    if let Some(date) = &document.delivery_date {
-        xml.push_str("<cac:Delivery>");
-        write_text_element(xml, "cbc:ActualDeliveryDate", date.as_str());
-        xml.push_str("</cac:Delivery>");
+/// `delivery_date` / `deliver_to`, so a parsed document replays the preserved
+/// fragment and a fresh IR document emits here. The caller gates this on the
+/// preserved-write signal (preserved wins), so a parse-then-enrich document
+/// emits `cac:Delivery` exactly once.
+fn write_native_delivery(xml: &mut String, document: &CommercialDocument) -> Result<(), UblError> {
+    if document.delivery_date.is_none() && document.deliver_to.is_none() {
+        return Ok(());
     }
+    xml.push_str("<cac:Delivery>");
+    if let Some(date) = &document.delivery_date {
+        write_text_element(xml, "cbc:ActualDeliveryDate", date.as_str());
+    }
+    if let Some(deliver_to) = &document.deliver_to {
+        if deliver_to.location_id.is_some() || deliver_to.address.is_some() {
+            xml.push_str("<cac:DeliveryLocation>");
+            if let Some(location_id) = &deliver_to.location_id {
+                write_text_element(xml, "cbc:ID", location_id);
+            }
+            if let Some(address) = &deliver_to.address {
+                write_address_as(xml, "cac:Address", address)?;
+            }
+            xml.push_str("</cac:DeliveryLocation>");
+        }
+        if let Some(name) = &deliver_to.name {
+            xml.push_str("<cac:DeliveryParty><cac:PartyName>");
+            write_text_element(xml, "cbc:Name", name);
+            xml.push_str("</cac:PartyName></cac:DeliveryParty>");
+        }
+    }
+    xml.push_str("</cac:Delivery>");
+    Ok(())
 }
 
 fn write_preserved_exchange_rates(
@@ -1986,7 +2009,21 @@ fn write_party(
 }
 
 fn write_address(xml: &mut String, address: &PostalAddress) -> Result<(), UblError> {
-    xml.push_str("<cac:PostalAddress>");
+    write_address_as(xml, "cac:PostalAddress", address)
+}
+
+/// Emit UBL `AddressType` content under an arbitrary wrapper element. Parties use
+/// `cac:PostalAddress`; a deliver-to location uses `cac:Address` — the child
+/// content (`cbc:StreetName`, `cbc:CityName`, `cbc:PostalZone`,
+/// `cbc:CountrySubentity`, `cac:Country`) is the same `AddressType`.
+fn write_address_as(
+    xml: &mut String,
+    wrapper: &str,
+    address: &PostalAddress,
+) -> Result<(), UblError> {
+    xml.push('<');
+    xml.push_str(wrapper);
+    xml.push('>');
     if let Some(first) = address.lines.first() {
         write_text_element(xml, "cbc:StreetName", first);
     }
@@ -2005,7 +2042,9 @@ fn write_address(xml: &mut String, address: &PostalAddress) -> Result<(), UblErr
         &string_value(&address.country)?,
     );
     xml.push_str("</cac:Country>");
-    xml.push_str("</cac:PostalAddress>");
+    xml.push_str("</");
+    xml.push_str(wrapper);
+    xml.push('>');
     Ok(())
 }
 
@@ -3030,6 +3069,64 @@ mod tests {
         assert!(
             !xml.contains("<cac:Delivery"),
             "a None delivery_date must emit no cac:Delivery:\n{xml}"
+        );
+    }
+
+    /// Gating test: a fresh `CommercialDocument` carrying BG-13/BG-15 deliver-to
+    /// information (name, location id, address) alongside a BT-72 delivery date
+    /// emits them inside one `cac:Delivery` in UBL `DeliveryType` child order
+    /// (`cbc:ActualDeliveryDate`, then `cac:DeliveryLocation` with ID + Address,
+    /// then `cac:DeliveryParty`), with canonical/idempotent, schema-valid output.
+    #[test]
+    fn fresh_document_emits_deliver_to() {
+        use invoicekit_ir::{DeliverToParty, PostalAddress};
+
+        let mut document = fixture(DocumentType::Invoice, 58);
+        document.delivery_date = Some(DateOnly::new("2026-05-28").unwrap());
+        document.deliver_to = Some(DeliverToParty {
+            name: Some("Warehouse 7".to_owned()),
+            location_id: Some("LOC-7".to_owned()),
+            address: Some(PostalAddress {
+                lines: vec!["Dock 3".to_owned()],
+                city: "Hamburg".to_owned(),
+                subdivision: None,
+                postal_code: "20095".to_owned(),
+                country: CountryCode::new("DE").unwrap(),
+            }),
+        });
+
+        let xml = to_xml(&document).unwrap();
+
+        // Exactly one cac:Delivery carrying the date + DeliveryLocation + DeliveryParty.
+        assert_eq!(xml.matches("<cac:Delivery ").count(), 1, "one cac:Delivery:\n{xml}");
+        assert!(xml.contains(">2026-05-28</cbc:ActualDeliveryDate>"));
+        assert!(xml.contains(">LOC-7</cbc:ID>"));
+        assert!(xml.contains(">Hamburg</cbc:CityName>"));
+        assert!(xml.contains(">Warehouse 7</cbc:Name>"));
+        // BG-15 uses cac:Address (not cac:PostalAddress) inside cac:DeliveryLocation.
+        assert!(xml.contains("<cac:DeliveryLocation><cbc:ID"));
+        assert!(xml.contains("<cac:Address>"));
+        assert!(xml.contains("<cac:DeliveryParty>"));
+
+        // Child order within cac:Delivery: ActualDeliveryDate < DeliveryLocation
+        // < DeliveryParty.
+        let delivery = xml.find("<cac:Delivery ").expect("delivery present");
+        // cbc:ActualDeliveryDate is the first cbc in the top-level cac:Delivery,
+        // so the canonicalizer pins xmlns:cbc on it — match the open-tag prefix.
+        let date = xml[delivery..].find("<cbc:ActualDeliveryDate").unwrap();
+        let location = xml[delivery..].find("<cac:DeliveryLocation>").unwrap();
+        let party = xml[delivery..].find("<cac:DeliveryParty>").unwrap();
+        assert!(
+            date < location && location < party,
+            "cac:Delivery child order must be ActualDeliveryDate, DeliveryLocation, DeliveryParty:\n{xml}"
+        );
+
+        assert_eq!(canonicalize_xml(&xml).unwrap(), xml);
+        let schema_report = validate_oasis_ubl_2_1_schema(&xml).unwrap();
+        assert!(
+            schema_report.is_valid(),
+            "expected deliver-to output to be schema valid, findings: {:?}",
+            schema_report.findings
         );
     }
 
