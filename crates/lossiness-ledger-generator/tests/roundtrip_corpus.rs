@@ -19,6 +19,7 @@ use invoicekit_lossiness_ledger_generator::{compute_ledger, TargetFormat};
 const MIN_FIXTURES_PER_FORMAT: usize = 20;
 const ZERO_LOSS_LOST_PATHS: &[&str] = &[];
 const ZERO_LOSS_PRESERVED_PATHS: &[&str] = &[
+    "/allowance_charges",
     "/attachments",
     "/currency",
     "/customer",

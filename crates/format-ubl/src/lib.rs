@@ -3216,6 +3216,34 @@ mod tests {
         // BT-95 category in cac:TaxCategory.
         assert!(xml.contains("<cac:TaxCategory>"));
 
+        // Child order within the first (allowance) cac:AllowanceCharge — pin the
+        // UBL AllowanceChargeType sequence explicitly, since canonical
+        // idempotence alone would not catch a mis-ordered (but well-formed)
+        // emission. Scope to the first element by slicing up to the second.
+        let first_ac = xml.find("<cac:AllowanceCharge ").expect("allowance present");
+        let second_ac = first_ac
+            + 1
+            + xml[first_ac + 1..]
+                .find("<cac:AllowanceCharge ")
+                .expect("second allowance present");
+        let allowance = &xml[first_ac..second_ac];
+        let indicator = allowance.find(">false</cbc:ChargeIndicator>").unwrap();
+        let reason_code = allowance.find(">95</cbc:AllowanceChargeReasonCode>").unwrap();
+        let reason = allowance.find("</cbc:AllowanceChargeReason>").unwrap();
+        let factor = allowance.find("</cbc:MultiplierFactorNumeric>").unwrap();
+        let amount = allowance.find("</cbc:Amount>").unwrap();
+        let base = allowance.find("</cbc:BaseAmount>").unwrap();
+        let category = allowance.find("<cac:TaxCategory>").unwrap();
+        assert!(
+            indicator < reason_code
+                && reason_code < reason
+                && reason < factor
+                && factor < amount
+                && amount < base
+                && base < category,
+            "cac:AllowanceCharge child order must follow UBL AllowanceChargeType:\n{allowance}"
+        );
+
         // Placement: after the parties, before the monetary total.
         let supplier_pos = xml
             .find("<cac:AccountingSupplierParty")

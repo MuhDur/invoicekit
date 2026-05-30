@@ -1514,6 +1514,13 @@ fn record_payload_lossiness(
         source.extensions == reparsed.extensions,
         adapter,
     );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/allowance_charges",
+        source.allowance_charges == reparsed.allowance_charges,
+        adapter,
+    );
 }
 
 fn record_field_lossiness(

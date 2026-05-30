@@ -1718,18 +1718,35 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
     if !billing_period_preserved {
         write_billing_specified_period(&mut xml, document)?;
     }
-    // BG-20/21: native document-level allowances/charges at their schema slot
-    // (SpecifiedTradeAllowanceCharge, after BillingSpecifiedPeriod and before
-    // SpecifiedTradePaymentTerms). 0..n + lossiness-ledger-preserved on parse,
-    // so a preserved fragment (flushed by the SpecifiedTradePaymentTerms replay
-    // below) and native entries legitimately coexist — emitted unconditionally.
-    write_cii_allowance_charges(&mut xml, document);
+    // Flush preserved settlement siblings ordered BEFORE SpecifiedTradeAllowanceCharge
+    // (notably a preserved BillingSpecifiedPeriod) before the native allowances, so a
+    // parse-then-enrich document keeps CII child order (BillingSpecifiedPeriod precedes
+    // SpecifiedTradeAllowanceCharge). Canonical idempotence alone does NOT catch a
+    // mis-ordered-but-well-formed emission.
     write_preserved_xml_before(
         &mut xml,
         document,
-        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement",
+        settlement_path,
         None,
-        "SpecifiedTradePaymentTerms",
+        "SpecifiedTradeAllowanceCharge",
+    )?;
+    // BG-20/21: native document-level allowances/charges (SpecifiedTradeAllowanceCharge,
+    // 0..n + lossiness-ledger-preserved, so native entries and any preserved ones
+    // legitimately coexist — emitted unconditionally).
+    write_cii_allowance_charges(&mut xml, document);
+    // Flush the remaining preserved settlement siblings (preserved allowance charges,
+    // SubtotalCalculatedTradeTax, SpecifiedLogisticsServiceCharge) at/above
+    // SpecifiedTradeAllowanceCharge but STRICTLY ABOVE BillingSpecifiedPeriod, so a
+    // BillingSpecifiedPeriod already flushed above is not re-emitted. The window is
+    // explicit because the convenience wrapper's lower bound (the last known child)
+    // would re-cover BillingSpecifiedPeriod, and write_preserved_xml does not consume.
+    write_preserved_xml(
+        &mut xml,
+        document,
+        settlement_path,
+        None,
+        cii_child_order("ApplicableHeaderTradeSettlement", "BillingSpecifiedPeriod"),
+        cii_child_order("ApplicableHeaderTradeSettlement", "SpecifiedTradePaymentTerms"),
     )?;
     if let Some(terms) = &document.payment_terms {
         xml.push_str("<ram:SpecifiedTradePaymentTerms>");
@@ -5298,6 +5315,55 @@ mod tests {
             !serialized.contains("<ram:SpecifiedTradeAllowanceCharge>"),
             "an empty allowance_charges must emit no ram:SpecifiedTradeAllowanceCharge:\n{serialized}"
         );
+    }
+
+    /// Gating test for the CII child-order fix: a parse-then-enrich document
+    /// carrying BOTH a preserved `BillingSpecifiedPeriod` (BG-14, order 25) AND
+    /// caller-set native allowances (BG-20/21, order 26) must emit the period
+    /// BEFORE the allowances. The native allowances are emitted before the
+    /// preserve replay, so without the explicit reordering the preserved period
+    /// would (incorrectly) follow them — schema-out-of-order yet
+    /// canonically-idempotent.
+    #[test]
+    fn preserved_billing_period_precedes_native_allowance_charges() {
+        use invoicekit_ir::{DocumentAllowanceCharge, InvoicePeriod};
+
+        // Seed a doc whose serialized form carries a BillingSpecifiedPeriod, then
+        // parse it: the period becomes preserved raw XML, invoice_period None.
+        let mut seed = fixture(DocumentType::Invoice, 76);
+        seed.invoice_period = Some(InvoicePeriod {
+            start_date: Some(DateOnly::new("2026-05-01").unwrap()),
+            end_date: Some(DateOnly::new("2026-05-31").unwrap()),
+        });
+        let mut parsed = parse_document(&to_xml(&seed).unwrap());
+        assert!(parsed.invoice_period.is_none());
+
+        // A consumer adds native allowances/charges.
+        parsed.allowance_charges = vec![DocumentAllowanceCharge {
+            is_charge: false,
+            amount: DecimalValue::new(Decimal::new(1000, 2)),
+            base_amount: None,
+            percentage: None,
+            tax_category: None,
+            tax_rate: None,
+            reason: Some("Discount".to_owned()),
+            reason_code: None,
+        }];
+
+        let out = to_xml(&parsed).unwrap();
+
+        // Each element appears exactly once, and the period precedes the allowance.
+        assert_eq!(out.matches("<ram:BillingSpecifiedPeriod>").count(), 1);
+        assert_eq!(out.matches("<ram:SpecifiedTradeAllowanceCharge>").count(), 1);
+        let period = out.find("<ram:BillingSpecifiedPeriod>").unwrap();
+        let allowance = out.find("<ram:SpecifiedTradeAllowanceCharge>").unwrap();
+        assert!(
+            period < allowance,
+            "preserved BillingSpecifiedPeriod must precede native allowances (CII child order):\n{out}"
+        );
+        // Output is canonical, and round-trips byte-stably.
+        assert_eq!(canonicalize_xml(&out).unwrap(), out);
+        assert_eq!(to_xml(&parse_document(&out)).unwrap(), out);
     }
 
     #[test]

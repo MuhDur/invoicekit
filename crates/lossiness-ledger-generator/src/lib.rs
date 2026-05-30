@@ -151,11 +151,10 @@ mod tests {
 
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly, DecimalValue,
-        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentType, InvoicePeriod,
-        Iso4217Code, JurisdictionExtension, LocalizedString, LossinessLedger, MonetaryTotal, Party,
-        PartyTaxId,
-        PaymentInstruction, PaymentInstructionKind, PaymentTerms, PostalAddress, SchemaVersion,
-        TaxCategorySummary,
+        DocumentAllowanceCharge, DocumentId, DocumentLine, DocumentMeta, DocumentNumber,
+        DocumentType, InvoicePeriod, Iso4217Code, JurisdictionExtension, LocalizedString,
+        LossinessLedger, MonetaryTotal, Party, PartyTaxId, PaymentInstruction,
+        PaymentInstructionKind, PaymentTerms, PostalAddress, SchemaVersion, TaxCategorySummary,
     };
     use invoicekit_profile_factur_x::FacturXProfile;
     use rust_decimal::Decimal;
@@ -317,6 +316,35 @@ mod tests {
                     "{format:?} ledger must report {path} as lost (relocated to preserved XML)"
                 );
             }
+        }
+    }
+
+    /// Regression guard for the EN 16931 BG-20/BG-21 document-level
+    /// allowances/charges. Like `invoice_period`/`delivery_date`, the serializers
+    /// emit them but the parsers keep them as preserved raw XML (the typed field
+    /// resets to empty), so a source carrying them differs from its reparse —
+    /// the ledger MUST surface `/allowance_charges` on its own typed path (as
+    /// lost) rather than silently reporting zero loss for the trust artifact.
+    #[test]
+    fn allowance_charges_are_tracked_per_field_in_the_ledger() {
+        let mut source = fixture();
+        source.allowance_charges = vec![DocumentAllowanceCharge {
+            is_charge: false,
+            amount: DecimalValue::new(Decimal::new(1000, 2)),
+            base_amount: None,
+            percentage: None,
+            tax_category: Some("S".to_owned()),
+            tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+            reason: Some("Loyalty discount".to_owned()),
+            reason_code: Some("95".to_owned()),
+        }];
+
+        for format in [TargetFormat::Ubl, TargetFormat::Cii] {
+            let ledger = compute_ledger(&source, format).expect("ledger computes");
+            assert!(
+                ledger.lost.iter().any(|e| e.path == "/allowance_charges"),
+                "{format:?} ledger must report /allowance_charges as lost (relocated to preserved XML)"
+            );
         }
     }
 
