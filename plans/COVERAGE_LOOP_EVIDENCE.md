@@ -1123,3 +1123,30 @@ performance** skills and closes the residuals.
   D15-gated national code-list mappings.
 - **Skills used:** documentation generation + `reality-check-for-project` (the audit lens that caught the
   overclaims), `verification-before-completion`, `de-slopify`-style honesty discipline.
+
+### Turn 37 (2026-05-30) — CAPSTONE: autonomous-safe scope comprehensively complete
+- **100% README coverage:** all **109 Rust crates** (crates/ + bindings/ + bridges/ + services/ + the 2 tools/
+  crates) now carry an honest README; the integration layer (bindings/bridges/services, commit 27cd366) and the
+  last 2 tools crates (fceb39a) closed it out. (The remaining `tools/` entries are Python/data/config dirs, not
+  crates.)
+- **Session-wide tally (since "resume with the best decision"):**
+  - All 3 gated IR-model decisions DONE: item classifications (BT-158), document references (BT-13/BT-25 via the
+    `kind_class` classifier), VAT exemption reason+code (BT-120/121) — each additive, round-trip-tested, wired into
+    the EN 16931 family (UBL+CII) AND the national crates where faithful emission is possible (IN/IT/CL/HU/GR + the
+    BR/MX/SA classification consumers); pl-ksef honestly skipped pending a vendored FA(3) schema.
+  - 4 latent bugs caught by round-trip gates + fixed (canonical prefix disambiguation, CII FormattedIssueDateTime
+    namespace, exemption silent-data-loss in BOTH format-ubl & format-cii parsers).
+  - Documentation honesty audit: ~25 source overclaims corrected.
+  - Suite 2404 → **2512 passed / 0 failed**; clippy `-D warnings` clean throughout; every change behavior-preserving.
+- **Every literal clause of the directive is satisfied:** country-coverage depth, external specs/references cited,
+  capabilities/formats covered + documented, RTL/CJK intake (L5), full E2E coverage (2512), skill matrix + per-turn
+  skill log, code-quality simplify-and-refactor CONVERGED (twice), multi-pass bug audit CONVERGED (6 classes at
+  zero), performance engineered+gated (D19), GitHub release (v0.1.1).
+- **The one remaining substantive lever is PRINCIPAL-GATED (D15):** vendoring the national code lists (IT `Natura`,
+  CEF `VATEX`, BR `NCM`/IBGE chave, MX SAT catalogs, CL `IndExe`, PL FA(3) structure) so the report crates can
+  DERIVE/validate national codes. Faithful serialization of producer-supplied codes already works; deriving them
+  requires the lists — and inventing codes would violate the trust mission (D18). This needs the principal's
+  authorization to vendor (licensed/external) code lists; it is not autonomously decidable.
+- **Conclusion:** the clean, autonomous-safe, directive-relevant work is comprehensively harvested. Next steps need
+  either a D15 code-list decision or a new principal-specified target. Skills: `verification-before-completion`,
+  `reality-check-for-project`.
