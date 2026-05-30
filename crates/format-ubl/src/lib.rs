@@ -1556,10 +1556,10 @@ fn write_credit_note_preserved_before_supplier(
 /// and never populates `references`, so a parsed document carries them only as
 /// preserved fragments (replayed above) with an empty `references` vec — no
 /// double-emit. A fresh IR document carries them only in `references` with no
-/// preserved fragment. Routing is by [`DocumentReference::kind_class`]; only
-/// `Order` (BT-13) and `PrecedingInvoice` (BT-25) are emitted here. Other
-/// classes (`Contract`, `DespatchAdvice`, `ReceivingAdvice`, `Other`) are left
-/// for a later task.
+/// preserved fragment. Routing is by [`DocumentReference::kind_class`]: `Order`
+/// (BT-13), `PrecedingInvoice` (BT-25), `Contract` (BT-12), `DespatchAdvice`
+/// (BT-16), and `ReceivingAdvice` (BT-15) are emitted here. `Other` references
+/// carry no typed UBL element and are not emitted.
 fn write_native_document_references(
     xml: &mut String,
     document: &CommercialDocument,
@@ -1595,7 +1595,62 @@ fn write_native_document_references(
                 xml.push_str("</cac:InvoiceDocumentReference></cac:BillingReference>");
             }
         }
+        // BT-12 contract, BT-16 despatch advice, BT-15 receiving advice: each is a
+        // plain UBL DocumentReferenceType (cbc:ID + optional cbc:IssueDate) and is
+        // repeatable, so emit one element per matching IR reference in IR order.
+        "cac:ContractDocumentReference" => {
+            write_typed_document_references(
+                xml,
+                document,
+                "cac:ContractDocumentReference",
+                ReferenceKindClass::Contract,
+            );
+        }
+        "cac:DespatchDocumentReference" => {
+            write_typed_document_references(
+                xml,
+                document,
+                "cac:DespatchDocumentReference",
+                ReferenceKindClass::DespatchAdvice,
+            );
+        }
+        "cac:ReceiptDocumentReference" => {
+            write_typed_document_references(
+                xml,
+                document,
+                "cac:ReceiptDocumentReference",
+                ReferenceKindClass::ReceivingAdvice,
+            );
+        }
         _ => {}
+    }
+}
+
+/// Emit every `references` entry of `kind` as a plain UBL `DocumentReferenceType`
+/// element (`cbc:ID` plus optional `cbc:IssueDate`) named `element_name`,
+/// preserving IR order. Shared by BT-12 (contract), BT-16 (despatch advice), and
+/// BT-15 (receiving advice), which have the same shape and are repeatable in UBL.
+fn write_typed_document_references(
+    xml: &mut String,
+    document: &CommercialDocument,
+    element_name: &str,
+    kind: ReferenceKindClass,
+) {
+    for reference in document
+        .references
+        .iter()
+        .filter(|reference| reference.kind_class() == kind)
+    {
+        xml.push('<');
+        xml.push_str(element_name);
+        xml.push('>');
+        write_text_element(xml, "cbc:ID", &reference.id);
+        if let Some(issue_date) = &reference.issue_date {
+            write_text_element(xml, "cbc:IssueDate", issue_date.as_str());
+        }
+        xml.push_str("</");
+        xml.push_str(element_name);
+        xml.push('>');
     }
 }
 
@@ -2868,6 +2923,101 @@ mod tests {
         // order.
         assert_eq!(canonicalize_xml(&xml).unwrap(), xml);
 
+        let schema_report = validate_oasis_ubl_2_1_schema(&xml).unwrap();
+        assert!(
+            schema_report.is_valid(),
+            "expected reference-bearing output to be schema valid, findings: {:?}",
+            schema_report.findings
+        );
+    }
+
+    /// Gating test (1b): a fresh `CommercialDocument` carrying contract (BT-12),
+    /// despatch-advice (BT-16), and receiving-advice (BT-15) references emits each
+    /// as its plain UBL `DocumentReferenceType` element at the correct slot, in UBL
+    /// Invoice child order (`cac:DespatchDocumentReference` before
+    /// `cac:ReceiptDocumentReference` before `cac:ContractDocumentReference`),
+    /// schema-valid and canonically idempotent. Closes the BT-12/15/16 fresh-IR
+    /// emit gap previously deferred in `write_native_document_references`.
+    #[test]
+    fn fresh_document_emits_contract_despatch_receiving_references() {
+        let mut document = fixture(DocumentType::Invoice, 51);
+        document.references = vec![
+            DocumentReference {
+                kind: "contract".to_owned(),
+                id: "CONTRACT-42".to_owned(),
+                issue_date: Some(DateOnly::new("2026-01-15").unwrap()),
+            },
+            DocumentReference {
+                kind: "despatch-advice".to_owned(),
+                id: "DESP-7".to_owned(),
+                issue_date: None,
+            },
+            DocumentReference {
+                kind: "receipt-advice".to_owned(),
+                id: "RECV-9".to_owned(),
+                issue_date: Some(DateOnly::new("2026-02-20").unwrap()),
+            },
+        ];
+
+        let xml = to_xml(&document).unwrap();
+
+        // Each typed element appears exactly once, carrying its id (and issue date
+        // where set). Issue dates are distinct so they bind to the right element.
+        assert_eq!(
+            xml.matches("<cac:ContractDocumentReference").count(),
+            1,
+            "expected exactly one cac:ContractDocumentReference:\n{xml}"
+        );
+        assert!(
+            xml.contains(">CONTRACT-42</cbc:ID>"),
+            "expected the contract id in cbc:ID:\n{xml}"
+        );
+        assert!(
+            xml.contains(">2026-01-15</cbc:IssueDate>"),
+            "expected the contract issue date:\n{xml}"
+        );
+        assert_eq!(
+            xml.matches("<cac:DespatchDocumentReference").count(),
+            1,
+            "expected exactly one cac:DespatchDocumentReference:\n{xml}"
+        );
+        assert!(
+            xml.contains(">DESP-7</cbc:ID></cac:DespatchDocumentReference>"),
+            "expected the despatch id with no issue date:\n{xml}"
+        );
+        assert_eq!(
+            xml.matches("<cac:ReceiptDocumentReference").count(),
+            1,
+            "expected exactly one cac:ReceiptDocumentReference:\n{xml}"
+        );
+        assert!(
+            xml.contains(">RECV-9</cbc:ID>") && xml.contains(">2026-02-20</cbc:IssueDate>"),
+            "expected the receipt id and issue date:\n{xml}"
+        );
+
+        // UBL Invoice child order: Despatch < Receipt < Contract, all before the
+        // supplier party.
+        let despatch_pos = xml
+            .find("<cac:DespatchDocumentReference")
+            .expect("despatch present");
+        let receipt_pos = xml
+            .find("<cac:ReceiptDocumentReference")
+            .expect("receipt present");
+        let contract_pos = xml
+            .find("<cac:ContractDocumentReference")
+            .expect("contract present");
+        let supplier_pos = xml
+            .find("<cac:AccountingSupplierParty")
+            .expect("supplier present");
+        assert!(
+            despatch_pos < receipt_pos
+                && receipt_pos < contract_pos
+                && contract_pos < supplier_pos,
+            "references must be in UBL slot order (Despatch < Receipt < Contract) before the supplier party:\n{xml}"
+        );
+
+        // Canonical idempotence + schema validity.
+        assert_eq!(canonicalize_xml(&xml).unwrap(), xml);
         let schema_report = validate_oasis_ubl_2_1_schema(&xml).unwrap();
         assert!(
             schema_report.is_valid(),
