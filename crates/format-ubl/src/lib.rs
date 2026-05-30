@@ -548,6 +548,27 @@ impl ParseState {
             }
             return Ok(());
         }
+        // EN 16931 BT-121 / BT-120: capture the exemption reason code and free-
+        // text reason verbatim. Like the classification code above, entity-
+        // bearing text (a reason containing `&`/`<`) arrives as several events,
+        // so APPEND raw fragments rather than overwrite — overwriting silently
+        // kept only the last fragment and lost the rest. Free text is preserved
+        // exactly (no trim), so a serialize -> parse -> serialize round-trip is
+        // byte-stable and lossless.
+        if let Some(tax) = self.current_tax.as_mut() {
+            if path_ends(stack, &["TaxCategory", "TaxExemptionReasonCode"]) {
+                tax.exemption_reason_code
+                    .get_or_insert_with(String::new)
+                    .push_str(raw);
+                return Ok(());
+            }
+            if path_ends(stack, &["TaxCategory", "TaxExemptionReason"]) {
+                tax.exemption_reason
+                    .get_or_insert_with(String::new)
+                    .push_str(raw);
+                return Ok(());
+            }
+        }
         let value = raw.trim();
         if value.is_empty() {
             return Ok(());
@@ -612,6 +633,9 @@ impl ParseState {
                 tax.tax_rate = Some(decimal_value("tax_summary.tax_rate", value)?);
                 return Ok(());
             }
+            // (BT-121 / BT-120 exemption reason code + text are accumulated
+            // above, in the raw-fragment region, so entity-bearing text is not
+            // truncated.)
         }
 
         if let Some(role) = party_role(stack) {
@@ -1096,6 +1120,8 @@ struct TaxSummaryBuilder {
     taxable_amount: Option<MoneyAmount>,
     tax_amount: Option<MoneyAmount>,
     tax_rate: Option<DecimalValue>,
+    exemption_reason: Option<String>,
+    exemption_reason_code: Option<String>,
 }
 
 impl TaxSummaryBuilder {
@@ -1111,8 +1137,8 @@ impl TaxSummaryBuilder {
                 .tax_amount
                 .ok_or(UblError::MissingElement("cbc:TaxAmount"))?,
             tax_rate: self.tax_rate,
-            exemption_reason: None,
-            exemption_reason_code: None,
+            exemption_reason: self.exemption_reason,
+            exemption_reason_code: self.exemption_reason_code,
         })
     }
 }
@@ -1889,6 +1915,20 @@ fn write_tax_total(
         if let Some(rate) = &summary.tax_rate {
             write_text_element(xml, "cbc:Percent", &rate.inner().to_string());
         }
+        // EN 16931 BT-121 (cbc:TaxExemptionReasonCode) and BT-120
+        // (cbc:TaxExemptionReason) for an exempt / zero-rated / reverse-charge
+        // category. UBL cac:TaxCategory child order places both after
+        // cbc:Percent and before cac:TaxScheme, ReasonCode ahead of Reason. The
+        // codes are carried verbatim from the IR — InvoiceKit does not map,
+        // translate, or invent code-list values. Both fields are emitted only
+        // when present, so a summary with neither serializes byte-identically to
+        // the prior output (behavior-preserving for every existing fixture).
+        if let Some(code) = &summary.exemption_reason_code {
+            write_text_element(xml, "cbc:TaxExemptionReasonCode", code);
+        }
+        if let Some(reason) = &summary.exemption_reason {
+            write_text_element(xml, "cbc:TaxExemptionReason", reason);
+        }
         write_tax_scheme(xml);
         xml.push_str("</cac:TaxCategory>");
         xml.push_str("</cac:TaxSubtotal>");
@@ -2361,6 +2401,151 @@ mod tests {
         let err = to_xml(&document)
             .expect_err("overflowing tax-amount summation must surface an error, not panic");
         assert!(matches!(err, UblError::AmountOverflow));
+    }
+
+    /// Gating test (1): a fresh `CommercialDocument` whose tax category carries
+    /// both an EN 16931 BT-121 code (`exemption_reason_code` -> the controlled
+    /// list code `VATEX-EU-AE`) and a BT-120 free-text reason
+    /// (`exemption_reason`) emits `cbc:TaxExemptionReasonCode` and
+    /// `cbc:TaxExemptionReason` at the correct UBL `cac:TaxCategory` slot — after
+    /// `cbc:Percent` and before `cac:TaxScheme`, `ReasonCode` ahead of `Reason`
+    /// — and a full serialize -> PARSE -> serialize round-trip is byte-stable.
+    /// The parse step is load-bearing: a `to_xml`-only check would miss a parser
+    /// that rejected or dropped the new elements (the `FormattedIssueDateTime`
+    /// lesson).
+    #[test]
+    fn fresh_document_emits_vat_exemption_reason_and_code_round_trip_stable() {
+        let mut document = fixture(DocumentType::Invoice, 60);
+        let summary = &mut document.tax_summary[0];
+        // Reverse-charge: exempt with a code-list code (BT-121) and free text
+        // (BT-120). The code is opaque to InvoiceKit — serialized verbatim.
+        summary.tax_rate = None;
+        summary.exemption_reason_code = Some("VATEX-EU-AE".to_owned());
+        summary.exemption_reason = Some("Reverse charge".to_owned());
+
+        let xml = to_xml(&document).unwrap();
+
+        // Both elements are present, carrying the verbatim IR strings.
+        assert!(
+            xml.contains(">VATEX-EU-AE</cbc:TaxExemptionReasonCode>"),
+            "expected cbc:TaxExemptionReasonCode with the verbatim BT-121 code:\n{xml}"
+        );
+        assert!(
+            xml.contains(">Reverse charge</cbc:TaxExemptionReason>"),
+            "expected cbc:TaxExemptionReason with the verbatim BT-120 text:\n{xml}"
+        );
+
+        // Placement inside cac:TaxCategory: the category opens, its ID precedes
+        // both exemption elements, the ReasonCode precedes the Reason, and both
+        // precede the cac:TaxScheme that closes the category. (There is no
+        // cbc:Percent here because an exempt category omits the rate; the slot is
+        // still after the rate position and before the scheme.) The canonicalizer
+        // pins inline xmlns:cbc on the first cbc element inside the category, so
+        // match the open tags (with a trailing space or '>') rather than bare
+        // elements.
+        let category_pos = xml.find("<cac:TaxCategory>").expect("cac:TaxCategory present");
+        let id_pos = category_pos
+            + xml[category_pos..]
+                .find("</cbc:ID>")
+                .expect("tax category ID present");
+        let code_pos = category_pos
+            + xml[category_pos..]
+                .find("</cbc:TaxExemptionReasonCode>")
+                .expect("ReasonCode present");
+        let reason_pos = category_pos
+            + xml[category_pos..]
+                .find("</cbc:TaxExemptionReason>")
+                .expect("Reason present");
+        let scheme_pos = category_pos
+            + xml[category_pos..]
+                .find("<cac:TaxScheme>")
+                .expect("cac:TaxScheme follows the exemption elements");
+        assert!(
+            category_pos < id_pos
+                && id_pos < code_pos
+                && code_pos < reason_pos
+                && reason_pos < scheme_pos,
+            "cac:TaxCategory child order must be ID, ReasonCode, Reason, TaxScheme:\n{xml}"
+        );
+
+        // Serialize -> PARSE -> serialize must be byte-stable. The parser has to
+        // capture both fields into the IR, otherwise the re-serialization would
+        // drop them and this assertion would fail.
+        let parsed = parse_document(&xml);
+        assert_eq!(
+            parsed.tax_summary[0].exemption_reason_code.as_deref(),
+            Some("VATEX-EU-AE"),
+            "parser must capture the BT-121 code verbatim"
+        );
+        assert_eq!(
+            parsed.tax_summary[0].exemption_reason.as_deref(),
+            Some("Reverse charge"),
+            "parser must capture the BT-120 reason verbatim"
+        );
+        let reserialized = to_xml(&parsed).unwrap();
+        assert_eq!(
+            reserialized, xml,
+            "serialize -> parse -> serialize must be byte-stable:\n{xml}\n--- vs ---\n{reserialized}"
+        );
+
+        // Canonical idempotence: to_xml already canonicalizes, so a second pass
+        // is a no-op — proves the freshly emitted exemption elements are in
+        // schema order vs their siblings.
+        assert_eq!(canonicalize_xml(&xml).unwrap(), xml);
+
+        let schema_report = validate_oasis_ubl_2_1_schema(&xml).unwrap();
+        assert!(
+            schema_report.is_valid(),
+            "expected exemption-bearing output to be schema valid, findings: {:?}",
+            schema_report.findings
+        );
+    }
+
+    #[test]
+    fn vat_exemption_reason_with_xml_entities_round_trips_losslessly() {
+        // BT-120 free text frequently contains `&`/`<`/`>` (legal-article
+        // citations, company names). quick-xml splits entity-interrupted text
+        // into several Text/GeneralRef events; the parser must ACCUMULATE them.
+        // The earlier overwrite-on-each-event handler silently kept only the
+        // last fragment ("C"), losing the rest with no LossinessLedger entry.
+        let mut document = fixture(DocumentType::Invoice, 64);
+        let summary = &mut document.tax_summary[0];
+        summary.tax_rate = None;
+        summary.exemption_reason_code = Some("VATEX-A & B".to_owned());
+        summary.exemption_reason = Some("Exempt: Art 132 A & B < C, D > E".to_owned());
+
+        let xml = to_xml(&document).unwrap();
+        let parsed = parse_document(&xml);
+        assert_eq!(
+            parsed.tax_summary[0].exemption_reason.as_deref(),
+            Some("Exempt: Art 132 A & B < C, D > E"),
+            "entity-bearing BT-120 text must survive parse verbatim (no fragment loss)"
+        );
+        assert_eq!(
+            parsed.tax_summary[0].exemption_reason_code.as_deref(),
+            Some("VATEX-A & B"),
+            "entity-bearing BT-121 code must survive parse verbatim"
+        );
+        let reserialized = to_xml(&parsed).unwrap();
+        assert_eq!(
+            reserialized, xml,
+            "entity-bearing exemption round-trip must be byte-stable"
+        );
+    }
+
+    /// Behavior-preserving guard: a tax category with both exemption fields
+    /// `None` (every existing fixture) emits neither element, so the bytes are
+    /// identical to the prior serializer output.
+    #[test]
+    fn absent_vat_exemption_fields_emit_nothing() {
+        let document = fixture(DocumentType::Invoice, 61);
+        assert!(document.tax_summary[0].exemption_reason.is_none());
+        assert!(document.tax_summary[0].exemption_reason_code.is_none());
+        let xml = to_xml(&document).unwrap();
+        assert!(
+            !xml.contains("TaxExemptionReason"),
+            "a None exemption must emit no cbc:TaxExemptionReason* element:\n{xml}"
+        );
     }
 
     fn parse_document(xml: &str) -> CommercialDocument {

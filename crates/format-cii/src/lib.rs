@@ -552,6 +552,26 @@ impl ParseState {
 
     #[allow(clippy::too_many_lines)]
     fn text(&mut self, stack: &[String], raw: &str) -> Result<(), CiiError> {
+        // EN 16931 BT-120 / BT-121: accumulate the exemption reason text + code
+        // from RAW fragments BEFORE the trim / empty early-return below. Entity-
+        // bearing text (e.g. "A & B") arrives as several Text/GeneralRef events;
+        // overwriting kept only the last fragment and silently lost the rest.
+        // Free text is preserved exactly (no trim) so a serialize -> parse ->
+        // serialize round-trip stays byte-stable.
+        if let Some(tax) = self.current_tax.as_mut() {
+            if path_ends(stack, &["ApplicableTradeTax", "ExemptionReason"]) {
+                tax.exemption_reason
+                    .get_or_insert_with(String::new)
+                    .push_str(raw);
+                return Ok(());
+            }
+            if path_ends(stack, &["ApplicableTradeTax", "ExemptionReasonCode"]) {
+                tax.exemption_reason_code
+                    .get_or_insert_with(String::new)
+                    .push_str(raw);
+                return Ok(());
+            }
+        }
         let value = raw.trim();
         if value.is_empty() {
             return Ok(());
@@ -640,6 +660,9 @@ impl ParseState {
                 tax.category_code = Some(value.to_owned());
                 return Ok(());
             }
+            // (BT-120 / BT-121 exemption reason text + code are accumulated
+            // above, in the raw-fragment region, so entity-bearing text is not
+            // truncated.)
             if path_ends(stack, &["ApplicableTradeTax", "RateApplicablePercent"]) {
                 tax.tax_rate = Some(decimal_value("tax_summary.tax_rate", value)?);
                 return Ok(());
@@ -1258,6 +1281,8 @@ struct TaxSummaryBuilder {
     taxable_amount: Option<MoneyAmount>,
     tax_amount: Option<MoneyAmount>,
     tax_rate: Option<DecimalValue>,
+    exemption_reason: Option<String>,
+    exemption_reason_code: Option<String>,
 }
 
 impl TaxSummaryBuilder {
@@ -1273,8 +1298,8 @@ impl TaxSummaryBuilder {
                 "ram:ApplicableTradeTax/ram:CalculatedAmount",
             ))?,
             tax_rate: self.tax_rate,
-            exemption_reason: None,
-            exemption_reason_code: None,
+            exemption_reason: self.exemption_reason,
+            exemption_reason_code: self.exemption_reason_code,
         })
     }
 }
@@ -2333,10 +2358,28 @@ fn write_tax_summary(
     write_amount_text_element(xml, "ram:CalculatedAmount", summary.tax_amount.inner());
     write_preserved_xml_before(xml, document, container_path, None, "TypeCode")?;
     write_text_element(xml, "ram:TypeCode", "VAT");
+    // EN 16931 BT-120 (free-text exemption reason): ram:ExemptionReason sits
+    // after ram:TypeCode / before ram:BasisAmount in the CII child order. The
+    // native emission is bracketed within the preserved-XML replay (same
+    // machinery as DesignatedProductClassification): replay siblings up to the
+    // ExemptionReason slot first, then emit the native element. Emit nothing
+    // when absent so documents without exemption text serialize byte-identically.
+    write_preserved_xml_before(xml, document, container_path, None, "ExemptionReason")?;
+    if let Some(exemption_reason) = &summary.exemption_reason {
+        write_text_element(xml, "ram:ExemptionReason", exemption_reason);
+    }
     write_preserved_xml_before(xml, document, container_path, None, "BasisAmount")?;
     write_amount_text_element(xml, "ram:BasisAmount", summary.taxable_amount.inner());
     write_preserved_xml_before(xml, document, container_path, None, "CategoryCode")?;
     write_text_element(xml, "ram:CategoryCode", &summary.category_code);
+    // EN 16931 BT-121 (controlled-list exemption code, e.g. VATEX-EU-AE or an IT
+    // Natura code): ram:ExemptionReasonCode sits after ram:CategoryCode / before
+    // ram:RateApplicablePercent. Serialized verbatim — InvoiceKit does not map,
+    // translate, or invent codes. Bracketed within the preserved-XML replay.
+    write_preserved_xml_before(xml, document, container_path, None, "ExemptionReasonCode")?;
+    if let Some(exemption_reason_code) = &summary.exemption_reason_code {
+        write_text_element(xml, "ram:ExemptionReasonCode", exemption_reason_code);
+    }
     write_preserved_xml_before(xml, document, container_path, None, "RateApplicablePercent")?;
     if let Some(rate) = &summary.tax_rate {
         write_text_element(xml, "ram:RateApplicablePercent", &rate.inner().to_string());
@@ -3089,8 +3132,10 @@ fn known_cii_children(parent: &str) -> Option<&'static [&'static str]> {
         "ApplicableTradeTax" => Some(&[
             "CalculatedAmount",
             "TypeCode",
+            "ExemptionReason",
             "BasisAmount",
             "CategoryCode",
+            "ExemptionReasonCode",
             "RateApplicablePercent",
         ]),
         "SpecifiedTradeSettlementHeaderMonetarySummation" => Some(&[
@@ -4870,6 +4915,156 @@ mod tests {
 
         let parsed = parse_document(&serialized);
         assert_eq!(parsed.lines[0].classifications, document.lines[0].classifications);
+        assert_eq!(to_xml(&parsed).unwrap(), serialized);
+    }
+
+    /// GATING TEST (1) for EN 16931 BT-120 / BT-121: a fresh document whose tax
+    /// category carries both `exemption_reason` (BT-120, free text) and
+    /// `exemption_reason_code` (BT-121, a controlled-list code) emits both
+    /// elements at their correct CII slots, and a full
+    /// serialize -> PARSE -> serialize round-trip is byte-stable. The parse step
+    /// is essential: a `to_xml`-only test would miss a parser rejection (the
+    /// lesson from the `FormattedIssueDateTime` parser bug).
+    #[test]
+    fn tax_exemption_reason_and_code_emit_in_schema_order_and_round_trip() {
+        let mut document = fixture(DocumentType::Invoice, 70);
+        let summary = document.tax_summary.first_mut().unwrap();
+        // Reverse-charge category with a CEF VATEX code, verbatim.
+        summary.category_code = "AE".to_owned();
+        summary.tax_rate = Some(DecimalValue::new(Decimal::ZERO));
+        summary.exemption_reason = Some("Reverse charge".to_owned());
+        summary.exemption_reason_code = Some("VATEX-EU-AE".to_owned());
+        document.lines.first_mut().unwrap().tax_category = Some("AE".to_owned());
+
+        let serialized = to_xml(&document).unwrap();
+
+        // GATING (2): canonical idempotence — schema order holds, output stable.
+        assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
+
+        // Both EN 16931 bindings are present, serialized verbatim (no mapping).
+        assert!(serialized.contains("<ram:ExemptionReason>Reverse charge</ram:ExemptionReason>"));
+        assert!(serialized
+            .contains("<ram:ExemptionReasonCode>VATEX-EU-AE</ram:ExemptionReasonCode>"));
+
+        // The exemption bindings live in the header-summary ApplicableTradeTax,
+        // not the line-level one. Scope position checks to the header block,
+        // which is the only ApplicableTradeTax that emits ram:CalculatedAmount.
+        let header_tax = &serialized[serialized.find("<ram:CalculatedAmount").unwrap()..];
+
+        // Exact CII child order within the header ApplicableTradeTax:
+        // TypeCode < ExemptionReason < BasisAmount < CategoryCode
+        //   < ExemptionReasonCode < RateApplicablePercent.
+        let type_code = header_tax.find("<ram:TypeCode>VAT</ram:TypeCode>").unwrap();
+        let exemption_reason = header_tax.find("<ram:ExemptionReason>").unwrap();
+        let basis_amount = header_tax.find("<ram:BasisAmount").unwrap();
+        let category_code = header_tax.find("<ram:CategoryCode>AE</ram:CategoryCode>").unwrap();
+        let exemption_code = header_tax.find("<ram:ExemptionReasonCode>").unwrap();
+        let rate = header_tax.find("<ram:RateApplicablePercent>").unwrap();
+        assert!(type_code < exemption_reason);
+        assert!(exemption_reason < basis_amount);
+        assert!(basis_amount < category_code);
+        assert!(category_code < exemption_code);
+        assert!(exemption_code < rate);
+
+        // Each binding appears exactly once in the whole document.
+        assert_eq!(serialized.matches("<ram:ExemptionReason>").count(), 1);
+        assert_eq!(serialized.matches("<ram:ExemptionReasonCode>").count(), 1);
+
+        // serialize -> PARSE -> serialize is byte-stable (not just to_xml idempotence).
+        let parsed = parse_document(&serialized);
+        assert_eq!(
+            parsed.tax_summary[0].exemption_reason.as_deref(),
+            Some("Reverse charge")
+        );
+        assert_eq!(
+            parsed.tax_summary[0].exemption_reason_code.as_deref(),
+            Some("VATEX-EU-AE")
+        );
+        assert_eq!(to_xml(&parsed).unwrap(), serialized);
+    }
+
+    #[test]
+    fn tax_exemption_reason_with_xml_entities_round_trips_losslessly() {
+        // BT-120 free text frequently contains `&`/`<`/`>`. quick-xml splits
+        // entity-interrupted text into several events; the parser must
+        // ACCUMULATE them, not overwrite (which kept only the last fragment).
+        let mut document = fixture(DocumentType::Invoice, 71);
+        let summary = document.tax_summary.first_mut().unwrap();
+        summary.category_code = "AE".to_owned();
+        summary.tax_rate = Some(DecimalValue::new(Decimal::ZERO));
+        summary.exemption_reason = Some("Exempt: Art 132 A & B < C, D > E".to_owned());
+        summary.exemption_reason_code = Some("VATEX-A & B".to_owned());
+        document.lines.first_mut().unwrap().tax_category = Some("AE".to_owned());
+
+        let serialized = to_xml(&document).unwrap();
+        let parsed = parse_document(&serialized);
+        assert_eq!(
+            parsed.tax_summary[0].exemption_reason.as_deref(),
+            Some("Exempt: Art 132 A & B < C, D > E"),
+            "entity-bearing BT-120 text must survive parse verbatim (no fragment loss)"
+        );
+        assert_eq!(
+            parsed.tax_summary[0].exemption_reason_code.as_deref(),
+            Some("VATEX-A & B"),
+            "entity-bearing BT-121 code must survive parse verbatim"
+        );
+        assert_eq!(
+            to_xml(&parsed).unwrap(),
+            serialized,
+            "entity-bearing exemption round-trip must be byte-stable"
+        );
+    }
+
+    /// Behavior-preserving guard: a tax category with neither exemption field
+    /// emits no `ram:ExemptionReason*` element, so documents that predate this
+    /// binding serialize byte-identically. Round-trips through parse unchanged.
+    #[test]
+    fn tax_summary_without_exemption_omits_both_elements() {
+        let document = fixture(DocumentType::Invoice, 71);
+        assert!(document.tax_summary[0].exemption_reason.is_none());
+        assert!(document.tax_summary[0].exemption_reason_code.is_none());
+
+        let serialized = to_xml(&document).unwrap();
+        assert!(!serialized.contains("ram:ExemptionReason"));
+        assert!(!serialized.contains("ram:ExemptionReasonCode"));
+        assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
+
+        let parsed = parse_document(&serialized);
+        assert!(parsed.tax_summary[0].exemption_reason.is_none());
+        assert!(parsed.tax_summary[0].exemption_reason_code.is_none());
+        assert_eq!(to_xml(&parsed).unwrap(), serialized);
+    }
+
+    /// Only `exemption_reason_code` (BT-121) without the free-text BT-120: the
+    /// code must still land at its own slot (after `CategoryCode`), confirming the
+    /// two bindings are emitted independently at their distinct positions.
+    #[test]
+    fn tax_exemption_code_without_reason_emits_at_its_own_slot() {
+        let mut document = fixture(DocumentType::Invoice, 72);
+        let summary = document.tax_summary.first_mut().unwrap();
+        summary.category_code = "E".to_owned();
+        summary.exemption_reason_code = Some("VATEX-EU-132-1A".to_owned());
+        document.lines.first_mut().unwrap().tax_category = Some("E".to_owned());
+
+        let serialized = to_xml(&document).unwrap();
+        assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
+        assert!(!serialized.contains("<ram:ExemptionReason>"));
+        assert!(serialized
+            .contains("<ram:ExemptionReasonCode>VATEX-EU-132-1A</ram:ExemptionReasonCode>"));
+
+        let header_tax = &serialized[serialized.find("<ram:CalculatedAmount").unwrap()..];
+        let category_code = header_tax.find("<ram:CategoryCode>E</ram:CategoryCode>").unwrap();
+        let exemption_code = header_tax.find("<ram:ExemptionReasonCode>").unwrap();
+        let rate = header_tax.find("<ram:RateApplicablePercent>").unwrap();
+        assert!(category_code < exemption_code);
+        assert!(exemption_code < rate);
+
+        let parsed = parse_document(&serialized);
+        assert_eq!(parsed.tax_summary[0].exemption_reason, None);
+        assert_eq!(
+            parsed.tax_summary[0].exemption_reason_code.as_deref(),
+            Some("VATEX-EU-132-1A")
+        );
         assert_eq!(to_xml(&parsed).unwrap(), serialized);
     }
 
