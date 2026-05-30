@@ -5556,6 +5556,59 @@ mod tests {
         assert_eq!(to_xml(&parsed).unwrap(), serialized);
     }
 
+    #[test]
+    fn adversarial_both_set_ship_to_preserved_wins_no_native_leak() {
+        use invoicekit_ir::DeliverToParty;
+
+        // 1) Build a doc whose serialized form carries a ram:ShipToTradeParty.
+        let mut seed = fixture(DocumentType::Invoice, 81);
+        seed.delivery_date = Some(DateOnly::new("2026-05-12").unwrap());
+        seed.deliver_to = Some(DeliverToParty {
+            name: Some("PRESERVED-SHIPTO".to_owned()),
+            location_id: Some("LOC-PRES".to_owned()),
+            address: Some(PostalAddress {
+                lines: vec!["Dock 3".to_owned()],
+                city: "Hamburg".to_owned(),
+                subdivision: None,
+                postal_code: "20095".to_owned(),
+                country: CountryCode::new("DE").unwrap(),
+            }),
+        });
+        let seed_xml = to_xml(&seed).unwrap();
+        assert!(seed_xml.contains("<ram:Name>PRESERVED-SHIPTO</ram:Name>"));
+
+        // 2) Parse it: ShipToTradeParty becomes preserved raw XML, deliver_to None.
+        let mut both = parse_document(&seed_xml);
+        assert!(both.deliver_to.is_none());
+
+        // 3) Now ALSO set a DIFFERENT native deliver_to -> the both-set case.
+        both.deliver_to = Some(DeliverToParty {
+            name: Some("NATIVE-SHIPTO".to_owned()),
+            location_id: Some("LOC-X".to_owned()),
+            address: None,
+        });
+
+        let out = to_xml(&both).unwrap();
+
+        // Preserved wins; native must NOT leak.
+        assert_eq!(
+            out.matches("<ram:ShipToTradeParty>").count(),
+            1,
+            "exactly one ShipToTradeParty:\n{out}"
+        );
+        assert!(out.contains("PRESERVED-SHIPTO"), "preserved present:\n{out}");
+        assert!(!out.contains("NATIVE-SHIPTO"), "native must be suppressed:\n{out}");
+        assert!(!out.contains("LOC-X"), "native id must be suppressed:\n{out}");
+
+        // Schema order + byte stability.
+        let ship = out.find("<ram:ShipToTradeParty>").unwrap();
+        let event = out.find("<ram:ActualDeliverySupplyChainEvent>").unwrap();
+        assert!(ship < event, "ShipToTradeParty before event:\n{out}");
+        assert_eq!(canonicalize_xml(&out).unwrap(), out);
+        // Re-parse/re-serialize stays stable.
+        assert_eq!(to_xml(&parse_document(&out)).unwrap(), out);
+    }
+
     /// Gating test for the CII child-order fix: a parse-then-enrich document
     /// carrying BOTH a preserved `BillingSpecifiedPeriod` (BG-14) AND caller-set
     /// native allowances (BG-20/21) must emit the period BEFORE the allowances

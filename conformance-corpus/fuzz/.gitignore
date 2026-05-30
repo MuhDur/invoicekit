@@ -1,0 +1,7 @@
+# libFuzzer writes newly-discovered inputs into a target's directory when that
+# directory is passed as a live corpus (e.g. `cargo fuzz run <t> <seed-dir>`).
+# Only the curated, hand-named seed_* inputs are tracked; transient
+# fuzzer-discovered inputs (SHA-1-named) must never be committed.
+*/*
+!*/seed_*
+!.gitignore
