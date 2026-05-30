@@ -172,8 +172,9 @@ pub trait VeriFactuProvider: Send + Sync {
 /// Deterministic mock provider.
 ///
 /// Returns [`VeriFactuStatus::Accepted`] with a synthesised
-/// `recorded_hash_hex` (BLAKE3-derived but presented as
-/// SHA-256-shaped hex) + `csv`, so cassette-replay tests stay
+/// `recorded_hash_hex` (a deterministic expansion of the payload
+/// byte length plus a payload-byte prefix, shaped like SHA-256 hex
+/// but not a real hash) + `csv`, so cassette-replay tests stay
 /// byte-identical across runs.
 ///
 /// Use [`MockVeriFactuProvider::with_forced_status`] to drive
