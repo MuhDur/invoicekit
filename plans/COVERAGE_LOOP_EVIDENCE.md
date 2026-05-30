@@ -1290,3 +1290,19 @@ The ungated EN 16931 **document-level** surface is now comprehensively covered b
 - **Verification:** full cargo suite green, clippy `-D warnings` clean, all 113 release-check gates pass, schema in sync. New-code audit running.
 - **Coverage status:** the EN 16931 surface — document-level AND line-level — is now comprehensively covered in UBL; CII covers all but the delivery-block items (BT-72, deliver-to ShipToTradeParty) deferred with the gated disentanglement. This is the bottom of the ungated coverage frontier.
 - **Skills used:** `simplify-and-refactor-code-isomorphically` (the two shared-helper extractions), `multi-pass-bug-hunting` (the round-trip gate surfaced the line preserve gap; audit running), `verification-before-completion`.
+
+### Turn 51 (2026-05-30) — BG-27/28 CONVERGED + ungated EN 16931 frontier exhausted
+- **BG-27/28 line allowances/charges: audit (2 real bugs) → fixed (four-window line-settlement preserve) → confirming round 0 residuals → CONVERGED.** The confirming verifier proved the four windows {<5},{6},{7-10},{>11} disjoint+complete against the actual child-order table (orders 1-19), boundary orders 5/11 moot (known/native-only, never preserved), no regression, tax_category-None case correct. 57 CII tests + corpora pass; full cargo suite green; clippy clean; 113 release-check gates pass; schema in sync.
+- **🟢 THE UNGATED EN 16931 COVERAGE FRONTIER IS EXHAUSTED.** Seven additive IR foundations now comprehensively cover the valuable EN 16931 surface, each round-trip-tested, comparator-wired, schema-synced, audited, confirming-round-clean, and UBL-wired:
+  1. item classifications (BT-158, doc+line)
+  2. document references (BT-13/25)
+  3. VAT exemption reason/code (BT-120/121)
+  4. invoice period (BG-14) + delivery date (BT-72)
+  5. document allowances/charges (BG-20/21)
+  6. deliver-to (BG-13/15)
+  7. line allowances/charges (BG-27/28)
+  CII carries all but the delivery-block items (BT-72, deliver-to ShipToTradeParty), deferred with the gated disentanglement.
+- **Only ONE ungated group remains — BG-26 line-level invoice period — and it is near-zero value** (a per-line billing sub-period is rare). Grinding it would be diminishing-returns theater; left available if the principal wants exhaustive coverage.
+- **ALL remaining HIGH-value work is principal-gated (3 decisions):** (1) **D15 national code-list vendoring** — unblocks the national code-derivation tier across many report crates, by far the highest-value next step; (2) **CII delivery-block disentanglement** (BT-7/BT-72 conflation + BT-72 emit + deliver-to ShipToTradeParty); (3) both-set precedence unification (CII references native-wins vs preserved-wins elsewhere).
+- **LOOP STOPPED at genuine comprehensive convergence** rather than grind BG-26's near-zero value. Resume by authorizing a gated decision (D15 recommended) or naming a specific target.
+- **Skills used:** `multi-pass-bug-hunting` (audit + confirming round), `simplify-and-refactor-code-isomorphically`, `verification-before-completion`.
