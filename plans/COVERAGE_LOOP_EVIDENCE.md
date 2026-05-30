@@ -1039,3 +1039,29 @@ performance** skills and closes the residuals.
 - **Skills used:** `feature-dev` (classifier design), `testing-real-service-e2e-no-mocks` (round-trip + idempotence
   gating tests; the CII round-trip gap), `reality-check-for-project` (caught the latent parser bug), `verification-
   before-completion`.
+
+### Turn 34 (2026-05-30) — Gated decision #3 DONE: VAT exemption reason/code (BT-120/121). ALL 3 GATED ITEMS COMPLETE.
+- **IR foundation (commit 70c3d56):** additive `exemption_reason` (BT-120) + `exemption_reason_code` (BT-121) on
+  `TaxCategorySummary`, carried verbatim (no code-list mapping/invention). 217-site literal ripple repaired by a
+  41-agent mechanical workflow (+ the ir crate). Round-trip proptest + unit test. Additive/behavior-preserving.
+- **Consumers (commit 06bf778):** UBL `cbc:TaxExemptionReasonCode`/`cbc:TaxExemptionReason` in `cac:TaxCategory`;
+  CII `ram:ExemptionReason` (after TypeCode) + `ram:ExemptionReasonCode` (after CategoryCode) in
+  `ram:ApplicableTradeTax`, bracketed in the preserved-XML replay.
+- **Caught + fixed a SILENT DATA-LOSS bug in BOTH parsers** (the workflow's round-trip gate did its job): the
+  exemption text handlers OVERWROTE on each event, so entity-bearing free text (`"A & B < C"` — which quick-xml
+  splits into multiple Text/GeneralRef events) round-tripped to just its last fragment (`"C"`) with NO
+  LossinessLedger entry. Fixed by accumulating raw fragments (mirroring the BT-158 `ItemClassificationCode` path)
+  and preserving free text exactly. Added entity-bearing serialize→parse→serialize round-trip tests to both
+  crates. LESSON (again): the earlier gating tests used entity-free sample values (`"Reverse charge"`,
+  `"VATEX-EU-AE"`) and missed this — a round-trip test must include XML-metacharacter content.
+- **Verification:** `cargo test --workspace` = **2488 passed / 0 failed**; clippy `-D warnings` clean throughout.
+- **GATED TIER COMPLETE: #1 classifications ✅, #2 references ✅, #3 exemption ✅.** The three additive IR fields
+  (item classifications, reference-kind classifier, exemption reason/code) + their EN 16931-family UBL/CII
+  consumers are all shipped, round-trip-tested, and behavior-preserving. Suite 2404 → 2488 across the campaign.
+- **Remaining (honest residuals, all code-list-gated / D15):** the national code-list MAPPINGS that would let the
+  report crates auto-derive codes — IT `Natura`, CEF `VATEX`, BR `NCM`/IBGE municipality, MX SAT `ClaveProdServ`/
+  tax-nature catalogs. These need vendored code lists; faithfully serializing producer-supplied codes already works
+  (done), but deriving/validating them against the national catalogs needs the lists (do NOT invent — D18).
+- **Skills used:** `feature-dev` (additive-field design), `testing-real-service-e2e-no-mocks` (entity-bearing
+  round-trip gating tests), `reality-check-for-project` (the round-trip gate caught the silent-loss bug in both
+  crates), `verification-before-completion`.
