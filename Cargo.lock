@@ -2042,7 +2042,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-adversarial-generator"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-format-cii",
  "invoicekit-format-gobl",
@@ -2059,7 +2059,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-archive"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-evidence",
  "serde",
@@ -2070,7 +2070,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-bench-harness"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "criterion",
  "invoicekit-canonical",
@@ -2092,7 +2092,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-binding-node-napi"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-engine",
  "serde",
@@ -2101,7 +2101,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-binding-python"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-engine",
  "pyo3",
@@ -2111,7 +2111,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-binding-rest-shim"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "axum",
  "base64",
@@ -2133,7 +2133,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-binding-wasm-browser"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-engine",
  "serde",
@@ -2142,7 +2142,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-bridge-chargebee"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-ir",
  "serde",
@@ -2152,7 +2152,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-bridge-lago"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-ir",
  "serde",
@@ -2162,7 +2162,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-bridge-maxio"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-ir",
  "serde",
@@ -2172,7 +2172,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-bridge-recurly"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-ir",
  "serde",
@@ -2182,7 +2182,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-bridge-stripe-invoicing"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-ir",
  "serde",
@@ -2192,7 +2192,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-canonical"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "proptest",
  "quick-xml 0.40.1",
@@ -2204,7 +2204,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-cli"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "invoicekit-codelists",
@@ -2229,7 +2229,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-codelists"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "proptest",
  "serde",
@@ -2240,7 +2240,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-engine"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-ir",
@@ -2253,7 +2253,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-envelope-encryption"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "blake3",
@@ -2266,7 +2266,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-evidence"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "serde",
@@ -2278,7 +2278,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-evidence-dsse"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "base64",
  "invoicekit-evidence",
@@ -2290,7 +2290,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-ffi"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-engine",
  "serde",
@@ -2299,7 +2299,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-format-cii"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-ir",
@@ -2314,7 +2314,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-format-detect"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2322,7 +2322,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-format-gobl"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-ir",
  "rust_decimal",
@@ -2333,7 +2333,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-format-ubl"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "fastxml",
  "invoicekit-canonical",
@@ -2349,7 +2349,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-inbound-peppol"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-format-cii",
  "invoicekit-format-detect",
@@ -2363,7 +2363,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-intake-citation"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2372,7 +2372,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-intake-ocr"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2381,7 +2381,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-intake-pdf"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "lopdf",
@@ -2391,7 +2391,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-intake-vlm"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2401,7 +2401,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-intake-witness"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-intake-citation",
  "rust_decimal",
@@ -2413,7 +2413,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-ir"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "proptest",
  "rust_decimal",
@@ -2425,7 +2425,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-lossiness-ledger-generator"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-format-cii",
  "invoicekit-format-ubl",
@@ -2438,7 +2438,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-lsp"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2447,7 +2447,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-managed-api"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "hmac 0.12.1",
  "serde",
@@ -2461,7 +2461,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-managed-api-server"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "axum",
  "http",
@@ -2478,7 +2478,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-mcp-server"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2487,7 +2487,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-migration"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-ir",
  "proptest",
@@ -2498,7 +2498,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-money"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-ir",
  "proptest",
@@ -2510,7 +2510,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-pdf-visual-regression"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "clap",
  "image",
@@ -2523,7 +2523,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-peppol-smp-sml"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "base32",
  "md-5 0.10.6",
@@ -2535,7 +2535,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-profile-factur-x"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-format-cii",
  "invoicekit-ir",
@@ -2546,7 +2546,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-profile-peppol-bis"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-format-ubl",
  "invoicekit-ir",
@@ -2557,7 +2557,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-profile-peppol-pint"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-format-ubl",
  "invoicekit-ir",
@@ -2568,7 +2568,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-profile-xrechnung"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-format-ubl",
  "invoicekit-ir",
@@ -2579,7 +2579,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-reconcile"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "futures-task",
@@ -2600,7 +2600,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-render-factur-x-acceptance"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-render-pdf",
  "invoicekit-render-pdf-postproc",
@@ -2609,7 +2609,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-render-html"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-ir",
  "rust_decimal",
@@ -2618,7 +2618,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-render-pdf"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-ir",
  "serde_json",
@@ -2631,7 +2631,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-render-pdf-postproc"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-intake-pdf",
  "lopdf",
@@ -2641,7 +2641,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-render-verify"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2650,7 +2650,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-replay"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-evidence",
  "serde",
@@ -2660,7 +2660,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-ar-afip"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2675,7 +2675,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-be-peppol"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2690,7 +2690,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-br-nfe"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2706,7 +2706,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-cl-dte"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2721,7 +2721,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-cn-fapiao"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2736,7 +2736,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-co-dian"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2751,7 +2751,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-cr-hacienda"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2766,7 +2766,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-do-dgii"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2781,7 +2781,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-ec-sri"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2796,7 +2796,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-eg-eta"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2811,7 +2811,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-es-verifactu"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2826,7 +2826,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-fr-ctc"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2844,7 +2844,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-gr-mydata"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2859,7 +2859,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-hu-nav"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2874,7 +2874,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-id-djp"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2889,7 +2889,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-il-ita"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2904,7 +2904,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-in-gst"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2919,7 +2919,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-it-sdi"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2935,7 +2935,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-jp-qis"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2950,7 +2950,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-ke-etims"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2965,7 +2965,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-kr-nts"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2980,7 +2980,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-mx-cfdi"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -2996,7 +2996,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-my-myinvois"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -3011,7 +3011,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-ng-firs"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -3026,7 +3026,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-pe-sunat"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -3041,7 +3041,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-ph-bir"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -3056,7 +3056,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-pl-ksef"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -3072,7 +3072,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-ro-efactura"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -3087,7 +3087,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-sa-zatca"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -3104,7 +3104,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-th-rd"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -3119,7 +3119,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-tr-efatura"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -3134,7 +3134,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-tw-mof"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -3149,7 +3149,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-vn-gdt"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -3164,7 +3164,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-report-za-sars"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-evidence",
@@ -3179,7 +3179,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-rulepack"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "arc-swap",
  "blake3",
@@ -3193,7 +3193,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-signer"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "serde",
@@ -3203,7 +3203,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-signer-agent"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-signer",
  "serde",
@@ -3213,7 +3213,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-signer-cfdi"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-signer",
  "serde",
@@ -3223,7 +3223,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-signer-eidas"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-signer",
  "invoicekit-timestamping",
@@ -3234,7 +3234,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-signer-france-ctc"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-signer",
  "invoicekit-signer-eidas",
@@ -3245,7 +3245,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-signer-ksef"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-signer",
  "serde",
@@ -3255,7 +3255,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-signer-nfe"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-signer",
  "serde",
@@ -3265,7 +3265,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-signer-sdi"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-signer",
  "serde",
@@ -3275,7 +3275,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-signer-zatca"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-signer",
  "serde",
@@ -3285,7 +3285,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-tax-calculation"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-canonical",
  "invoicekit-ir",
@@ -3299,7 +3299,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-timestamping"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "serde",
@@ -3309,11 +3309,11 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-transmit-email"
-version = "0.1.1"
+version = "0.2.0"
 
 [[package]]
 name = "invoicekit-transmit-mock"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "invoicekit-canonical",
@@ -3327,11 +3327,11 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-transmit-peppol"
-version = "0.1.1"
+version = "0.2.0"
 
 [[package]]
 name = "invoicekit-transmit-peppol-byok"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3341,7 +3341,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-transmit-peppol-native-as4"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-format-ubl",
  "invoicekit-ir",
@@ -3354,7 +3354,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-transmit-peppol-native-as4-receive"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-transmit-peppol-byok",
  "invoicekit-transmit-peppol-native-as4",
@@ -3364,7 +3364,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-transmit-peppol-partner"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-format-ubl",
  "invoicekit-ir",
@@ -3377,7 +3377,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-transmit-peppol-phase4"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-reconcile",
  "invoicekit-transmit-peppol-byok",
@@ -3389,7 +3389,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-validate"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "proptest",
  "schemars",
@@ -3400,7 +3400,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-validate-ubl-cii"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "invoicekit-rulepack",
@@ -3413,7 +3413,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-verify"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "invoicekit-evidence",
@@ -3428,7 +3428,7 @@ dependencies = [
 
 [[package]]
 name = "invoicekit-wasm"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "invoicekit-engine",
  "serde",

@@ -18,10 +18,10 @@ name = "invoicekit_inbound_peppol"
 path = "src/lib.rs"
 
 [dependencies]
-invoicekit-format-cii = { path = "../format-cii", version = "0.1.0" }
-invoicekit-format-detect = { path = "../format-detect", version = "0.1.0" }
-invoicekit-format-ubl = { path = "../format-ubl", version = "0.1.0" }
-invoicekit-ir = { path = "../ir", version = "0.1.0" }
+invoicekit-format-cii = { path = "../format-cii", version = "0.2.0" }
+invoicekit-format-detect = { path = "../format-detect", version = "0.2.0" }
+invoicekit-format-ubl = { path = "../format-ubl", version = "0.2.0" }
+invoicekit-ir = { path = "../ir", version = "0.2.0" }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 thiserror.workspace = true

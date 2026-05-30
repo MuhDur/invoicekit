@@ -18,8 +18,8 @@ name = "invoicekit_profile_peppol_bis"
 path = "src/lib.rs"
 
 [dependencies]
-invoicekit-format-ubl = { path = "../format-ubl", version = "0.1.0" }
-invoicekit-ir = { path = "../ir", version = "0.1.0" }
+invoicekit-format-ubl = { path = "../format-ubl", version = "0.2.0" }
+invoicekit-ir = { path = "../ir", version = "0.2.0" }
 serde = "1"
 serde_json = "1"
 thiserror.workspace = true

@@ -23,8 +23,8 @@ path = "src/bin/normalize_ubl.rs"
 
 [dependencies]
 fastxml = "0.8.1"
-invoicekit-canonical = { path = "../canonical", version = "0.1.0" }
-invoicekit-ir = { path = "../ir", version = "0.1.0" }
+invoicekit-canonical = { path = "../canonical", version = "0.2.0" }
+invoicekit-ir = { path = "../ir", version = "0.2.0" }
 quick-xml = "0.40.1"
 rust_decimal = "1"
 serde = "1"

@@ -73,7 +73,7 @@ full = [
 ]
 
 [dependencies]
-invoicekit-engine = { path = "../invoicekit-engine", version = "0.1.0" }
+invoicekit-engine = { path = "../invoicekit-engine", version = "0.2.0" }
 serde_json = "1"
 
 # wasm-bindgen is the bridge to JavaScript; only compiled in on

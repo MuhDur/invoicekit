@@ -5,6 +5,47 @@ All notable changes to InvoiceKit are documented here. The format follows
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reaches
 `1.0`. Until then, minor versions may carry breaking changes.
 
+## [0.2.0] — 2026-05-30
+
+A coverage-and-trust release: more EN 16931 semantic coverage, and the engine's
+correctness verified end-to-end against the genuine reference validators.
+
+### Added — EN 16931 coverage
+- **Invoice period (BG-14)** and **delivery date (BT-72)** emitted from the IR in
+  both UBL and CII.
+- **Document-level allowances and charges (BG-20 / BG-21)** and **line-level
+  allowances and charges (BG-27 / BG-28)** in both UBL and CII.
+- **Deliver-to information (BG-13 / BG-15)** as UBL `cac:Delivery` /
+  CII `ram:ShipToTradeParty`.
+- **Document references** now emit their typed elements from the IR across both
+  serializers: contract (BT-12), purchase order (BT-13), receiving advice
+  (BT-15), despatch advice (BT-16), and preceding invoice (BT-25).
+- India GST: INV-01 preceding-invoice link (`RefDtls.PrecDocDtls`).
+
+### Changed — correctness & trust
+- **CII BT-7 / BT-72 disentanglement.** The tax point date (BT-7) now serializes
+  as per-tax `ram:TaxPointDate` (`udt:DateString`), and the actual delivery date
+  (BT-72) as `ram:OccurrenceDateTime` — previously conflated.
+- **Battle-tested against real reference validators.** The pure-Rust EN 16931
+  validator's `BR-*` / `BR-CO-*` findings match the live KoSIT XRechnung 3.0.2 and
+  phive Peppol BIS 3.0 oracles across 722 corpus fixtures (core parity 1.0).
+  Factur-X output clears the real veraPDF 1.30.1 verifier at PDF/A-3b **and** 3u
+  (30/30). Fuzzing (5 targets) and a Miri check of the C ABI are clean.
+- **Documentation honesty.** All crates and tool directories documented and ~25
+  doc overclaims corrected; the README now states the real signing/timestamping
+  maturity (production-grade BLAKE3 artefact integrity; placeholder software
+  signer and mock TSA, with real crypto/TSA a planned track) and the real binding
+  maturity (working Go/Java/.NET/Python byte-contract packages; Node and
+  WebAssembly are byte-contract stubs).
+
+### Fixed
+- Several audit-surfaced serialization bugs: BG-20/21 (6), BG-27/28, the UBL
+  `cac:OrderReference` 0..1 both-set double-emit, two CII line-settlement preserve
+  bugs, and the `udt:Indicator` parse path.
+- The EN 16931 differential parity harness no longer counts national CIUS rules
+  (e.g. XRechnung `BR-DE-*`) as core EN 16931, which had produced false parity
+  failures on the public dashboard.
+
 ## [0.1.1] — 2026-05-29
 
 First **complete** tagged release. Supersedes `v0.1.0`, whose cross-platform

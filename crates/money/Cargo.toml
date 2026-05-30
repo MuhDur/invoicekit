@@ -17,7 +17,7 @@ name = "invoicekit_money"
 path = "src/lib.rs"
 
 [dependencies]
-invoicekit-ir = { path = "../ir", version = "0.1.0" }
+invoicekit-ir = { path = "../ir", version = "0.2.0" }
 rust_decimal = { version = "1", default-features = false, features = ["serde-with-str", "std"] }
 serde = { version = "1", features = ["derive"] }
 thiserror.workspace = true

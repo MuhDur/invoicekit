@@ -24,8 +24,8 @@ path = "src/lib.rs"
 peppol-test-bed = []
 
 [dependencies]
-invoicekit-transmit-peppol-native-as4 = { path = "../transmit-peppol-native-as4", version = "0.1.0" }
-invoicekit-transmit-peppol-byok = { path = "../transmit-peppol-byok", version = "0.1.0" }
+invoicekit-transmit-peppol-native-as4 = { path = "../transmit-peppol-native-as4", version = "0.2.0" }
+invoicekit-transmit-peppol-byok = { path = "../transmit-peppol-byok", version = "0.2.0" }
 thiserror.workspace = true
 
 [dev-dependencies]
