@@ -11,15 +11,17 @@ use invoicekit_format_cii::{from_xml, to_xml};
 use invoicekit_ir::LossinessLedger;
 
 const EXPECTED_FIXTURES: usize = 50;
-const EXPECTED_PRESERVED_PATHS: [&str; 21] = [
+const EXPECTED_PRESERVED_PATHS: [&str; 23] = [
     "/attachments",
     "/currency",
     "/customer",
+    "/delivery_date",
     "/document_number",
     "/document_type",
     "/due_date",
     "/extensions",
     "/id",
+    "/invoice_period",
     "/issue_date",
     "/lines",
     "/meta",

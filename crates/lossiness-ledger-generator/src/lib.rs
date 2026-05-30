@@ -151,8 +151,9 @@ mod tests {
 
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly, DecimalValue,
-        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentType, Iso4217Code,
-        JurisdictionExtension, LocalizedString, LossinessLedger, MonetaryTotal, Party, PartyTaxId,
+        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentType, InvoicePeriod,
+        Iso4217Code, JurisdictionExtension, LocalizedString, LossinessLedger, MonetaryTotal, Party,
+        PartyTaxId,
         PaymentInstruction, PaymentInstructionKind, PaymentTerms, PostalAddress, SchemaVersion,
         TaxCategorySummary,
     };
@@ -280,6 +281,41 @@ mod tests {
                 ledger.preserved.iter().any(|e| e.path == path),
                 "UBL ledger missing preserved entry for {path}"
             );
+        }
+    }
+
+    /// Regression guard for the comparator coverage of the EN 16931 BG-14
+    /// invoice period and BT-72 delivery date. Both are round-trippable typed
+    /// fields the serializers emit but the parsers keep as preserved raw XML
+    /// (IR field reset to None), so a source carrying them differs from its
+    /// reparse — the ledger MUST surface each on its own typed path (here as
+    /// `lost`, since the value relocates into the preserved-XML extension)
+    /// rather than only generically under `/extensions`. Without the
+    /// comparator entries these paths would be silently absent.
+    #[test]
+    fn invoice_period_and_delivery_date_are_tracked_per_field_in_the_ledger() {
+        let mut source = fixture();
+        source.invoice_period = Some(InvoicePeriod {
+            start_date: Some(DateOnly::new("2026-05-01").unwrap()),
+            end_date: Some(DateOnly::new("2026-05-31").unwrap()),
+        });
+        source.delivery_date = Some(DateOnly::new("2026-05-15").unwrap());
+
+        for format in [TargetFormat::Ubl, TargetFormat::Cii] {
+            let ledger = compute_ledger(&source, format).expect("ledger computes");
+            for path in ["/invoice_period", "/delivery_date"] {
+                let surfaced = ledger.lost.iter().chain(ledger.preserved.iter()).any(|e| e.path == path);
+                assert!(
+                    surfaced,
+                    "{format:?} ledger must surface {path} on its own typed path"
+                );
+                // The round-trip relocates the value into preserved raw XML, so
+                // the typed field does not survive equal — it is reported lost.
+                assert!(
+                    ledger.lost.iter().any(|e| e.path == path),
+                    "{format:?} ledger must report {path} as lost (relocated to preserved XML)"
+                );
+            }
         }
     }
 

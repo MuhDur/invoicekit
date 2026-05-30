@@ -1334,6 +1334,20 @@ fn record_identity_lossiness(
     record_field_lossiness(
         preserved,
         lost,
+        "/invoice_period",
+        source.invoice_period == reparsed.invoice_period,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/delivery_date",
+        source.delivery_date == reparsed.delivery_date,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
         "/document_number",
         source.document_number.as_str() == reparsed.document_number.as_str(),
         adapter,
@@ -1788,10 +1802,13 @@ mod tests {
 
     #[test]
     fn invoice_period_rejects_an_empty_group() {
-        // BG-14, when present, requires at least one of BT-73 / BT-74.
+        // BG-14, when present, requires at least one of BT-73 / BT-74 — pin the
+        // exact variant so the test keeps exercising InvoicePeriod::validate's
+        // at-least-one rule (not some unrelated decode error).
         let mut input = synthetic_document_json();
         input["invoice_period"] = json!({});
-        assert!(CommercialDocument::try_from_value(input).is_err());
+        let err = CommercialDocument::try_from_value(input).unwrap_err();
+        assert!(matches!(err, IrError::MissingRequiredField("invoice_period")));
     }
 
     #[test]

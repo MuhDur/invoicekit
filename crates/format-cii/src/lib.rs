@@ -1703,10 +1703,19 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
     for summary in &document.tax_summary {
         write_tax_summary(&mut xml, summary, document)?;
     }
-    // BG-14: native invoice period at its schema slot (after ApplicableTradeTax).
-    // A parsed document's preserved BillingSpecifiedPeriod is flushed instead by
-    // the SpecifiedTradePaymentTerms preserve replay below; mutually exclusive.
-    write_billing_specified_period(&mut xml, document)?;
+    // BG-14: native invoice period at its schema slot (after ApplicableTradeTax),
+    // UNLESS a preserved BillingSpecifiedPeriod already exists for this container
+    // (a parse-then-enrich document). Preserved fragment wins: it is flushed by
+    // the SpecifiedTradePaymentTerms preserve replay below, so emitting natively
+    // too would produce two BillingSpecifiedPeriod elements (BG-14 is 0..1).
+    let settlement_path =
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement";
+    let billing_period_preserved = cii_preserved_xml_values(document, settlement_path, None)?
+        .iter()
+        .any(|preserved| preserved.element == "BillingSpecifiedPeriod");
+    if !billing_period_preserved {
+        write_billing_specified_period(&mut xml, document)?;
+    }
     write_preserved_xml_before(
         &mut xml,
         document,
@@ -2683,12 +2692,14 @@ fn write_invoice_referenced_documents(
 /// `ram:BillingSpecifiedPeriod` (`ram:SpecifiedPeriodType`, verified against the
 /// vendored CII D16B element catalog) is `lossiness_ledger_preserved` on parse
 /// and never populates [`CommercialDocument::invoice_period`], so a parsed
-/// document replays its preserved fragment (`invoice_period` `None` -> no native
-/// emit) and a fresh IR document emits here only. Emitted textually right after
-/// the `ram:ApplicableTradeTax` loop — its schema slot — so a preserved fragment
-/// for a parsed document is flushed exactly once by the following
-/// `write_preserved_xml_before(.., "SpecifiedTradePaymentTerms")`. No
-/// double-emit: the two cases are mutually exclusive.
+/// document replays its preserved fragment and a fresh IR document emits here.
+/// Emitted textually right after the `ram:ApplicableTradeTax` loop — its schema
+/// slot — so a preserved fragment is flushed by the following
+/// `write_preserved_xml_before(.., "SpecifiedTradePaymentTerms")`. The caller
+/// gates this call on the absence of a preserved `BillingSpecifiedPeriod`
+/// (preserved wins), so even a parse-then-enrich document that carries BOTH a
+/// preserved fragment and a caller-set `invoice_period` emits the element
+/// exactly once (BG-14 is 0..1) — never a malformed duplicate.
 fn write_billing_specified_period(
     xml: &mut String,
     document: &CommercialDocument,
@@ -5098,6 +5109,43 @@ mod tests {
             !serialized.contains("<ram:BillingSpecifiedPeriod>"),
             "a None invoice_period must emit no ram:BillingSpecifiedPeriod:\n{serialized}"
         );
+    }
+
+    /// Gating test: a parse-then-enrich document carrying BOTH a preserved
+    /// `ram:BillingSpecifiedPeriod` AND a caller-set `invoice_period` must emit
+    /// the element EXACTLY ONCE (preserved fragment wins) — never a malformed
+    /// duplicate of the 0..1 BG-14 group.
+    #[test]
+    fn both_native_and_preserved_billing_period_emit_once_preserved_wins() {
+        use invoicekit_ir::InvoicePeriod;
+
+        // Seed a document whose serialized form carries a BillingSpecifiedPeriod,
+        // then parse it: the element becomes preserved raw XML, invoice_period None.
+        let mut seed = fixture(DocumentType::Invoice, 73);
+        seed.invoice_period = Some(InvoicePeriod {
+            start_date: Some(DateOnly::new("2026-05-01").unwrap()),
+            end_date: Some(DateOnly::new("2026-05-31").unwrap()),
+        });
+        let seeded = to_xml(&seed).unwrap();
+        let mut parsed = parse_document(&seeded);
+        assert!(parsed.invoice_period.is_none());
+
+        // A consumer ALSO sets the typed field (the parse-then-enrich edge).
+        parsed.invoice_period = Some(InvoicePeriod {
+            start_date: Some(DateOnly::new("2099-09-09").unwrap()),
+            end_date: None,
+        });
+
+        let out = to_xml(&parsed).unwrap();
+        assert_eq!(
+            out.matches("<ram:BillingSpecifiedPeriod>").count(),
+            1,
+            "exactly one ram:BillingSpecifiedPeriod (preserved wins):\n{out}"
+        );
+        // Preserved fragment wins: the original period survives, not the override.
+        assert!(out.contains("format=\"102\">20260501</udt:DateTimeString>"));
+        assert!(!out.contains("20990909"), "native override must not appear:\n{out}");
+        assert_eq!(canonicalize_xml(&out).unwrap(), out);
     }
 
     #[test]

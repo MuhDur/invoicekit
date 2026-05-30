@@ -1343,8 +1343,13 @@ fn write_document_parties(xml: &mut String, document: &CommercialDocument) -> Re
     write_preserved_top_level(xml, document, "cac:BuyerCustomerParty")?;
     write_preserved_top_level(xml, document, "cac:SellerSupplierParty")?;
     write_preserved_top_level(xml, document, "cac:TaxRepresentativeParty")?;
-    write_preserved_top_level(xml, document, "cac:Delivery")?;
-    write_native_delivery(xml, document);
+    // Preserved fragment wins: emit the native delivery date only when no
+    // preserved cac:Delivery exists, so a parse-then-enrich document does not
+    // emit two cac:Delivery elements.
+    let delivery_preserved = write_preserved_top_level(xml, document, "cac:Delivery")?;
+    if !delivery_preserved {
+        write_native_delivery(xml, document);
+    }
     write_preserved_top_level(xml, document, "cac:DeliveryTerms")?;
     Ok(())
 }
@@ -1409,8 +1414,14 @@ fn write_invoice_preserved_before_supplier(
         "cac:ProjectReference",
         "cac:Signature",
     ] {
-        write_preserved_top_level(xml, document, element)?;
-        write_native_invoice_period(xml, document, element);
+        // Preserved fragment wins: only emit the native invoice period when no
+        // preserved cac:InvoicePeriod exists for this slot, so a parse-then-enrich
+        // document (preserved fragment + a caller-set invoice_period) emits the
+        // element exactly once instead of a malformed duplicate.
+        let preserved = write_preserved_top_level(xml, document, element)?;
+        if !preserved {
+            write_native_invoice_period(xml, document, element);
+        }
         write_native_document_references(xml, document, element);
     }
     Ok(())
@@ -1433,8 +1444,11 @@ fn write_credit_note_preserved_before_supplier(
         "cac:OriginatorDocumentReference",
         "cac:Signature",
     ] {
-        write_preserved_top_level(xml, document, element)?;
-        write_native_invoice_period(xml, document, element);
+        // Preserved fragment wins (see write_invoice_preserved_before_supplier).
+        let preserved = write_preserved_top_level(xml, document, element)?;
+        if !preserved {
+            write_native_invoice_period(xml, document, element);
+        }
         write_native_document_references(xml, document, element);
     }
     Ok(())
@@ -1499,11 +1513,14 @@ fn write_native_document_references(
 /// native IR at the `cac:InvoicePeriod` document slot.
 ///
 /// Bracketed into the document-header preserved-replay loop alongside
-/// [`write_native_document_references`], so it shares the same preserve-vs-native
-/// invariant: the parser preserves any input `cac:InvoicePeriod` as raw XML and
-/// never populates [`CommercialDocument::invoice_period`], so a parsed document
-/// replays the preserved fragment (IR field `None`, no native emit) and a fresh
-/// IR document emits here only. No double-emit.
+/// [`write_native_document_references`]. The parser preserves any input
+/// `cac:InvoicePeriod` as raw XML and never populates
+/// [`CommercialDocument::invoice_period`], so a parsed document replays the
+/// preserved fragment and a fresh IR document emits here. The caller gates this
+/// call on the preserved-write signal (`if !write_preserved_top_level(..)?`), so
+/// even a parse-then-enrich document that carries BOTH a preserved fragment and a
+/// caller-set `invoice_period` emits `cac:InvoicePeriod` exactly once (preserved
+/// wins) — never a malformed duplicate.
 fn write_native_invoice_period(xml: &mut String, document: &CommercialDocument, slot_element: &str) {
     if slot_element != "cac:InvoicePeriod" {
         return;
@@ -1527,7 +1544,9 @@ fn write_native_invoice_period(xml: &mut String, document: &CommercialDocument, 
 /// preserves any input `cac:Delivery` as raw XML and never populates
 /// [`CommercialDocument::delivery_date`], so a parsed document replays the
 /// preserved fragment and a fresh IR document emits a minimal `cac:Delivery`
-/// carrying only the delivery date. No double-emit.
+/// carrying only the delivery date. The caller gates this on the preserved-write
+/// signal (preserved wins), so a parse-then-enrich document emits `cac:Delivery`
+/// exactly once.
 fn write_native_delivery(xml: &mut String, document: &CommercialDocument) {
     if let Some(date) = &document.delivery_date {
         xml.push_str("<cac:Delivery>");
@@ -2953,6 +2972,62 @@ mod tests {
             "expected preserved period/delivery replay to be schema valid, findings: {:?}",
             schema_report.findings
         );
+    }
+
+    /// Gating test: a parse-then-enrich document carrying BOTH a preserved
+    /// `cac:InvoicePeriod` / `cac:Delivery` fragment AND a caller-set
+    /// `invoice_period` / `delivery_date` must still emit each element EXACTLY
+    /// ONCE (the preserved fragment wins) — never a malformed EN 16931 duplicate
+    /// of a 0..1 element.
+    #[test]
+    fn both_native_and_preserved_period_and_delivery_emit_once_preserved_wins() {
+        let base = fixture(DocumentType::Invoice, 54);
+        let invoice_period = format!(
+            r#"<cac:InvoicePeriod xmlns:cac="{UBL_CAC_NAMESPACE_URI}" xmlns:cbc="{UBL_CBC_NAMESPACE_URI}"><cbc:StartDate>2026-01-01</cbc:StartDate></cac:InvoicePeriod>"#
+        );
+        let delivery = format!(
+            r#"<cac:Delivery xmlns:cac="{UBL_CAC_NAMESPACE_URI}" xmlns:cbc="{UBL_CBC_NAMESPACE_URI}"><cbc:ActualDeliveryDate>2026-01-15</cbc:ActualDeliveryDate></cac:Delivery>"#
+        );
+        let seeded = to_xml(&base)
+            .unwrap()
+            .replacen(
+                "<cac:AccountingSupplierParty",
+                &format!("{invoice_period}<cac:AccountingSupplierParty"),
+                1,
+            )
+            .replacen(
+                "</cac:AccountingCustomerParty>",
+                &format!("</cac:AccountingCustomerParty>{delivery}"),
+                1,
+            );
+
+        // Parse: both elements become preserved raw XML, IR fields stay None.
+        let mut parsed = parse_document(&seeded);
+        assert!(parsed.invoice_period.is_none() && parsed.delivery_date.is_none());
+
+        // A consumer ALSO sets the typed fields (the parse-then-enrich edge).
+        parsed.invoice_period = Some(invoicekit_ir::InvoicePeriod {
+            start_date: Some(DateOnly::new("2099-09-09").unwrap()),
+            end_date: None,
+        });
+        parsed.delivery_date = Some(DateOnly::new("2099-09-09").unwrap());
+
+        let out = to_xml(&parsed).unwrap();
+        assert_eq!(
+            out.matches("<cac:InvoicePeriod").count(),
+            1,
+            "exactly one cac:InvoicePeriod (preserved wins):\n{out}"
+        );
+        assert_eq!(
+            out.matches("<cac:Delivery ").count(),
+            1,
+            "exactly one cac:Delivery (preserved wins):\n{out}"
+        );
+        // Preserved fragment wins: the original dates survive, not the override.
+        assert!(out.contains(">2026-01-01</cbc:StartDate>"));
+        assert!(out.contains(">2026-01-15</cbc:ActualDeliveryDate>"));
+        assert!(!out.contains("2099-09-09"), "native override must not appear:\n{out}");
+        assert_eq!(canonicalize_xml(&out).unwrap(), out);
     }
 
     #[test]
