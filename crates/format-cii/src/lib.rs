@@ -2572,30 +2572,57 @@ fn write_line(
         "SpecifiedLineTradeSettlement",
     )?;
     xml.push_str("<ram:SpecifiedLineTradeSettlement>");
+    let line_settlement_path = format!("{line_path}/SpecifiedLineTradeSettlement");
+    // Preserve replay across the line settlement is split into disjoint windows
+    // around the native emits, mirroring the document-level pattern. Known
+    // children are exactly [ApplicableTradeTax(order 5), MonetarySummation(11)],
+    // so a preserved sibling below ApplicableTradeTax (orders 1-4, e.g.
+    // PaymentReference) or between it and the monetary summation (e.g. a line
+    // BillingSpecifiedPeriod, order 6) has no IR home and must be flushed at its
+    // own slot — otherwise the trailing after_all (which only covers >11) drops
+    // it. Phase 0: preserved children below ApplicableTradeTax.
+    write_preserved_xml_before(
+        xml,
+        document,
+        &line_settlement_path,
+        Some(&line.id),
+        "ApplicableTradeTax",
+    )?;
     if let Some(category) = &line.tax_category {
         xml.push_str("<ram:ApplicableTradeTax>");
         write_text_element(xml, "ram:TypeCode", "VAT");
         write_text_element(xml, "ram:CategoryCode", category);
         xml.push_str("</ram:ApplicableTradeTax>");
     }
-    // EN 16931 BG-27/BG-28 line allowances/charges: ram:SpecifiedTradeAllowanceCharge
-    // sits after ram:ApplicableTradeTax and before the line monetary summation in
-    // CII LineTradeSettlementType child order. 0..n; empty when the line carries
-    // none (behavior-preserving).
-    for allowance_charge in &line.allowance_charges {
-        write_cii_allowance_charge(xml, allowance_charge);
-    }
-    // Flush any PRESERVED line-settlement children ordered before the monetary
-    // summation (notably a preserved SpecifiedTradeAllowanceCharge, which is
-    // mid-order and would otherwise be dropped by the trailing after_all). The
-    // window (ApplicableTradeTax, MonetarySummation) is disjoint from the
-    // after_all window (> MonetarySummation), so no double-flush.
+    // Phase 1: preserved children ordered before SpecifiedTradeAllowanceCharge
+    // (notably a line BillingSpecifiedPeriod, order 6) BEFORE the native
+    // allowances, so CII child order holds.
     write_preserved_xml_before(
         xml,
         document,
-        &format!("{line_path}/SpecifiedLineTradeSettlement"),
+        &line_settlement_path,
         Some(&line.id),
-        "SpecifiedTradeSettlementLineMonetarySummation",
+        "SpecifiedTradeAllowanceCharge",
+    )?;
+    // EN 16931 BG-27/BG-28 line allowances/charges (order 7). 0..n; empty when
+    // the line carries none (behavior-preserving).
+    for allowance_charge in &line.allowance_charges {
+        write_cii_allowance_charge(xml, allowance_charge);
+    }
+    // Phase 2: remaining preserved children up to the monetary summation
+    // (a preserved SpecifiedTradeAllowanceCharge + orders 8-10), lower-bounded
+    // STRICTLY ABOVE BillingSpecifiedPeriod so Phase 1's flush is not re-emitted.
+    // Windows {<5}, {6}, {7..10}, {>11} are disjoint (5 and 11 emit natively).
+    write_preserved_xml(
+        xml,
+        document,
+        &line_settlement_path,
+        Some(&line.id),
+        cii_child_order("SpecifiedLineTradeSettlement", "BillingSpecifiedPeriod"),
+        cii_child_order(
+            "SpecifiedLineTradeSettlement",
+            "SpecifiedTradeSettlementLineMonetarySummation",
+        ),
     )?;
     xml.push_str("<ram:SpecifiedTradeSettlementLineMonetarySummation>");
     write_amount_text_element(
@@ -4313,7 +4340,7 @@ mod tests {
 
     use super::{
         crate_name, from_xml, mapping, to_xml, CiiError, CII_QDT_NAMESPACE_URI,
-        CII_RAM_NAMESPACE_URI, CII_RSM_NAMESPACE_URI,
+        CII_RAM_NAMESPACE_URI, CII_RSM_NAMESPACE_URI, CII_UDT_NAMESPACE_URI,
     };
     use invoicekit_canonical::canonicalize_xml;
     use invoicekit_ir::{
@@ -5451,6 +5478,82 @@ mod tests {
         // serialize -> parse -> serialize byte-stable (parser preserves; line
         // allowance_charges resets to empty, replayed via preserved raw XML).
         assert_eq!(to_xml(&parse_document(&serialized)).unwrap(), serialized);
+    }
+
+    /// Gating test for the line-settlement two-phase preserve fix: a line that
+    /// carries BOTH a preserved `BillingSpecifiedPeriod` (order 6) AND a native
+    /// allowance (order 7) must emit the period BEFORE the allowance, and round
+    /// trip losslessly. The naive single post-allowance flush emitted the period
+    /// AFTER the allowance (out of order) and lost it on re-parse.
+    #[test]
+    fn line_preserved_billing_period_precedes_native_allowance() {
+        use invoicekit_ir::DocumentAllowanceCharge;
+
+        let base = fixture(DocumentType::Invoice, 78);
+        let period = format!(
+            r#"<ram:BillingSpecifiedPeriod xmlns:ram="{CII_RAM_NAMESPACE_URI}" xmlns:udt="{CII_UDT_NAMESPACE_URI}"><ram:StartDateTime><udt:DateTimeString format="102">20260101</udt:DateTimeString></ram:StartDateTime></ram:BillingSpecifiedPeriod>"#
+        );
+        // Inject the preserved period after the line's ApplicableTradeTax (the
+        // first one — the line's, which has no ram:CalculatedAmount).
+        let seeded = to_xml(&base).unwrap().replacen(
+            "</ram:ApplicableTradeTax>",
+            &format!("</ram:ApplicableTradeTax>{period}"),
+            1,
+        );
+        let mut parsed = parse_document(&seeded);
+        assert!(parsed.lines[0].allowance_charges.is_empty());
+
+        // A consumer adds a native line allowance.
+        parsed.lines[0].allowance_charges = vec![DocumentAllowanceCharge {
+            is_charge: false,
+            amount: DecimalValue::new(Decimal::new(250, 2)),
+            base_amount: None,
+            percentage: None,
+            tax_category: None,
+            tax_rate: None,
+            reason: Some("Line discount".to_owned()),
+            reason_code: None,
+        }];
+
+        let out = to_xml(&parsed).unwrap();
+        let period_pos = out.find("<ram:BillingSpecifiedPeriod>").unwrap();
+        let allowance_pos = out.find("<ram:SpecifiedTradeAllowanceCharge>").unwrap();
+        assert!(
+            period_pos < allowance_pos,
+            "line BillingSpecifiedPeriod (order 6) must precede the native allowance (order 7):\n{out}"
+        );
+        assert_eq!(out.matches("<ram:BillingSpecifiedPeriod>").count(), 1);
+        assert_eq!(canonicalize_xml(&out).unwrap(), out);
+        assert_eq!(to_xml(&parse_document(&out)).unwrap(), out);
+    }
+
+    /// Gating test for the sub-ApplicableTradeTax preserve gap: a preserved line
+    /// `SpecifiedLineTradeSettlement` child ordered BELOW `ApplicableTradeTax` (here
+    /// ram:PaymentReference, order 1) must survive the round trip — the trailing
+    /// `after_all` alone (>11) would silently drop it.
+    #[test]
+    fn line_preserved_sub_tax_sibling_survives() {
+        let base = fixture(DocumentType::Invoice, 79);
+        let payment_ref = format!(
+            r#"<ram:PaymentReference xmlns:ram="{CII_RAM_NAMESPACE_URI}">LINE-PR-1</ram:PaymentReference>"#
+        );
+        // Inject as the first child of the line settlement.
+        let seeded = to_xml(&base).unwrap().replacen(
+            "<ram:SpecifiedLineTradeSettlement>",
+            &format!("<ram:SpecifiedLineTradeSettlement>{payment_ref}"),
+            1,
+        );
+        let out = to_xml(&parse_document(&seeded)).unwrap();
+        assert!(
+            out.contains(">LINE-PR-1</ram:PaymentReference>"),
+            "preserved sub-ApplicableTradeTax line sibling must survive:\n{out}"
+        );
+        // It precedes the line ApplicableTradeTax, and the round trip is lossless.
+        let pr = out.find(">LINE-PR-1</ram:PaymentReference>").unwrap();
+        let tax = out.find("<ram:ApplicableTradeTax>").unwrap();
+        assert!(pr < tax, "PaymentReference (order 1) must precede ApplicableTradeTax:\n{out}");
+        assert_eq!(canonicalize_xml(&out).unwrap(), out);
+        assert_eq!(to_xml(&parse_document(&out)).unwrap(), out);
     }
 
     #[test]
