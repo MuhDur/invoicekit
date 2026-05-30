@@ -5318,11 +5318,12 @@ mod tests {
     }
 
     /// Gating test for the CII child-order fix: a parse-then-enrich document
-    /// carrying BOTH a preserved `BillingSpecifiedPeriod` (BG-14, order 25) AND
-    /// caller-set native allowances (BG-20/21, order 26) must emit the period
-    /// BEFORE the allowances. The native allowances are emitted before the
-    /// preserve replay, so without the explicit reordering the preserved period
-    /// would (incorrectly) follow them — schema-out-of-order yet
+    /// carrying BOTH a preserved `BillingSpecifiedPeriod` (BG-14) AND caller-set
+    /// native allowances (BG-20/21) must emit the period BEFORE the allowances
+    /// (`BillingSpecifiedPeriod` precedes `SpecifiedTradeAllowanceCharge` in CII
+    /// child order). The native allowances are emitted before the preserve
+    /// replay, so without the explicit reordering the preserved period would
+    /// (incorrectly) follow them — schema-out-of-order yet
     /// canonically-idempotent.
     #[test]
     fn preserved_billing_period_precedes_native_allowance_charges() {
