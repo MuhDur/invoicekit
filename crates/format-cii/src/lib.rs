@@ -1619,13 +1619,36 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
         "BuyerOrderReferencedDocument",
     )?;
     let emitted_buyer_order = write_buyer_order_referenced_document(&mut xml, document);
+    // Preserved window between BT-13 BuyerOrderReferencedDocument (order 14) and
+    // BT-12 ContractReferencedDocument (order 17): replays preserved siblings with
+    // no IR home (Quotation 15, OrderResponse 16). The lower bound suppresses a
+    // same-order preserved BuyerOrderReferencedDocument when the native BT-13 was
+    // emitted, exactly as write_preserved_xml_after_child would (native wins).
+    let buyer_order_lower =
+        cii_child_order("ApplicableHeaderTradeAgreement", "BuyerOrderReferencedDocument")
+            .map(|order| if emitted_buyer_order { order } else { order.saturating_sub(1) });
+    write_preserved_xml(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement",
+        None,
+        buyer_order_lower,
+        cii_child_order("ApplicableHeaderTradeAgreement", "ContractReferencedDocument"),
+    )?;
+    // BT-12 contract reference (0..1; native wins over a same-order preserved one).
+    let emitted_contract = write_single_referenced_document(
+        &mut xml,
+        document,
+        "ram:ContractReferencedDocument",
+        ReferenceKindClass::Contract,
+    );
     write_preserved_xml_after_child(
         &mut xml,
         document,
         "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement",
         None,
-        "BuyerOrderReferencedDocument",
-        emitted_buyer_order,
+        "ContractReferencedDocument",
+        emitted_contract,
     )?;
     xml.push_str("</ram:ApplicableHeaderTradeAgreement>");
 
@@ -1674,7 +1697,52 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
         write_date_time(&mut xml, date)?;
         xml.push_str("</ram:OccurrenceDateTime></ram:ActualDeliverySupplyChainEvent>");
     }
-    write_preserved_xml_after_all(&mut xml, document, delivery_path, None)?;
+    // BT-16 despatch advice (order 10) and BT-15 receiving advice (order 11) follow
+    // the BT-72 delivery event (order 7, a known child). Disjoint preserved windows
+    // fence each native 0..1 emit; native wins over a same-order preserved fragment.
+    // Window (delivery event, despatch): preserved ActualReceiptSupplyChainEvent (8)
+    // and AdditionalReferencedDocument (9), lower-fenced at the last known child.
+    write_preserved_xml(
+        &mut xml,
+        document,
+        delivery_path,
+        None,
+        max_known_child_order(container_name(delivery_path)),
+        cii_child_order("ApplicableHeaderTradeDelivery", "DespatchAdviceReferencedDocument"),
+    )?;
+    let emitted_despatch = write_single_referenced_document(
+        &mut xml,
+        document,
+        "ram:DespatchAdviceReferencedDocument",
+        ReferenceKindClass::DespatchAdvice,
+    );
+    // Window (despatch, receiving): suppresses a same-order preserved despatch when
+    // the native one was emitted, otherwise replays it.
+    let despatch_lower =
+        cii_child_order("ApplicableHeaderTradeDelivery", "DespatchAdviceReferencedDocument")
+            .map(|order| if emitted_despatch { order } else { order.saturating_sub(1) });
+    write_preserved_xml(
+        &mut xml,
+        document,
+        delivery_path,
+        None,
+        despatch_lower,
+        cii_child_order("ApplicableHeaderTradeDelivery", "ReceivingAdviceReferencedDocument"),
+    )?;
+    let emitted_receiving = write_single_referenced_document(
+        &mut xml,
+        document,
+        "ram:ReceivingAdviceReferencedDocument",
+        ReferenceKindClass::ReceivingAdvice,
+    );
+    write_preserved_xml_after_child(
+        &mut xml,
+        document,
+        delivery_path,
+        None,
+        "ReceivingAdviceReferencedDocument",
+        emitted_receiving,
+    )?;
     xml.push_str("</ram:ApplicableHeaderTradeDelivery>");
 
     write_preserved_xml_before(
@@ -2772,6 +2840,38 @@ fn write_buyer_order_referenced_document(xml: &mut String, document: &Commercial
     xml.push_str("<ram:BuyerOrderReferencedDocument>");
     write_text_element(xml, "ram:IssuerAssignedID", &reference.id);
     xml.push_str("</ram:BuyerOrderReferencedDocument>");
+    true
+}
+
+/// Emit the first `references` entry of `kind` as a `0..1` CII referenced-document
+/// element carrying only `ram:IssuerAssignedID`, returning `true` when one was
+/// emitted (so the caller can suppress a same-order preserved fragment and avoid
+/// double-filling the slot). Shared by BT-12 contract
+/// (`ram:ContractReferencedDocument`, under `ApplicableHeaderTradeAgreement`),
+/// BT-16 despatch advice (`ram:DespatchAdviceReferencedDocument`), and BT-15
+/// receiving advice (`ram:ReceivingAdviceReferencedDocument`, both under
+/// `ApplicableHeaderTradeDelivery`). These EN 16931 terms carry an identifier
+/// only — no issue date — so no `ram:FormattedIssueDateTime` is emitted.
+fn write_single_referenced_document(
+    xml: &mut String,
+    document: &CommercialDocument,
+    element: &str,
+    kind: ReferenceKindClass,
+) -> bool {
+    let Some(reference) = document
+        .references
+        .iter()
+        .find(|reference| reference.kind_class() == kind)
+    else {
+        return false;
+    };
+    xml.push('<');
+    xml.push_str(element);
+    xml.push('>');
+    write_text_element(xml, "ram:IssuerAssignedID", &reference.id);
+    xml.push_str("</");
+    xml.push_str(element);
+    xml.push('>');
     true
 }
 
@@ -6023,11 +6123,13 @@ mod tests {
         assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
     }
 
-    /// Other/Contract-class references are NOT emitted in this task: they neither
-    /// produce `BuyerOrderReferencedDocument` nor `InvoiceReferencedDocument` and
-    /// the document stays byte-stable/canonical.
+    /// BT-12 contract and BT-16 despatch-advice references now emit their typed CII
+    /// referenced-document elements from a fresh IR document, while a reference whose
+    /// kind maps to `ReferenceKindClass::Other` has no typed element and is skipped.
+    /// Output stays byte-stable/canonical and carries no Order/PrecedingInvoice
+    /// elements (this document has neither).
     #[test]
-    fn non_order_non_preceding_references_are_skipped() {
+    fn unrecognized_reference_kind_skipped_recognized_kinds_emit() {
         let mut document = fixture(DocumentType::Invoice, 63);
         document.references = vec![
             DocumentReference {
@@ -6047,12 +6149,104 @@ mod tests {
             },
         ];
         let serialized = to_xml(&document).unwrap();
+        // No Order- or PrecedingInvoice-class references in this document.
         assert!(!serialized.contains("BuyerOrderReferencedDocument"));
         assert!(!serialized.contains("InvoiceReferencedDocument"));
-        assert!(!serialized.contains("C-1"));
-        assert!(!serialized.contains("X-1"));
-        assert!(!serialized.contains("D-1"));
+        // BT-12 contract + BT-16 despatch advice emit their typed elements.
+        assert!(
+            serialized.contains("<ram:ContractReferencedDocument>")
+                && serialized.contains(">C-1</ram:IssuerAssignedID>"),
+            "expected ram:ContractReferencedDocument carrying C-1:\n{serialized}"
+        );
+        assert!(
+            serialized.contains("<ram:DespatchAdviceReferencedDocument>")
+                && serialized.contains(">D-1</ram:IssuerAssignedID>"),
+            "expected ram:DespatchAdviceReferencedDocument carrying D-1:\n{serialized}"
+        );
+        // The unrecognized kind (ReferenceKindClass::Other) has no typed element.
+        assert!(!serialized.contains("X-1"), "Other-kind reference must be skipped:\n{serialized}");
         assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
+    }
+
+    /// A fresh IR document carrying BT-12 contract, BT-16 despatch-advice, and
+    /// BT-15 receiving-advice references emits each typed CII element in the right
+    /// container and schema order: `ram:ContractReferencedDocument` inside
+    /// `ram:ApplicableHeaderTradeAgreement`, and `ram:DespatchAdviceReferencedDocument`
+    /// before `ram:ReceivingAdviceReferencedDocument` inside
+    /// `ram:ApplicableHeaderTradeDelivery` after the BT-72 delivery event. Output is
+    /// canonical/idempotent AND round-trips byte-stably (parse preserves each as raw
+    /// XML, re-serialize replays exactly once — the no-double-emit guard for the new
+    /// preserve windows).
+    #[test]
+    fn fresh_ir_emits_contract_despatch_receiving_referenced_documents() {
+        let mut document = fixture(DocumentType::Invoice, 64);
+        document.delivery_date = Some(DateOnly::new("2026-03-10").unwrap());
+        document.references = vec![
+            DocumentReference {
+                kind: "contract".to_owned(),
+                id: "CONTRACT-1".to_owned(),
+                issue_date: None,
+            },
+            DocumentReference {
+                kind: "despatch-advice".to_owned(),
+                id: "DESP-1".to_owned(),
+                issue_date: None,
+            },
+            DocumentReference {
+                kind: "receipt-advice".to_owned(),
+                id: "RECV-1".to_owned(),
+                issue_date: None,
+            },
+        ];
+
+        let out = to_xml(&document).unwrap();
+
+        // Each typed element appears exactly once, carrying its id.
+        for (element, id) in [
+            ("ram:ContractReferencedDocument", "CONTRACT-1"),
+            ("ram:DespatchAdviceReferencedDocument", "DESP-1"),
+            ("ram:ReceivingAdviceReferencedDocument", "RECV-1"),
+        ] {
+            assert_eq!(
+                out.matches(&format!("<{element}>")).count(),
+                1,
+                "expected exactly one <{element}>:\n{out}"
+            );
+            assert!(
+                out.contains(&format!("<{element}><ram:IssuerAssignedID>{id}</ram:IssuerAssignedID></{element}>")),
+                "expected <{element}> carrying {id}:\n{out}"
+            );
+        }
+
+        // Contract sits inside ApplicableHeaderTradeAgreement. (Section-root elements
+        // carry an inline xmlns:ram from the canonicalizer, so match the open-tag
+        // prefix rather than a `>`-terminated literal.)
+        let agreement_open = out.find("<ram:ApplicableHeaderTradeAgreement").unwrap();
+        let agreement_close = out.find("</ram:ApplicableHeaderTradeAgreement>").unwrap();
+        let contract_pos = out.find("<ram:ContractReferencedDocument>").unwrap();
+        assert!(
+            agreement_open < contract_pos && contract_pos < agreement_close,
+            "ContractReferencedDocument must sit inside ApplicableHeaderTradeAgreement:\n{out}"
+        );
+
+        // Despatch + Receiving sit inside ApplicableHeaderTradeDelivery, after the
+        // delivery event, with Despatch before Receiving.
+        let delivery_open = out.find("<ram:ApplicableHeaderTradeDelivery").unwrap();
+        let delivery_close = out.find("</ram:ApplicableHeaderTradeDelivery>").unwrap();
+        let event_pos = out.find("<ram:ActualDeliverySupplyChainEvent>").unwrap();
+        let despatch_pos = out.find("<ram:DespatchAdviceReferencedDocument>").unwrap();
+        let receiving_pos = out.find("<ram:ReceivingAdviceReferencedDocument>").unwrap();
+        assert!(
+            delivery_open < event_pos
+                && event_pos < despatch_pos
+                && despatch_pos < receiving_pos
+                && receiving_pos < delivery_close,
+            "delivery references must follow the event in order (Despatch < Receiving) inside the delivery container:\n{out}"
+        );
+
+        // Canonical idempotence + byte-stable round-trip (no double-emit on replay).
+        assert_eq!(canonicalize_xml(&out).unwrap(), out);
+        assert_eq!(to_xml(&parse_document(&out)).unwrap(), out);
     }
 
     /// GATING TEST (2): NO DOUBLE-EMIT through parse. The parser never populates
