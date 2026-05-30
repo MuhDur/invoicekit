@@ -305,18 +305,31 @@ mod tests {
 
         for format in [TargetFormat::Ubl, TargetFormat::Cii] {
             let ledger = compute_ledger(&source, format).expect("ledger computes");
-            for path in ["/invoice_period", "/delivery_date"] {
-                let surfaced = ledger.lost.iter().chain(ledger.preserved.iter()).any(|e| e.path == path);
-                assert!(
-                    surfaced,
-                    "{format:?} ledger must surface {path} on its own typed path"
-                );
-                // The round-trip relocates the value into preserved raw XML, so
-                // the typed field does not survive equal — it is reported lost.
-                assert!(
-                    ledger.lost.iter().any(|e| e.path == path),
-                    "{format:?} ledger must report {path} as lost (relocated to preserved XML)"
-                );
+            // /invoice_period is preserve-only (raw XML) in BOTH formats, so it is
+            // surfaced as lost in both.
+            assert!(
+                ledger.lost.iter().any(|e| e.path == "/invoice_period"),
+                "{format:?} ledger must report /invoice_period as lost (relocated to preserved XML)"
+            );
+            // /delivery_date: UBL keeps cac:Delivery as preserved raw XML (lost),
+            // but CII parse-round-trips it via ram:OccurrenceDateTime (BT-72), so
+            // it is PRESERVED there — the comparator surfaces it either way.
+            let surfaced = ledger
+                .lost
+                .iter()
+                .chain(ledger.preserved.iter())
+                .any(|e| e.path == "/delivery_date");
+            assert!(surfaced, "{format:?} ledger must surface /delivery_date");
+            match format {
+                TargetFormat::Ubl => assert!(
+                    ledger.lost.iter().any(|e| e.path == "/delivery_date"),
+                    "UBL ledger must report /delivery_date as lost (preserved raw XML)"
+                ),
+                TargetFormat::Cii => assert!(
+                    ledger.preserved.iter().any(|e| e.path == "/delivery_date"),
+                    "CII ledger must report /delivery_date as PRESERVED (round-trips via OccurrenceDateTime)"
+                ),
+                TargetFormat::FacturX(_) => {}
             }
         }
     }

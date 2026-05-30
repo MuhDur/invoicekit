@@ -15,8 +15,8 @@ use std::str::FromStr as _;
 use invoicekit_canonical::{canonicalize_xml, XmlCanonicalizeError};
 use invoicekit_ir::{
     Attachment, CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly,
-    DecimalValue, DocumentAllowanceCharge, DocumentId, DocumentLine, DocumentMeta, DocumentNumber,
-    DocumentReference,
+    DecimalValue, DeliverToParty, DocumentAllowanceCharge, DocumentId, DocumentLine, DocumentMeta,
+    DocumentNumber, DocumentReference,
     DocumentType, IrError, Iso4217Code, ItemClassification, JurisdictionExtension, LocalizedString,
     LossinessLedger, MonetaryTotal, MoneyAmount, Party, PartyTaxId, PaymentInstruction,
     PaymentInstructionKind, PaymentTerms, PostalAddress, Quantity, ReferenceKindClass,
@@ -434,6 +434,7 @@ struct ParseState {
     document_number: Option<String>,
     issue_date: Option<String>,
     tax_point_date: Option<String>,
+    delivery_date: Option<String>,
     due_date: Option<String>,
     currency: Option<String>,
     metadata_tenant_id: Option<String>,
@@ -801,9 +802,12 @@ impl ParseState {
             self.document_type = Some(document_type(value)?);
         } else if path_ends(stack, &["IssueDateTime", "DateTimeString"]) {
             self.issue_date = Some(cii_date_to_iso("ExchangedDocument/IssueDateTime", value)?);
-        } else if path_ends(stack, &["TaxPointDate", "DateTimeString"]) {
+        } else if path_ends(stack, &["TaxPointDate", "DateString"]) {
+            // EN 16931 BT-7: ram:ApplicableTradeTax/ram:TaxPointDate is a
+            // udt:DateType (content udt:DateString format="102"), NOT a
+            // DateTimeType. Replicated per tax category; last (identical) wins.
             self.tax_point_date = Some(cii_date_to_iso(
-                "ApplicableHeaderTradeSettlement/TaxPointDate",
+                "ApplicableTradeTax/TaxPointDate",
                 value,
             )?);
         } else if path_ends(
@@ -814,7 +818,10 @@ impl ParseState {
                 "DateTimeString",
             ],
         ) {
-            self.tax_point_date = Some(cii_date_to_iso(
+            // EN 16931 BT-72: ram:ActualDeliverySupplyChainEvent/ram:OccurrenceDateTime
+            // is the ACTUAL DELIVERY DATE — distinct from the tax point date (BT-7),
+            // which is ram:ApplicableTradeTax/ram:TaxPointDate (handled above).
+            self.delivery_date = Some(cii_date_to_iso(
                 "ApplicableHeaderTradeDelivery/ActualDeliverySupplyChainEvent",
                 value,
             )?);
@@ -997,7 +1004,7 @@ impl ParseState {
             tax_point_date: self.tax_point_date.map(DateOnly::new).transpose()?,
             due_date,
             invoice_period: None,
-            delivery_date: None,
+            delivery_date: self.delivery_date.map(DateOnly::new).transpose()?,
             document_number: DocumentNumber::new(document_number)?,
             currency: Iso4217Code::new(currency)?,
             supplier: self.supplier.build("SellerTradeParty")?,
@@ -1630,17 +1637,44 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
         "ApplicableHeaderTradeDelivery",
     )?;
     xml.push_str("<ram:ApplicableHeaderTradeDelivery>");
-    if let Some(date) = &document.tax_point_date {
+    let delivery_path =
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeDelivery";
+    // Disjoint preserve windows around the native ShipToTradeParty (order 2) and
+    // ActualDeliverySupplyChainEvent (order 7), mirroring the settlement/line
+    // pattern. Known children = [ActualDeliverySupplyChainEvent] only, so any
+    // preserved sibling (RelatedSupplyChainConsignment 1, a preserved
+    // ShipToTradeParty 2, Ultimate/ShipFrom/Despatch/PickUp 3-6) has no IR home
+    // and must be flushed at its own slot. Phase 0: preserved children before
+    // ShipToTradeParty.
+    write_preserved_xml_before(&mut xml, document, delivery_path, None, "ShipToTradeParty")?;
+    // BG-13/BG-15 deliver-to as ram:ShipToTradeParty (0..1; preserved wins).
+    let ship_to_preserved = cii_preserved_xml_values(document, delivery_path, None)?
+        .iter()
+        .any(|preserved| preserved.element == "ShipToTradeParty");
+    if !ship_to_preserved {
+        if let Some(deliver_to) = &document.deliver_to {
+            write_ship_to_trade_party(&mut xml, deliver_to, document)?;
+        }
+    }
+    // Phase 1: preserved children between ShipToTradeParty and the delivery event
+    // (a preserved ShipToTradeParty + orders 3-6), lower-bounded strictly above
+    // RelatedSupplyChainConsignment so Phase 0's flush is not re-emitted.
+    write_preserved_xml(
+        &mut xml,
+        document,
+        delivery_path,
+        None,
+        cii_child_order("ApplicableHeaderTradeDelivery", "RelatedSupplyChainConsignment"),
+        cii_child_order("ApplicableHeaderTradeDelivery", "ActualDeliverySupplyChainEvent"),
+    )?;
+    // EN 16931 BT-72 actual delivery date (NOT the tax point date — BT-7 now
+    // lives in ram:ApplicableTradeTax/ram:TaxPointDate).
+    if let Some(date) = &document.delivery_date {
         xml.push_str("<ram:ActualDeliverySupplyChainEvent><ram:OccurrenceDateTime>");
         write_date_time(&mut xml, date)?;
         xml.push_str("</ram:OccurrenceDateTime></ram:ActualDeliverySupplyChainEvent>");
     }
-    write_preserved_xml_after_all(
-        &mut xml,
-        document,
-        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeDelivery",
-        None,
-    )?;
+    write_preserved_xml_after_all(&mut xml, document, delivery_path, None)?;
     xml.push_str("</ram:ApplicableHeaderTradeDelivery>");
 
     write_preserved_xml_before(
@@ -2427,6 +2461,22 @@ fn write_tax_summary(
     if let Some(exemption_reason_code) = &summary.exemption_reason_code {
         write_text_element(xml, "ram:ExemptionReasonCode", exemption_reason_code);
     }
+    // EN 16931 BT-7 (VAT point date): the document-level tax point date is
+    // carried per ApplicableTradeTax as ram:TaxPointDate (udt:DateType /
+    // DateString format="102"), after ram:ExemptionReasonCode and before
+    // ram:RateApplicablePercent. Replicated across categories (identical value);
+    // the parser reads it back (last wins). Emitted only when present, so
+    // documents without a tax point date serialize byte-identically. NOTE: a
+    // document with a tax point date but an EMPTY tax_summary has no
+    // ApplicableTradeTax to carry BT-7 — that degenerate (non-EN-16931, BR-CO-18)
+    // case loses it on round-trip, which the lossiness ledger reports at
+    // /tax_point_date rather than silently dropping.
+    write_preserved_xml_before(xml, document, container_path, None, "TaxPointDate")?;
+    if let Some(tax_point_date) = &document.tax_point_date {
+        xml.push_str("<ram:TaxPointDate>");
+        write_date(xml, tax_point_date)?;
+        xml.push_str("</ram:TaxPointDate>");
+    }
     write_preserved_xml_before(xml, document, container_path, None, "RateApplicablePercent")?;
     if let Some(rate) = &summary.tax_rate {
         write_text_element(xml, "ram:RateApplicablePercent", &rate.inner().to_string());
@@ -2885,6 +2935,47 @@ fn write_date_time(xml: &mut String, date: &DateOnly) -> Result<(), CiiError> {
     Ok(())
 }
 
+/// Emit a `udt:DateType` value (`udt:DateString format="102"`), used by
+/// `ram:TaxPointDate` (BT-7) — distinct from the `udt:DateTimeString` used by
+/// the `DateTimeType` date elements (issue/delivery/due dates).
+fn write_date(xml: &mut String, date: &DateOnly) -> Result<(), CiiError> {
+    xml.push_str(r#"<udt:DateString format="102">"#);
+    write_xml_text(&iso_date_to_cii(date)?, xml);
+    xml.push_str("</udt:DateString>");
+    Ok(())
+}
+
+/// Emit EN 16931 BG-13/BG-15 deliver-to information as a CII `ram:ShipToTradeParty`
+/// (`TradePartyType` child order: ID, Name, `PostalTradeAddress`) under
+/// `ram:ApplicableHeaderTradeDelivery`. `ram:ShipToTradeParty` is
+/// `lossiness_ledger_preserved` on parse (the parser keeps any input as raw XML
+/// and does not populate `deliver_to`), so a parsed document replays the
+/// preserved fragment and a fresh IR document emits here; the caller gates this
+/// on the absence of a preserved one (preserved wins).
+fn write_ship_to_trade_party(
+    xml: &mut String,
+    deliver_to: &DeliverToParty,
+    document: &CommercialDocument,
+) -> Result<(), CiiError> {
+    xml.push_str("<ram:ShipToTradeParty>");
+    if let Some(location_id) = &deliver_to.location_id {
+        write_text_element(xml, "ram:ID", location_id);
+    }
+    if let Some(name) = &deliver_to.name {
+        write_text_element(xml, "ram:Name", name);
+    }
+    if let Some(address) = &deliver_to.address {
+        write_address(
+            xml,
+            address,
+            document,
+            "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeDelivery/ShipToTradeParty/PostalTradeAddress",
+        )?;
+    }
+    xml.push_str("</ram:ShipToTradeParty>");
+    Ok(())
+}
+
 fn write_text_element(xml: &mut String, name: &str, value: &str) {
     xml.push('<');
     xml.push_str(name);
@@ -3173,6 +3264,11 @@ fn expected_cii_namespace(parent_stack: &[String], name: &str) -> &'static str {
         // `ram:SpecifiedTradeAllowanceCharge`). Without this the parser rejects
         // its own valid allowance/charge output.
         CII_UDT_NAMESPACE_URI
+    } else if name == "DateString" {
+        // `udt:DateString` is the content of a `udt:DateType` element such as
+        // `ram:TaxPointDate` (BT-7, per tax category) — distinct from
+        // `udt:DateTimeString` used by the DateTimeType date elements.
+        CII_UDT_NAMESPACE_URI
     } else {
         CII_RAM_NAMESPACE_URI
     }
@@ -3329,6 +3425,7 @@ fn known_cii_children(parent: &str) -> Option<&'static [&'static str]> {
             "BasisAmount",
             "CategoryCode",
             "ExemptionReasonCode",
+            "TaxPointDate",
             "RateApplicablePercent",
         ]),
         "SpecifiedTradeSettlementHeaderMonetarySummation" => Some(&[
@@ -5374,6 +5471,89 @@ mod tests {
             !serialized.contains("<ram:SpecifiedTradeAllowanceCharge>"),
             "an empty allowance_charges must emit no ram:SpecifiedTradeAllowanceCharge:\n{serialized}"
         );
+    }
+
+    /// Gating test for the BT-7/BT-72 disentanglement: the tax point date (BT-7)
+    /// emits as per-tax ram:TaxPointDate (udt:DateString format="102"), and the
+    /// actual delivery date (BT-72) emits as ram:ActualDeliverySupplyChainEvent/
+    /// ram:OccurrenceDateTime (udt:DateTimeString) — DISTINCT slots that both
+    /// round-trip into their own IR fields (no longer conflated).
+    #[test]
+    fn tax_point_date_and_delivery_date_are_disentangled() {
+        let mut document = fixture(DocumentType::Invoice, 80);
+        document.tax_point_date = Some(DateOnly::new("2026-05-10").unwrap());
+        document.delivery_date = Some(DateOnly::new("2026-05-12").unwrap());
+
+        let serialized = to_xml(&document).unwrap();
+        assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
+
+        // BT-7 -> per-tax ram:TaxPointDate / udt:DateString.
+        assert!(serialized.contains("<ram:TaxPointDate>"));
+        assert!(
+            serialized.contains(r#"format="102">20260510</udt:DateString>"#),
+            "BT-7 must serialize as a udt:DateString in ram:TaxPointDate:\n{serialized}"
+        );
+        // BT-72 -> ram:OccurrenceDateTime / udt:DateTimeString (NOT the tax point).
+        assert!(serialized.contains("<ram:OccurrenceDateTime>"));
+        assert!(
+            serialized.contains(r#"format="102">20260512</udt:DateTimeString>"#),
+            "BT-72 must serialize as a udt:DateTimeString in OccurrenceDateTime:\n{serialized}"
+        );
+
+        // Both round-trip into their OWN IR fields (disentangled), byte-stably.
+        let parsed = parse_document(&serialized);
+        assert_eq!(
+            parsed.tax_point_date.as_ref().map(DateOnly::as_str),
+            Some("2026-05-10")
+        );
+        assert_eq!(
+            parsed.delivery_date.as_ref().map(DateOnly::as_str),
+            Some("2026-05-12")
+        );
+        assert_eq!(to_xml(&parsed).unwrap(), serialized);
+    }
+
+    /// Gating test: BG-13/BG-15 deliver-to emits as ram:ShipToTradeParty
+    /// (ID/Name/PostalTradeAddress) in the delivery block, schema-order before
+    /// the delivery event; preserve-on-parse (the parser keeps it as raw XML and
+    /// does not populate `deliver_to`), so serialize->parse->serialize is stable.
+    #[test]
+    fn deliver_to_emits_ship_to_trade_party() {
+        use invoicekit_ir::DeliverToParty;
+
+        let mut document = fixture(DocumentType::Invoice, 81);
+        document.delivery_date = Some(DateOnly::new("2026-05-12").unwrap());
+        document.deliver_to = Some(DeliverToParty {
+            name: Some("Warehouse 7".to_owned()),
+            location_id: Some("LOC-7".to_owned()),
+            address: Some(PostalAddress {
+                lines: vec!["Dock 3".to_owned()],
+                city: "Hamburg".to_owned(),
+                subdivision: None,
+                postal_code: "20095".to_owned(),
+                country: CountryCode::new("DE").unwrap(),
+            }),
+        });
+
+        let serialized = to_xml(&document).unwrap();
+        assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
+
+        assert_eq!(serialized.matches("<ram:ShipToTradeParty>").count(), 1);
+        assert!(serialized.contains("<ram:ID>LOC-7</ram:ID>"));
+        assert!(serialized.contains("<ram:Name>Warehouse 7</ram:Name>"));
+        assert!(serialized.contains(">Hamburg</ram:CityName>"));
+
+        // TradePartyType + delivery child order: ShipToTradeParty (order 2)
+        // precedes ActualDeliverySupplyChainEvent (order 7).
+        let ship = serialized.find("<ram:ShipToTradeParty>").unwrap();
+        let event = serialized.find("<ram:ActualDeliverySupplyChainEvent>").unwrap();
+        assert!(ship < event, "ShipToTradeParty must precede the delivery event:\n{serialized}");
+
+        // Preserve-on-parse: the parser keeps ShipToTradeParty as raw XML and does
+        // not populate deliver_to; the round trip replays it byte-stably.
+        let parsed = parse_document(&serialized);
+        assert!(parsed.deliver_to.is_none());
+        assert_eq!(to_xml(&parsed).unwrap(), serialized);
     }
 
     /// Gating test for the CII child-order fix: a parse-then-enrich document
