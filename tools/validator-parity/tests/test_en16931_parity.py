@@ -25,6 +25,34 @@ def test_core_rule_ids_keeps_only_en16931_business_rules() -> None:
     assert en16931_parity.core_rule_ids(findings) == {"BR-01", "BR-CO-15"}
 
 
+def test_core_rule_ids_excludes_national_cius_rules() -> None:
+    # National CIUS rules (XRechnung BR-DE-*, NLCIUS BR-NL-*) match the shape
+    # regex but are NOT core EN 16931; the pure-core Rust probe never emits them,
+    # so they must be excluded from the parity comparison. Core calculation,
+    # code-list, and VAT-category rules (incl. BR-AE, which collides with the UAE
+    # ISO code) must be kept.
+    findings = [
+        {"rule_id": "BR-27"},
+        {"rule_id": "BR-CO-11"},
+        {"rule_id": "BR-CL-17"},
+        {"rule_id": "BR-AE-05"},
+        {"rule_id": "BR-IC-08"},
+        {"rule_id": "BR-DE-15"},
+        {"rule_id": "BR-DE-7"},
+        {"rule_id": "BR-NL-01"},
+    ]
+
+    assert en16931_parity.core_rule_ids(findings) == {
+        "BR-27",
+        "BR-CO-11",
+        "BR-CL-17",
+        "BR-AE-05",
+        "BR-IC-08",
+    }
+    assert en16931_parity.is_en16931_core_rule("BR-AE-05") is True
+    assert en16931_parity.is_en16931_core_rule("BR-DE-15") is False
+
+
 def test_oracle_unavailable_detects_configuration_failure() -> None:
     finding = {"rule_id": "KOSIT-CONFIGURATION-MISSING", "message": "set scenarios.xml"}
 

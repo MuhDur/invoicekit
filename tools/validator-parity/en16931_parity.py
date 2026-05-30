@@ -27,6 +27,15 @@ import urllib.request
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_FIXTURE_GLOB = "conformance-corpus/synthetic/ubl-2-1/*/fixture.xml"
 BR_RULE_RE = re.compile(r"^BR(?:-[A-Z]{2,})?-\d+[A-Z]?$")
+# EN 16931 *core* rule-class infixes: calculation (CO), code-list (CL), and the
+# multi-letter VAT-category classes. A `BR-<INFIX>-<n>` identifier is core only
+# when its infix is one of these. Any other multi-letter infix is a national
+# CIUS extension keyed by ISO country code (e.g. `BR-DE-*` from XRechnung,
+# `BR-NL-*` from NLCIUS) — those are NOT core EN 16931 and must not be compared
+# against the pure-core Rust probe, which never emits them. An allowlist is used
+# deliberately (not a country denylist) because `AE` is both a core VAT category
+# (reverse charge) and the ISO code for the UAE; the allowlist keeps BR-AE core.
+EN16931_CORE_RULE_INFIXES = frozenset({"CO", "CL", "AE", "IC", "IG", "IP", "AF", "AG"})
 UBL_NS = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
 CBC_NS = "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
 CAC_NS = "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
@@ -421,11 +430,28 @@ def rpc_validate(sidecar: dict[str, str], xml: str, request_id: str, timeout: fl
         raise SystemExit(f"{sidecar['backend']} request failed at {sidecar['url']}: {error}") from error
 
 
+def is_en16931_core_rule(rule_id: str) -> bool:
+    """True for EN 16931 *core* business rules, False for national CIUS rules.
+
+    A national CIUS rule such as ``BR-DE-15`` matches the shape regex but is an
+    XRechnung/NLCIUS extension, not core EN 16931; the core Rust probe never
+    emits it, so comparing it would falsely fail the parity check.
+    """
+    if not BR_RULE_RE.fullmatch(rule_id):
+        return False
+    parts = rule_id.split("-")
+    # "BR-<INFIX>-<n>" carries a rule-class infix; only the EN 16931 core infixes
+    # count as core. "BR-<n>" (no infix) is always core.
+    if len(parts) == 3 and parts[1].isalpha():
+        return parts[1] in EN16931_CORE_RULE_INFIXES
+    return True
+
+
 def core_rule_ids(findings: list[dict]) -> set[str]:
     return {
         rule_id
         for finding in findings
-        if isinstance((rule_id := finding.get("rule_id")), str) and BR_RULE_RE.fullmatch(rule_id)
+        if isinstance((rule_id := finding.get("rule_id")), str) and is_en16931_core_rule(rule_id)
     }
 
 
