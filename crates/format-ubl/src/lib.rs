@@ -18,8 +18,8 @@ use invoicekit_ir::{
     DocumentType, IrError, Iso4217Code, ItemClassification, JurisdictionExtension, LocalizedString,
     LossinessEntry,
     LossinessLedger, MonetaryTotal, MoneyAmount, Party, PartyTaxId, PaymentInstruction,
-    PaymentInstructionKind, PaymentTerms, PostalAddress, Quantity, SchemaVersion,
-    TaxCategorySummary,
+    PaymentInstructionKind, PaymentTerms, PostalAddress, Quantity, ReferenceKindClass,
+    SchemaVersion, TaxCategorySummary,
 };
 use quick_xml::events::{attributes::AttrError, BytesDecl, BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
@@ -1375,6 +1375,7 @@ fn write_invoice_preserved_before_supplier(
         "cac:Signature",
     ] {
         write_preserved_top_level(xml, document, element)?;
+        write_native_document_references(xml, document, element);
     }
     Ok(())
 }
@@ -1397,8 +1398,64 @@ fn write_credit_note_preserved_before_supplier(
         "cac:Signature",
     ] {
         write_preserved_top_level(xml, document, element)?;
+        write_native_document_references(xml, document, element);
     }
     Ok(())
+}
+
+/// Emit EN 16931 document references from the native IR
+/// [`CommercialDocument::references`] at the correct UBL schema slot.
+///
+/// This is bracketed into the document-header preserved-replay loop: it runs
+/// immediately after [`write_preserved_top_level`] for the slot's element, so a
+/// document that mixes a preserved sibling (raw round-trip XML) with native IR
+/// references still serializes in UBL Invoice/CreditNote child order.
+///
+/// The parser preserves `cac:OrderReference` / `cac:BillingReference` as raw XML
+/// and never populates `references`, so a parsed document carries them only as
+/// preserved fragments (replayed above) with an empty `references` vec — no
+/// double-emit. A fresh IR document carries them only in `references` with no
+/// preserved fragment. Routing is by [`DocumentReference::kind_class`]; only
+/// `Order` (BT-13) and `PrecedingInvoice` (BT-25) are emitted here. Other
+/// classes (`Contract`, `DespatchAdvice`, `ReceivingAdvice`, `Other`) are left
+/// for a later task.
+fn write_native_document_references(
+    xml: &mut String,
+    document: &CommercialDocument,
+    slot_element: &str,
+) {
+    match slot_element {
+        // BT-13: UBL allows exactly one cac:OrderReference, so emit only the
+        // first Order-class reference and ignore any subsequent ones.
+        "cac:OrderReference" => {
+            if let Some(reference) = document
+                .references
+                .iter()
+                .find(|reference| reference.kind_class() == ReferenceKindClass::Order)
+            {
+                xml.push_str("<cac:OrderReference>");
+                write_text_element(xml, "cbc:ID", &reference.id);
+                xml.push_str("</cac:OrderReference>");
+            }
+        }
+        // BT-25: cac:BillingReference is repeatable, one per preceding-invoice
+        // reference, preserving the IR order.
+        "cac:BillingReference" => {
+            for reference in document
+                .references
+                .iter()
+                .filter(|reference| reference.kind_class() == ReferenceKindClass::PrecedingInvoice)
+            {
+                xml.push_str("<cac:BillingReference><cac:InvoiceDocumentReference>");
+                write_text_element(xml, "cbc:ID", &reference.id);
+                if let Some(issue_date) = &reference.issue_date {
+                    write_text_element(xml, "cbc:IssueDate", issue_date.as_str());
+                }
+                xml.push_str("</cac:InvoiceDocumentReference></cac:BillingReference>");
+            }
+        }
+        _ => {}
+    }
 }
 
 fn write_preserved_exchange_rates(
@@ -2258,8 +2315,8 @@ mod tests {
     use invoicekit_canonical::canonicalize_xml;
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly, DecimalValue,
-        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentType, Iso4217Code,
-        JurisdictionExtension, LocalizedString, MonetaryTotal, Party, PartyTaxId,
+        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference, DocumentType,
+        Iso4217Code, JurisdictionExtension, LocalizedString, MonetaryTotal, Party, PartyTaxId,
         PaymentInstruction, PaymentInstructionKind, PaymentTerms, PostalAddress, SchemaVersion,
         TaxCategorySummary,
     };
@@ -2330,6 +2387,162 @@ mod tests {
         let second = to_xml(&document).unwrap();
         assert_eq!(first, second);
         assert_eq!(canonicalize_xml(&first).unwrap(), first);
+    }
+
+    /// Gating test (1): a fresh `CommercialDocument` carrying one Order-class
+    /// reference (BT-13) and one PrecedingInvoice-class reference (BT-25) emits
+    /// both typed elements at the correct UBL slot — `cac:OrderReference` and
+    /// `cac:BillingReference/cac:InvoiceDocumentReference` after the cbc header
+    /// fields and before `cac:AccountingSupplierParty` — and the serializer
+    /// output is canonical/idempotent (schema order holds under a second
+    /// canonicalization pass).
+    #[test]
+    fn fresh_document_emits_order_and_preceding_invoice_references() {
+        let mut document = fixture(DocumentType::Invoice, 50);
+        document.references = vec![
+            DocumentReference {
+                kind: "purchase-order".to_owned(),
+                id: "PO-9001".to_owned(),
+                issue_date: None,
+            },
+            DocumentReference {
+                kind: "preceding-invoice".to_owned(),
+                id: "INV-ORIG-7".to_owned(),
+                issue_date: Some(DateOnly::new("2026-04-30").unwrap()),
+            },
+        ];
+
+        let xml = to_xml(&document).unwrap();
+
+        // The canonicalizer pins inline xmlns:cac / xmlns:cbc declarations on the
+        // first use of each prefix, so assert against the canonical shape: match
+        // the open-tag prefix (with a trailing space or '>') rather than a bare
+        // element, and the id text via cbc:ID local content.
+        // BT-13: exactly one cac:OrderReference carrying the Order-class id.
+        assert!(
+            xml.contains(">PO-9001</cbc:ID></cac:OrderReference>"),
+            "expected a single cac:OrderReference for the Order-class reference:\n{xml}"
+        );
+        assert_eq!(
+            xml.matches("<cac:OrderReference").count(),
+            1,
+            "UBL allows exactly one cac:OrderReference:\n{xml}"
+        );
+
+        // BT-25: one cac:BillingReference/cac:InvoiceDocumentReference with id
+        // and issue date for the PrecedingInvoice-class reference.
+        let billing_open = xml
+            .find("<cac:BillingReference")
+            .expect("BillingReference present");
+        assert!(
+            xml[billing_open..].contains("<cac:InvoiceDocumentReference>"),
+            "cac:BillingReference must wrap cac:InvoiceDocumentReference:\n{xml}"
+        );
+        assert!(
+            xml.contains(">INV-ORIG-7</cbc:ID>"),
+            "expected the preceding-invoice id in cbc:ID:\n{xml}"
+        );
+        assert!(
+            xml.contains(">2026-04-30</cbc:IssueDate>"),
+            "expected the preceding-invoice issue date in cbc:IssueDate:\n{xml}"
+        );
+
+        // Placement: both references sit after the cbc header fields and before
+        // cac:AccountingSupplierParty, in UBL Invoice child order
+        // (OrderReference precedes BillingReference).
+        let order_pos = xml.find("<cac:OrderReference").expect("OrderReference present");
+        let billing_pos = xml
+            .find("<cac:BillingReference")
+            .expect("BillingReference present");
+        let supplier_pos = xml
+            .find("<cac:AccountingSupplierParty")
+            .expect("supplier party present");
+        let currency_pos = xml
+            .find("<cbc:DocumentCurrencyCode")
+            .expect("currency present");
+        assert!(
+            currency_pos < order_pos
+                && order_pos < billing_pos
+                && billing_pos < supplier_pos,
+            "references must sit after cbc header fields and before the supplier party, OrderReference before BillingReference:\n{xml}"
+        );
+
+        // Canonical idempotence: to_xml already canonicalizes, so a second pass
+        // must be a no-op — proves the freshly-emitted references are in schema
+        // order.
+        assert_eq!(canonicalize_xml(&xml).unwrap(), xml);
+
+        let schema_report = validate_oasis_ubl_2_1_schema(&xml).unwrap();
+        assert!(
+            schema_report.is_valid(),
+            "expected reference-bearing output to be schema valid, findings: {:?}",
+            schema_report.findings
+        );
+    }
+
+    /// Gating test (2): a document that carried `cac:OrderReference` and
+    /// `cac:BillingReference` through parse keeps them as preserved raw XML with
+    /// an empty `references` vec, so re-emitting replays each element EXACTLY
+    /// ONCE — no double-emit, no regression. This is the no-double-emit proof:
+    /// the parser does NOT populate `references` from these elements, so the
+    /// native-emit path stays inert for parsed documents while the preserved
+    /// replay carries the original fragments.
+    #[test]
+    fn parsed_references_replay_exactly_once_no_double_emit() {
+        let document = fixture(DocumentType::Invoice, 51);
+
+        // Inject a preserved cac:OrderReference and cac:BillingReference into the
+        // serialized fixture, then parse it back. The parser must capture both as
+        // raw preserved XML.
+        let order_reference = format!(
+            r#"<cac:OrderReference xmlns:cac="{UBL_CAC_NAMESPACE_URI}" xmlns:cbc="{UBL_CBC_NAMESPACE_URI}"><cbc:ID>ORDER-51</cbc:ID></cac:OrderReference>"#
+        );
+        let billing_reference = format!(
+            r#"<cac:BillingReference xmlns:cac="{UBL_CAC_NAMESPACE_URI}" xmlns:cbc="{UBL_CBC_NAMESPACE_URI}"><cac:InvoiceDocumentReference><cbc:ID>PRIOR-51</cbc:ID><cbc:IssueDate>2026-03-15</cbc:IssueDate></cac:InvoiceDocumentReference></cac:BillingReference>"#
+        );
+        let xml = to_xml(&document).unwrap().replacen(
+            "<cac:AccountingSupplierParty",
+            &format!("{order_reference}{billing_reference}<cac:AccountingSupplierParty"),
+            1,
+        );
+
+        let parsed = parse_document(&xml);
+
+        // The parser does NOT populate references from cac:OrderReference /
+        // cac:BillingReference; they live only as preserved raw XML.
+        assert!(
+            parsed.references.is_empty(),
+            "parser must not populate IR references from preserved reference elements"
+        );
+
+        // Re-serialize. Each element must appear EXACTLY ONCE (preserved replay,
+        // not native + preserved double-emit). The canonicalizer pins an inline
+        // xmlns:cac on the open tag, so match the open-tag prefix.
+        let serialized = to_xml(&parsed).unwrap();
+        assert_eq!(
+            serialized.matches("<cac:OrderReference").count(),
+            1,
+            "preserved cac:OrderReference must re-emit exactly once:\n{serialized}"
+        );
+        assert_eq!(
+            serialized.matches("<cac:BillingReference").count(),
+            1,
+            "preserved cac:BillingReference must re-emit exactly once:\n{serialized}"
+        );
+        assert!(serialized.contains(">ORDER-51</cbc:ID>"));
+        assert!(serialized.contains(">PRIOR-51</cbc:ID>"));
+
+        // Full round-trip stability: parse(serialize(parsed)) == parsed, and the
+        // output is canonical.
+        assert_eq!(parse_document(&serialized), parsed);
+        assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
+
+        let schema_report = validate_oasis_ubl_2_1_schema(&serialized).unwrap();
+        assert!(
+            schema_report.is_valid(),
+            "expected preserved-reference replay to be schema valid, findings: {:?}",
+            schema_report.findings
+        );
     }
 
     #[test]
