@@ -96,7 +96,13 @@ fn supplier() -> Party {
 }
 
 fn customer() -> Party {
-    nigerian_party("Beta Services Plc", "NG98765432109", "Abuja", "FC", "900001")
+    nigerian_party(
+        "Beta Services Plc",
+        "NG98765432109",
+        "Abuja",
+        "FC",
+        "900001",
+    )
 }
 
 fn submit_request(payload: Vec<u8>) -> FirsSubmitRequest {
@@ -123,10 +129,16 @@ fn bundle_and_verify(doc: &CommercialDocument, ubl_bytes: &[u8], envelope: &Firs
         serde_json::to_vec(envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
-    assert!(report.ok, "FIRS evidence bundle must verify (exit 0 == report.ok)");
+    assert!(
+        report.ok,
+        "FIRS evidence bundle must verify (exit 0 == report.ok)"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -214,7 +226,10 @@ fn nigeria_credit_note_serializes_and_clears_firs() {
 
     // A corrective document is a UBL CreditNote, not an Invoice. These markers
     // are what distinguish the FIRS corrective shape from a fresh invoice.
-    assert!(ubl.contains("<CreditNote"), "corrective doc must be a UBL CreditNote root");
+    assert!(
+        ubl.contains("<CreditNote"),
+        "corrective doc must be a UBL CreditNote root"
+    );
     assert!(
         ubl.contains("cac:CreditNoteLine"),
         "CreditNote must use cac:CreditNoteLine, not cac:InvoiceLine"
@@ -232,7 +247,10 @@ fn nigeria_credit_note_serializes_and_clears_firs() {
         !ubl.contains("<cbc:DueDate"),
         "UBL forbids a top-level DueDate on a CreditNote"
     );
-    assert!(ubl.contains(">NGN</cbc:DocumentCurrencyCode>"), "currency must be NGN");
+    assert!(
+        ubl.contains(">NGN</cbc:DocumentCurrencyCode>"),
+        "currency must be NGN"
+    );
 
     let provider = MockFirsProvider::with_fixed_recorded_at(RECORDED_AT);
     let envelope = provider
@@ -240,7 +258,10 @@ fn nigeria_credit_note_serializes_and_clears_firs() {
         .unwrap();
     // FIRS clears the correction and assigns it its own IRN.
     assert_eq!(envelope.status, FirsStatus::Accepted);
-    assert!(envelope.irn.starts_with("NG-"), "corrective doc gets a Nigeria-tagged IRN");
+    assert!(
+        envelope.irn.starts_with("NG-"),
+        "corrective doc gets a Nigeria-tagged IRN"
+    );
 
     bundle_and_verify(&doc, ubl.as_bytes(), &envelope);
 }
@@ -256,7 +277,10 @@ fn nigeria_credit_note_lifecycle_is_byte_deterministic() {
 
     let canon_a = canonicalize_value(&doc.to_value().unwrap()).unwrap();
     let canon_b = canonicalize_value(&doc.to_value().unwrap()).unwrap();
-    assert_eq!(canon_a, canon_b, "credit-note canonical IR must be deterministic");
+    assert_eq!(
+        canon_a, canon_b,
+        "credit-note canonical IR must be deterministic"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -544,10 +568,7 @@ struct RejectingFirsProvider {
 }
 
 impl FirsProvider for RejectingFirsProvider {
-    fn submit_invoice(
-        &self,
-        request: &FirsSubmitRequest,
-    ) -> Result<FirsSubmitEnvelope, FirsError> {
+    fn submit_invoice(&self, request: &FirsSubmitRequest) -> Result<FirsSubmitEnvelope, FirsError> {
         // Run the same pre-wire shape validators the real adapter runs: a
         // malformed TIN or empty payload is still an `Err`, never a verdict.
         validate_tin(&request.issuer_tin)?;
@@ -607,7 +628,10 @@ fn nigeria_rejected_receipt_round_trips_through_serde() {
     };
     let json = serde_json::to_string(&envelope).unwrap();
     // Status serializes kebab-case per the crate's serde contract.
-    assert!(json.contains("\"status\":\"rejected\""), "status must be kebab-case `rejected`");
+    assert!(
+        json.contains("\"status\":\"rejected\""),
+        "status must be kebab-case `rejected`"
+    );
     let parsed: FirsSubmitEnvelope = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed, envelope);
 }
@@ -627,7 +651,10 @@ fn nigeria_invalid_tins_are_refused_before_the_wire() {
 
     // Well-formed FIRS TINs (with and without the hyphen) clear validation.
     for good in ["123456789012", "12345678-9012"] {
-        assert!(validate_tin(good).is_ok(), "{good:?} is a valid FIRS TIN shape");
+        assert!(
+            validate_tin(good).is_ok(),
+            "{good:?} is a valid FIRS TIN shape"
+        );
     }
 
     // Malformed TINs FIRS would never mint — each must be refused.

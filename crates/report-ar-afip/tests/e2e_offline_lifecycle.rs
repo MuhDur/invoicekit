@@ -170,7 +170,9 @@ fn run_lifecycle() -> (Vec<u8>, AfipCaeEnvelope) {
     // 3. request a CAE from the offline mock, feeding it the serialized bytes
     //    as the canonical request payload.
     let provider = MockAfipProvider::with_fixed_authorized_at(FIXED_AUTHORIZED_AT);
-    let envelope = provider.request_cae(&cae_request(ubl_bytes.clone())).unwrap();
+    let envelope = provider
+        .request_cae(&cae_request(ubl_bytes.clone()))
+        .unwrap();
 
     // 4. evidence bundle: canonical IR JSON + national-family UBL + AFIP receipt.
     let canonical = canonicalize_value(&doc.to_value().unwrap())
@@ -184,7 +186,10 @@ fn run_lifecycle() -> (Vec<u8>, AfipCaeEnvelope) {
         serde_json::to_vec(&envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, envelope)
 }
@@ -330,7 +335,10 @@ fn bundle_for(doc: &CommercialDocument, ubl_bytes: &[u8], envelope: &AfipCaeEnve
         serde_json::to_vec(envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     pack(&bundle).unwrap()
 }
 
@@ -388,7 +396,10 @@ fn argentina_refuses_invalid_cuit_punto_venta_and_payload() {
     // ...empty payload is refused before the wire.
     let empty = provider.request_cae(&cae_request(Vec::new()));
     assert!(
-        matches!(empty, Err(invoicekit_report_ar_afip::AfipError::BadPayload(_))),
+        matches!(
+            empty,
+            Err(invoicekit_report_ar_afip::AfipError::BadPayload(_))
+        ),
         "empty payload must be refused as BadPayload, got {empty:?}"
     );
 
@@ -469,8 +480,7 @@ fn argentina_nota_de_credito_a_corrective_document() {
     // (The canonicalizer inlines the cbc namespace decl as an attribute, so we
     // match the element by its open-tag prefix + the closing tag.)
     assert!(
-        ubl.contains("<cbc:CreditNoteTypeCode")
-            && ubl.contains(">381</cbc:CreditNoteTypeCode>"),
+        ubl.contains("<cbc:CreditNoteTypeCode") && ubl.contains(">381</cbc:CreditNoteTypeCode>"),
         "Nota de Crédito must serialize as UBL CreditNoteTypeCode 381"
     );
     assert!(
@@ -548,11 +558,21 @@ fn argentina_multiline_factura_a_21pct() {
         "Factura A projects to UBL InvoiceTypeCode 380"
     );
     // All three line descriptions survive into the national-family artifact.
-    for needle in ["Licencia software anual", "Horas de soporte", "Capacitacion in-company"] {
-        assert!(ubl.contains(needle), "multi-line UBL missing line {needle:?}");
+    for needle in [
+        "Licencia software anual",
+        "Horas de soporte",
+        "Capacitacion in-company",
+    ] {
+        assert!(
+            ubl.contains(needle),
+            "multi-line UBL missing line {needle:?}"
+        );
     }
     // The 63.00 IVA total and 363.00 payable balance the three lines.
-    assert!(ubl.contains("363.00"), "gross payable 363.00 must appear in UBL");
+    assert!(
+        ubl.contains("363.00"),
+        "gross payable 363.00 must appear in UBL"
+    );
 
     let ubl_bytes = ubl.into_bytes();
     let provider = MockAfipProvider::with_fixed_authorized_at(FIXED_AUTHORIZED_AT);
@@ -591,7 +611,13 @@ fn argentina_factura_e_export_wsfex_zero_rated() {
         currency: "USD", // export billed in foreign currency
         due_date: Some("2026-02-28"),
         customer: foreign_party("Globex Inc", "San Francisco", "US"),
-        lines: vec![line("1", "Software development services (export)", 1, 50000, 50000)],
+        lines: vec![line(
+            "1",
+            "Software development services (export)",
+            1,
+            50000,
+            50000,
+        )],
         // Zero-rated export: taxable base present, zero IVA at 0% aliquot.
         tax_summary: vec![TaxCategorySummary {
             category_code: "Z".to_owned(), // zero-rated
@@ -622,8 +648,16 @@ fn argentina_factura_e_export_wsfex_zero_rated() {
         "00002",
         ubl_bytes.clone(),
     );
-    assert_eq!(req.service, AfipService::Wsfex, "exports route through WSFEX");
-    assert_eq!(req.letter, AfipLetter::E, "export invoices are letter class E");
+    assert_eq!(
+        req.service,
+        AfipService::Wsfex,
+        "exports route through WSFEX"
+    );
+    assert_eq!(
+        req.letter,
+        AfipLetter::E,
+        "export invoices are letter class E"
+    );
 
     let provider = MockAfipProvider::with_fixed_authorized_at(FIXED_AUTHORIZED_AT);
     let env = provider.request_cae(&req).unwrap();
@@ -729,13 +763,12 @@ fn argentina_rechazado_is_a_status_not_an_error_and_still_bundles() {
         cae_expiry_yyyymmdd: String::new(),
         status: AfipStatus::Rechazado,
         authorized_at: FIXED_AUTHORIZED_AT.to_owned(),
-        observaciones: Some("10016: El comprobante ya fue autorizado (CbteNro duplicado)".to_owned()),
+        observaciones: Some(
+            "10016: El comprobante ya fue autorizado (CbteNro duplicado)".to_owned(),
+        ),
     };
     assert_eq!(rejected.status, AfipStatus::Rechazado);
-    assert!(
-        rejected.cae.is_empty(),
-        "a Rechazado verdict grants no CAE"
-    );
+    assert!(rejected.cae.is_empty(), "a Rechazado verdict grants no CAE");
     assert!(
         rejected.observaciones.is_some(),
         "AFIP rejection carries an observación"
@@ -743,7 +776,10 @@ fn argentina_rechazado_is_a_status_not_an_error_and_still_bundles() {
 
     // Rejection persists in the audit trail and the bundle still verifies.
     let ikb = bundle_for(&doc, &ubl_bytes, &rejected);
-    assert_bundle_verifies(&ikb, "rejection-path evidence bundle must still verify (exit 0)");
+    assert_bundle_verifies(
+        &ikb,
+        "rejection-path evidence bundle must still verify (exit 0)",
+    );
 
     // The receipt round-trips through serde with its rejection intact.
     let raw = serde_json::to_vec(&rejected).unwrap();
@@ -783,7 +819,10 @@ fn argentina_aprobado_con_observaciones_grants_cae_with_warning() {
     );
 
     let ikb = bundle_for(&doc, &ubl_bytes, &warned);
-    assert_bundle_verifies(&ikb, "approved-with-observations evidence bundle must verify");
+    assert_bundle_verifies(
+        &ikb,
+        "approved-with-observations evidence bundle must verify",
+    );
 }
 
 /// Scenario: invalid-identifier refusals grounded in the real CUIT structure.
@@ -808,7 +847,13 @@ fn argentina_cuit_and_punto_venta_shape_refusals() {
     assert!(validate_cuit("20172543597").is_ok());
 
     // Too short / too long / non-digit are all refused with the typed error.
-    for bad in ["2017254359", "201725435970", "2017254359X", "20-17254359-7", ""] {
+    for bad in [
+        "2017254359",
+        "201725435970",
+        "2017254359X",
+        "20-17254359-7",
+        "",
+    ] {
         assert!(
             matches!(validate_cuit(bad), Err(AfipError::BadCuit(_))),
             "malformed CUIT {bad:?} must be refused as BadCuit"
@@ -929,7 +974,10 @@ fn argentina_credit_note_and_export_paths_are_byte_deterministic() {
             ubl_bytes.clone(),
         ))
         .unwrap();
-    assert_eq!(env1, env2, "deterministic mock yields identical CAE envelope");
+    assert_eq!(
+        env1, env2,
+        "deterministic mock yields identical CAE envelope"
+    );
 
     let ikb1 = bundle_for(&exp, &ubl_bytes, &env1);
     let ikb2 = bundle_for(&exp, &ubl_bytes, &env2);

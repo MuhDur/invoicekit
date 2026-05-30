@@ -129,11 +129,21 @@ pub fn to_fattura_pa_xml(
     close(&mut out, 3, "IdTrasmittente");
     el(&mut out, 3, "ProgressivoInvio", &context.progressivo_invio);
     el(&mut out, 3, "FormatoTrasmissione", "FPR12");
-    el(&mut out, 3, "CodiceDestinatario", &context.codice_destinatario);
+    el(
+        &mut out,
+        3,
+        "CodiceDestinatario",
+        &context.codice_destinatario,
+    );
     close(&mut out, 2, "DatiTrasmissione");
 
     write_party(&mut out, "CedentePrestatore", &document.supplier, true)?;
-    write_party(&mut out, "CessionarioCommittente", &document.customer, false)?;
+    write_party(
+        &mut out,
+        "CessionarioCommittente",
+        &document.customer,
+        false,
+    )?;
     close(&mut out, 1, "FatturaElettronicaHeader");
 
     // --- FatturaElettronicaBody ---
@@ -182,7 +192,12 @@ pub fn to_fattura_pa_xml(
         if let Some(unit) = &line.unit_code {
             el(&mut out, 4, "UnitaMisura", unit);
         }
-        el(&mut out, 4, "PrezzoUnitario", &fmt_amount(line.unit_price.inner()));
+        el(
+            &mut out,
+            4,
+            "PrezzoUnitario",
+            &fmt_amount(line.unit_price.inner()),
+        );
         el(
             &mut out,
             4,
@@ -205,7 +220,12 @@ pub fn to_fattura_pa_xml(
             "ImponibileImporto",
             &fmt_amount(summary.taxable_amount.inner()),
         );
-        el(&mut out, 4, "Imposta", &fmt_amount(summary.tax_amount.inner()));
+        el(
+            &mut out,
+            4,
+            "Imposta",
+            &fmt_amount(summary.tax_amount.inner()),
+        );
         // `RiferimentoNormativo` (FatturaPA v1.2 element 2.2.2.8) is the free-text
         // legal/normative reference for an exempt or reverse-charge band. It is
         // the last child of `DatiRiepilogo` in XSD order, after `Imposta`
@@ -283,7 +303,9 @@ fn party_fiscal_id(party: &Party) -> Option<(String, String)> {
 fn strip_country_prefix(value: &str, country: &str) -> String {
     let bytes = value.as_bytes();
     if bytes.len() > 2
-        && value.get(0..2).is_some_and(|p| p.eq_ignore_ascii_case(country))
+        && value
+            .get(0..2)
+            .is_some_and(|p| p.eq_ignore_ascii_case(country))
         && bytes[..2].iter().all(u8::is_ascii_alphabetic)
     {
         value[2..].to_owned()
@@ -623,9 +645,9 @@ mod tests {
     use super::*;
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, CountryCode, DateOnly, DecimalValue,
-        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference,
-        ItemClassification, Iso4217Code, MonetaryTotal, Party, PartyTaxId, PostalAddress,
-        SchemaVersion, TaxCategorySummary,
+        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference, Iso4217Code,
+        ItemClassification, MonetaryTotal, Party, PartyTaxId, PostalAddress, SchemaVersion,
+        TaxCategorySummary,
     };
     use invoicekit_signer::SoftwareSigner;
 

@@ -19,9 +19,8 @@
 use invoicekit_ir::{
     CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly, DecimalValue,
     DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentType, IrError, Iso4217Code,
-    ItemClassification,
-    LocalizedString, MonetaryTotal, Party, PartyTaxId, PaymentInstruction, PaymentInstructionKind,
-    PaymentTerms, PostalAddress, SchemaVersion, TaxCategorySummary,
+    ItemClassification, LocalizedString, MonetaryTotal, Party, PartyTaxId, PaymentInstruction,
+    PaymentInstructionKind, PaymentTerms, PostalAddress, SchemaVersion, TaxCategorySummary,
 };
 use proptest::prelude::*;
 use rust_decimal::Decimal;
@@ -130,7 +129,11 @@ fn build_document(config: &DocConfig) -> CommercialDocument {
             // both scheme ids and a Some/None scheme_version across lines.
             classifications: vec![ItemClassification {
                 code: format!("{:04}", 1000 + i),
-                scheme_id: if tax == "S" { "SAC".to_owned() } else { "HSN".to_owned() },
+                scheme_id: if tax == "S" {
+                    "SAC".to_owned()
+                } else {
+                    "HSN".to_owned()
+                },
                 scheme_version: if i % 2 == 0 {
                     Some("2017".to_owned())
                 } else {

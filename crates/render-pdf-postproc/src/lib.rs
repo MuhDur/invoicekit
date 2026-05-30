@@ -1052,8 +1052,16 @@ mod tests {
             .unwrap()
             .as_dict()
             .unwrap();
-        let names_ref = patched_catalog.get(b"Names").unwrap().as_reference().unwrap();
-        let names = patched_doc.get_object(names_ref).unwrap().as_dict().unwrap();
+        let names_ref = patched_catalog
+            .get(b"Names")
+            .unwrap()
+            .as_reference()
+            .unwrap();
+        let names = patched_doc
+            .get_object(names_ref)
+            .unwrap()
+            .as_dict()
+            .unwrap();
         let embedded_files = names.get(b"EmbeddedFiles").unwrap().as_dict().unwrap();
         let entries = embedded_files.get(b"Names").unwrap().as_array().unwrap();
 

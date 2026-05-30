@@ -177,7 +177,11 @@ fn bundle_and_pack(
         serde_json::to_vec(envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    pack(&EvidenceBundle { manifest, artefacts }).unwrap()
+    pack(&EvidenceBundle {
+        manifest,
+        artefacts,
+    })
+    .unwrap()
 }
 
 /// Steps 1-4: build -> serialize (UBL) -> submit to SRI mock -> evidence bundle.
@@ -353,12 +357,12 @@ fn build_clave_acceso(
 /// `ISSUER_RUC`, serie `001-001`, secuencial `000000123`.
 fn factura_clave() -> String {
     build_clave_acceso(
-        "26052026",    // fecha de emisión: 26 May 2026
-        "01",          // tipo de comprobante: 01 Factura
-        ISSUER_RUC,    // 13-digit RUC
-        "001001",      // serie: estab 001 + punto emisión 001
-        "000000123",   // secuencial
-        "12345678",    // código numérico
+        "26052026",  // fecha de emisión: 26 May 2026
+        "01",        // tipo de comprobante: 01 Factura
+        ISSUER_RUC,  // 13-digit RUC
+        "001001",    // serie: estab 001 + punto emisión 001
+        "000000123", // secuencial
+        "12345678",  // código numérico
     )
 }
 
@@ -366,8 +370,8 @@ fn factura_clave() -> String {
 /// corrective credit note as its own comprobante with its own Clave de Acceso.
 fn nota_credito_clave() -> String {
     build_clave_acceso(
-        "27052026",  // issued the day after the factura it corrects
-        "04",        // tipo de comprobante: 04 Nota de Crédito
+        "27052026", // issued the day after the factura it corrects
+        "04",       // tipo de comprobante: 04 Nota de Crédito
         ISSUER_RUC,
         "001001",
         "000000045",
@@ -559,7 +563,11 @@ fn ecuador_clave_acceso_has_faithful_sri_structure() {
     validate_clave_acceso(&clave).expect("structurally-built clave must pass shape validation");
 
     // The RUC lives at offset 10..23 (after fecha[8] + tipo[2]).
-    assert_eq!(&clave[10..23], ISSUER_RUC, "embedded RUC segment must match issuer");
+    assert_eq!(
+        &clave[10..23],
+        ISSUER_RUC,
+        "embedded RUC segment must match issuer"
+    );
     // ambiente segment (offset 23) is certificación = "1".
     assert_eq!(&clave[23..24], AMBIENTE_CERTIFICACION);
     // tipo de comprobante segment (offset 8..10) is "01" Factura.
@@ -586,9 +594,14 @@ fn ecuador_clave_acceso_has_faithful_sri_structure() {
 #[test]
 fn ecuador_modulo_11_never_emits_ten_or_eleven() {
     for secuencial in ["000000001", "000000123", "000000999", "123456789"] {
-        let clave = build_clave_acceso("26052026", "01", ISSUER_RUC, "001001", secuencial, "12345678");
+        let clave = build_clave_acceso(
+            "26052026", "01", ISSUER_RUC, "001001", secuencial, "12345678",
+        );
         let dv = clave.as_bytes()[48] - b'0';
-        assert!(dv <= 9, "dígito verificador must be a single digit, got {dv}");
+        assert!(
+            dv <= 9,
+            "dígito verificador must be a single digit, got {dv}"
+        );
         // Recomputing over the emitted first-48 must reproduce the same DV.
         assert_eq!(modulo_11_check_digit(&clave[..48]), dv);
     }
@@ -611,7 +624,10 @@ fn ecuador_credit_note_lifecycle_is_authorized() {
     // National-family artifact really is a credit note, not an invoice. The UBL
     // serializer re-declares the `cbc`/`cac` namespace on each element, so we
     // assert on the open-tag prefix and the value separately.
-    assert!(ubl.contains("<CreditNote"), "credit note must serialize to a UBL CreditNote root");
+    assert!(
+        ubl.contains("<CreditNote"),
+        "credit note must serialize to a UBL CreditNote root"
+    );
     assert!(
         ubl.contains("<cbc:CreditNoteTypeCode") && ubl.contains(">381</cbc:CreditNoteTypeCode>"),
         "UBL credit note must carry type code 381"
@@ -671,8 +687,14 @@ fn ecuador_multiline_mixed_iva_lifecycle() {
     // Two distinct invoice lines.
     assert_eq!(ubl.matches("<cac:InvoiceLine").count(), 2);
     // Both the 15% and the 0% IVA percentages appear in the tax subtotals.
-    assert!(ubl.contains(">15.00</cbc:Percent>"), "15% IVA bucket missing");
-    assert!(ubl.contains(">0</cbc:Percent>"), "0% IVA (tarifa cero) bucket missing");
+    assert!(
+        ubl.contains(">15.00</cbc:Percent>"),
+        "15% IVA bucket missing"
+    );
+    assert!(
+        ubl.contains(">0</cbc:Percent>"),
+        "0% IVA (tarifa cero) bucket missing"
+    );
     // Payable is 200.00 net + 15.00 IVA = 215.00.
     assert!(ubl.contains("currencyID=\"USD\">215.00</cbc:PayableAmount>"));
 
@@ -689,7 +711,11 @@ fn ecuador_multiline_mixed_iva_lifecycle() {
     assert_eq!(envelope.status, SriStatus::Autorizado);
 
     let ikb = bundle_and_pack(&doc, ubl.into_bytes(), &envelope);
-    assert!(verify_packed(&ikb, &VerifyOptions::content_only()).unwrap().ok);
+    assert!(
+        verify_packed(&ikb, &VerifyOptions::content_only())
+            .unwrap()
+            .ok
+    );
 }
 
 /// Scenario: an SRI **DEVUELTA** (returned) verdict is data, not an `Err`. SRI
@@ -712,24 +738,39 @@ fn ecuador_devuelta_is_a_receipt_not_an_error() {
         mensaje: Some("43 CLAVE ACCESO REGISTRADA: el comprobante ya existe".to_owned()),
     };
     assert_eq!(rejection.status, SriStatus::Devuelto);
-    assert!(rejection.mensaje.is_some(), "a returned receipt must carry a mensaje");
+    assert!(
+        rejection.mensaje.is_some(),
+        "a returned receipt must carry a mensaje"
+    );
     // Even rejected, the echoed access key is shape-valid.
     validate_clave_acceso(&rejection.numero_autorizacion).unwrap();
 
     // The rejection serializes (audit trail) and round-trips losslessly.
     let json = serde_json::to_string(&rejection).unwrap();
-    assert!(json.contains("\"devuelto\""), "status must serialize kebab-case");
+    assert!(
+        json.contains("\"devuelto\""),
+        "status must serialize kebab-case"
+    );
     assert!(json.contains("CLAVE ACCESO REGISTRADA"));
     let back: SriSubmitEnvelope = serde_json::from_str(&json).unwrap();
     assert_eq!(back, rejection);
 
     // The rejection receipt bundles and the bundle still verifies.
     let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-    artefacts.insert("receipt.json".to_owned(), serde_json::to_vec(&rejection).unwrap());
+    artefacts.insert(
+        "receipt.json".to_owned(),
+        serde_json::to_vec(&rejection).unwrap(),
+    );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let ikb = pack(&EvidenceBundle { manifest, artefacts }).unwrap();
+    let ikb = pack(&EvidenceBundle {
+        manifest,
+        artefacts,
+    })
+    .unwrap();
     assert!(
-        verify_packed(&ikb, &VerifyOptions::content_only()).unwrap().ok,
+        verify_packed(&ikb, &VerifyOptions::content_only())
+            .unwrap()
+            .ok,
         "a DEVUELTA rejection must still produce a verifiable evidence bundle"
     );
 }
@@ -751,7 +792,10 @@ fn ecuador_no_autorizado_is_a_receipt_not_an_error() {
     };
     assert_eq!(envelope.status, SriStatus::NoAutorizado);
     let json = serde_json::to_string(&envelope).unwrap();
-    assert!(json.contains("\"no-autorizado\""), "kebab-case serialization expected");
+    assert!(
+        json.contains("\"no-autorizado\""),
+        "kebab-case serialization expected"
+    );
     let back: SriSubmitEnvelope = serde_json::from_str(&json).unwrap();
     assert_eq!(back, envelope);
 }
@@ -771,7 +815,10 @@ fn ecuador_rejects_cedula_used_as_ruc_and_malformed_clave() {
     // A 10-digit cédula passed where a 13-digit RUC is required.
     let cedula = "1791234567";
     assert_eq!(cedula.len(), 10);
-    assert!(validate_ruc(cedula).is_err(), "a 10-digit cédula is not a RUC");
+    assert!(
+        validate_ruc(cedula).is_err(),
+        "a 10-digit cédula is not a RUC"
+    );
     let mut req = submit_request(b"<Invoice/>".to_vec());
     req.issuer_ruc = cedula.to_owned();
     assert!(matches!(

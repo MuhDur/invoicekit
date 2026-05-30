@@ -273,7 +273,10 @@ fn bundle_document(
         .into_bytes();
     let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     artefacts.insert("canonical.json".to_owned(), canonical);
-    artefacts.insert("formats/factur-x.xml".to_owned(), factur_x.clone().into_bytes());
+    artefacts.insert(
+        "formats/factur-x.xml".to_owned(),
+        factur_x.clone().into_bytes(),
+    );
     artefacts.insert(
         "signed/factur-x.xml".to_owned(),
         report.transmitted_factur_x_xml.clone(),
@@ -287,7 +290,10 @@ fn bundle_document(
         serde_json::to_vec(&report.envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, report, factur_x)
 }
@@ -650,7 +656,11 @@ fn france_authority_rejection_carries_dgfip_motif_and_bundles() {
         serde_json::to_vec(&report.envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let ikb = pack(&EvidenceBundle { manifest, artefacts }).unwrap();
+    let ikb = pack(&EvidenceBundle {
+        manifest,
+        artefacts,
+    })
+    .unwrap();
     let verify = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
     assert!(verify.ok, "rejected-with-motif bundle must verify");
 }

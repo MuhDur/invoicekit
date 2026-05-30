@@ -134,8 +134,7 @@ fn polish_invoice() -> CommercialDocument {
 /// *session token* it mints (`sess-00000001` for the first session),
 /// independent of the issuer NIP — so a single session key serves every NIP.
 fn provider(forced: Option<KsefAcceptance>) -> MockKsefReportProvider {
-    let signer: Arc<dyn Signer> =
-        Arc::new(SoftwareSigner::new().with_key(SESSION_KEY, [5_u8; 32]));
+    let signer: Arc<dyn Signer> = Arc::new(SoftwareSigner::new().with_key(SESSION_KEY, [5_u8; 32]));
     let p = MockKsefReportProvider::new(signer, KsefEnvironment::Demo);
     match forced {
         Some(acceptance) => p.with_forced_acceptance(acceptance),
@@ -190,7 +189,10 @@ fn run_lifecycle(forced: Option<KsefAcceptance>) -> (Vec<u8>, KsefReport) {
         serde_json::to_vec(&report.envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, report)
 }
@@ -533,7 +535,11 @@ fn pack_evidence(doc: &CommercialDocument, fa: &str, report: &KsefReport) -> Vec
         serde_json::to_vec(&report.envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    pack(&EvidenceBundle { manifest, artefacts }).unwrap()
+    pack(&EvidenceBundle {
+        manifest,
+        artefacts,
+    })
+    .unwrap()
 }
 
 #[test]
@@ -559,10 +565,16 @@ fn poland_corrective_invoice_maps_to_korekta_and_verifies() {
     assert!(fa.contains("<P_15>61.50</P_15>"));
 
     let report = provider(None)
-        .report(&report_request_for(CORRECTIVE_ISSUER_NIP, fa.clone().into_bytes()))
+        .report(&report_request_for(
+            CORRECTIVE_ISSUER_NIP,
+            fa.clone().into_bytes(),
+        ))
         .unwrap();
     assert_eq!(report.envelope.acceptance, KsefAcceptance::Accepted);
-    assert!(report.envelope.numer_ksef.starts_with(CORRECTIVE_ISSUER_NIP));
+    assert!(report
+        .envelope
+        .numer_ksef
+        .starts_with(CORRECTIVE_ISSUER_NIP));
 
     let ikb = pack_evidence(&doc, &fa, &report);
     let verify = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
@@ -582,16 +594,31 @@ fn poland_mixed_rate_invoice_emits_per_line_rates_and_verifies() {
     // Each FaWiersz must carry its own P_12 rate.
     assert!(fa.contains("<NrWierszaFa>1</NrWierszaFa>"));
     assert!(fa.contains("<NrWierszaFa>3</NrWierszaFa>"));
-    assert!(fa.contains("<P_12>23.00</P_12>"), "missing 23% line rate:\n{fa}");
-    assert!(fa.contains("<P_12>8.00</P_12>"), "missing 8% line rate:\n{fa}");
+    assert!(
+        fa.contains("<P_12>23.00</P_12>"),
+        "missing 23% line rate:\n{fa}"
+    );
+    assert!(
+        fa.contains("<P_12>8.00</P_12>"),
+        "missing 8% line rate:\n{fa}"
+    );
     // A zero VAT rate built from `Decimal::ZERO` (scale 0) renders as the
     // bare `0` — `fmt_amount` calls `round_dp(2).to_string()`, which keeps the
     // source scale for an exact zero. This is the serializer's real behavior.
     assert!(fa.contains("<P_12>0</P_12>"), "missing 0% line rate:\n{fa}");
     // Aggregated base (600.00) and aggregated VAT (23.00 + 16.00 = 39.00).
-    assert!(fa.contains("<P_13_1>600.00</P_13_1>"), "wrong aggregated net base:\n{fa}");
-    assert!(fa.contains("<P_14_1>39.00</P_14_1>"), "wrong aggregated VAT:\n{fa}");
-    assert!(fa.contains("<P_15>639.00</P_15>"), "wrong gross total:\n{fa}");
+    assert!(
+        fa.contains("<P_13_1>600.00</P_13_1>"),
+        "wrong aggregated net base:\n{fa}"
+    );
+    assert!(
+        fa.contains("<P_14_1>39.00</P_14_1>"),
+        "wrong aggregated VAT:\n{fa}"
+    );
+    assert!(
+        fa.contains("<P_15>639.00</P_15>"),
+        "wrong gross total:\n{fa}"
+    );
 
     let report = provider(None)
         .report(&report_request_for(ISSUER_NIP, fa.clone().into_bytes()))
@@ -599,7 +626,11 @@ fn poland_mixed_rate_invoice_emits_per_line_rates_and_verifies() {
     assert_eq!(report.envelope.acceptance, KsefAcceptance::Accepted);
 
     let ikb = pack_evidence(&doc, &fa, &report);
-    assert!(verify_packed(&ikb, &VerifyOptions::content_only()).unwrap().ok);
+    assert!(
+        verify_packed(&ikb, &VerifyOptions::content_only())
+            .unwrap()
+            .ok
+    );
 }
 
 #[test]
@@ -615,8 +646,14 @@ fn poland_reverse_charge_invoice_has_zero_output_vat_and_verifies() {
     // The line VAT rate comes from `Decimal::ZERO` (scale 0) -> bare `0`,
     // whereas the aggregated `P_14_1` is built from `amt(0)` (scale 2) -> the
     // fixed-scale `0.00`. Both encode "no output VAT".
-    assert!(fa.contains("<P_12>0</P_12>"), "reverse-charge line must be 0%:\n{fa}");
-    assert!(fa.contains("<P_14_1>0.00</P_14_1>"), "reverse charge must carry no output VAT:\n{fa}");
+    assert!(
+        fa.contains("<P_12>0</P_12>"),
+        "reverse-charge line must be 0%:\n{fa}"
+    );
+    assert!(
+        fa.contains("<P_14_1>0.00</P_14_1>"),
+        "reverse charge must carry no output VAT:\n{fa}"
+    );
     // 1000.00 net, no VAT => 1000.00 gross.
     assert!(fa.contains("<P_13_1>1000.00</P_13_1>"));
     assert!(fa.contains("<P_15>1000.00</P_15>"));
@@ -627,7 +664,11 @@ fn poland_reverse_charge_invoice_has_zero_output_vat_and_verifies() {
     assert_eq!(report.envelope.acceptance, KsefAcceptance::Accepted);
 
     let ikb = pack_evidence(&doc, &fa, &report);
-    assert!(verify_packed(&ikb, &VerifyOptions::content_only()).unwrap().ok);
+    assert!(
+        verify_packed(&ikb, &VerifyOptions::content_only())
+            .unwrap()
+            .ok
+    );
 }
 
 #[test]
@@ -637,12 +678,14 @@ fn poland_numer_ksef_has_official_reference_shape() {
     let fa = to_fa3_xml(&polish_invoice(), &Fa3Context::default())
         .unwrap()
         .into_bytes();
-    let report = provider(None)
-        .report(&report_request(fa))
-        .unwrap();
+    let report = provider(None).report(&report_request(fa)).unwrap();
     let numer = &report.envelope.numer_ksef;
     let parts: Vec<&str> = numer.split('-').collect();
-    assert_eq!(parts.len(), 4, "Numer KSeF must have 4 dash-separated groups: {numer:?}");
+    assert_eq!(
+        parts.len(),
+        4,
+        "Numer KSeF must have 4 dash-separated groups: {numer:?}"
+    );
     // Group 1 = the issuer NIP (10 digits).
     assert_eq!(parts[0], ISSUER_NIP);
     assert_eq!(parts[0].len(), 10);
@@ -650,7 +693,11 @@ fn poland_numer_ksef_has_official_reference_shape() {
     assert_eq!(parts[1].len(), 8, "date group must be YYYYMMDD: {numer:?}");
     assert!(parts[1].bytes().all(|b| b.is_ascii_digit()));
     // Group 4 = a 2-char trailing checksum block.
-    assert_eq!(parts[3].len(), 2, "trailing block must be 2 chars: {numer:?}");
+    assert_eq!(
+        parts[3].len(),
+        2,
+        "trailing block must be 2 chars: {numer:?}"
+    );
     // The matching UPO acknowledgement reference is always present.
     assert!(report.envelope.upo_reference.starts_with("upo-"));
 }
@@ -723,8 +770,16 @@ fn poland_rejects_invalid_issuer_nip() {
 fn poland_nip_checksum_accepts_real_and_rejects_corrupted() {
     // The standalone validator enforces the official weights {6,5,7,2,3,4,5,6,7}.
     // Real, checksum-valid Polish NIPs used across the fixtures above:
-    for good in [ISSUER_NIP, CORRECTIVE_ISSUER_NIP, "5260001246", "7740001454"] {
-        assert!(validate_nip(good).is_ok(), "{good} should pass the NIP checksum");
+    for good in [
+        ISSUER_NIP,
+        CORRECTIVE_ISSUER_NIP,
+        "5260001246",
+        "7740001454",
+    ] {
+        assert!(
+            validate_nip(good).is_ok(),
+            "{good} should pass the NIP checksum"
+        );
     }
     // Flip the last digit of a valid NIP -> the checksum no longer matches.
     assert!(validate_nip("5252248480").is_err());

@@ -184,7 +184,10 @@ fn pack_zatca_bundle(doc: &CommercialDocument, ubl: String, report: &ZatcaReport
         serde_json::to_vec(&report.envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     pack(&bundle).unwrap()
 }
 
@@ -624,8 +627,14 @@ fn saudi_zero_rated_export_has_zero_vat_in_qr() {
     // Multi-line: the UBL spine carries both export lines.
     let ctx = ZatcaUblContext::genesis("uuid-sa-e2e-zr-0001", InvoiceMode::Standard);
     let xml = to_zatca_ubl_xml(&doc, &ctx).unwrap();
-    assert!(xml.contains("Exported dates (40kg)"), "line 1 missing:\n{xml}");
-    assert!(xml.contains("Exported saffron (1kg)"), "line 2 missing:\n{xml}");
+    assert!(
+        xml.contains("Exported dates (40kg)"),
+        "line 1 missing:\n{xml}"
+    );
+    assert!(
+        xml.contains("Exported saffron (1kg)"),
+        "line 2 missing:\n{xml}"
+    );
 
     // It still clears through the standard flow.
     let report = provider(None)
@@ -650,7 +659,10 @@ fn saudi_exempt_supply_has_zero_vat_and_clears() {
     let qr = build_qr_fields(&doc, QR_TIMESTAMP).unwrap();
     assert_eq!(qr.get(&ZatcaQrField::VatTotal).unwrap(), "0.00");
     assert_eq!(qr.get(&ZatcaQrField::Total).unwrap(), "800.00");
-    assert_eq!(qr.get(&ZatcaQrField::SellerName).unwrap(), "Riyadh Finance Co");
+    assert_eq!(
+        qr.get(&ZatcaQrField::SellerName).unwrap(),
+        "Riyadh Finance Co"
+    );
 
     let ctx = ZatcaUblContext::genesis("uuid-sa-e2e-ex-0001", InvoiceMode::Standard);
     let xml = to_zatca_ubl_xml(&doc, &ctx).unwrap();
@@ -820,7 +832,10 @@ fn saudi_serialization_distinguishes_invoice_from_credit_note() {
 
     assert!(inv_xml.contains("<cbc:InvoiceTypeCode name=\"0100000\">388</cbc:InvoiceTypeCode>"));
     assert!(cn_xml.contains("<cbc:InvoiceTypeCode name=\"0100000\">381</cbc:InvoiceTypeCode>"));
-    assert_ne!(inv_xml, cn_xml, "388 and 381 documents must differ on the wire");
+    assert_ne!(
+        inv_xml, cn_xml,
+        "388 and 381 documents must differ on the wire"
+    );
 
     // Each is deterministic across repeated serialization.
     assert_eq!(to_zatca_ubl_xml(&inv, &inv_ctx).unwrap(), inv_xml);

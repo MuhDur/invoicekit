@@ -136,9 +136,7 @@ pub fn to_invoices_doc_xml(
 
     let mut out = String::with_capacity(2048);
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    out.push_str(
-        "<InvoicesDoc xmlns=\"http://www.aade.gr/myDATA/invoice/v1.0\">\n",
-    );
+    out.push_str("<InvoicesDoc xmlns=\"http://www.aade.gr/myDATA/invoice/v1.0\">\n");
     open(&mut out, 1, "invoice");
 
     // --- issuer ---
@@ -152,7 +150,12 @@ pub fn to_invoices_doc_xml(
     open(&mut out, 2, "counterpart");
     el(&mut out, 3, "vatNumber", &counterpart.vat_number);
     el(&mut out, 3, "country", &counterpart.country);
-    el(&mut out, 3, "branch", &context.counterpart_branch.to_string());
+    el(
+        &mut out,
+        3,
+        "branch",
+        &context.counterpart_branch.to_string(),
+    );
     close(&mut out, 2, "counterpart");
 
     // --- invoiceHeader ---
@@ -330,8 +333,7 @@ fn line_vat(
             .ok_or(MyDataXmlError::TotalsUnrepresentable("line vatAmount"))?
             .round_dp(2)
     };
-    let exemption =
-        (vat_category == VAT_CATEGORY_EXCLUDING).then_some(1_u8);
+    let exemption = (vat_category == VAT_CATEGORY_EXCLUDING).then_some(1_u8);
     Ok((vat_amount, vat_category, exemption))
 }
 
@@ -855,7 +857,10 @@ mod tests {
             "<totalVatAmount>24.00</totalVatAmount>",
             "<totalGrossValue>124.00</totalGrossValue>",
         ] {
-            assert!(xml.contains(needle), "InvoicesDoc missing {needle:?}:\n{xml}");
+            assert!(
+                xml.contains(needle),
+                "InvoicesDoc missing {needle:?}:\n{xml}"
+            );
         }
     }
 
@@ -995,7 +1000,9 @@ mod tests {
         let header_start = xml.find("<invoiceHeader>").expect("invoiceHeader present");
         let header_end = xml.find("</invoiceHeader>").expect("invoiceHeader closed");
         let type_pos = xml.find("<invoiceType>").expect("invoiceType present");
-        let corr_pos = xml.find("<correlatedInvoices>").expect("correlatedInvoices present");
+        let corr_pos = xml
+            .find("<correlatedInvoices>")
+            .expect("correlatedInvoices present");
         assert!(
             header_start < corr_pos && corr_pos < header_end,
             "correlatedInvoices must sit inside invoiceHeader"
@@ -1060,15 +1067,15 @@ mod tests {
     /// so a populated `classifications` must NOT change the InvoicesDoc output.
     #[test]
     fn invoices_doc_ignores_line_classifications() {
-        let baseline = to_invoices_doc_xml(&sample_invoice(), &MyDataDocContext::default()).unwrap();
+        let baseline =
+            to_invoices_doc_xml(&sample_invoice(), &MyDataDocContext::default()).unwrap();
         let mut doc = sample_invoice();
         doc.lines[0].classifications = vec![invoicekit_ir::ItemClassification {
             code: "85176200".to_owned(),
             scheme_id: "HS".to_owned(),
             scheme_version: None,
         }];
-        let with_classification =
-            to_invoices_doc_xml(&doc, &MyDataDocContext::default()).unwrap();
+        let with_classification = to_invoices_doc_xml(&doc, &MyDataDocContext::default()).unwrap();
         assert_eq!(
             baseline, with_classification,
             "BT-158 classifications have no verbatim myDATA target; output must be unchanged"

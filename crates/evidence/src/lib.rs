@@ -393,8 +393,8 @@ pub fn verify(bundle: &EvidenceBundle) -> Result<(), BundleError> {
 /// output. If the bounded read yields more than `limit` bytes,
 /// the input is treated as a decompression bomb and rejected.
 fn decode_all_capped(bytes: &[u8], limit: u64) -> Result<Vec<u8>, BundleError> {
-    let decoder =
-        zstd::stream::read::Decoder::new(Cursor::new(bytes)).map_err(|e| BundleError::Io(e.to_string()))?;
+    let decoder = zstd::stream::read::Decoder::new(Cursor::new(bytes))
+        .map_err(|e| BundleError::Io(e.to_string()))?;
     // Read one byte past the cap so an output that lands exactly
     // on `limit` is accepted while anything larger is detected.
     let read_budget = limit.saturating_add(1);
@@ -708,8 +708,8 @@ mod tests {
         // cap, it must be rejected without buffering the whole
         // 8 MiB output.
         let inflated = vec![0_u8; 8 * 1024 * 1024];
-        let compressed = zstd::stream::encode_all(Cursor::new(inflated), 0)
-            .expect("compress zero payload");
+        let compressed =
+            zstd::stream::encode_all(Cursor::new(inflated), 0).expect("compress zero payload");
         assert!(
             compressed.len() < 64 * 1024,
             "bomb should compress tiny, got {} bytes",
@@ -727,8 +727,8 @@ mod tests {
     fn decode_all_capped_accepts_payload_at_or_under_cap() {
         // Exactly the cap and just under both decode cleanly.
         let payload = vec![7_u8; 4096];
-        let compressed = zstd::stream::encode_all(Cursor::new(&payload), 0)
-            .expect("compress payload");
+        let compressed =
+            zstd::stream::encode_all(Cursor::new(&payload), 0).expect("compress payload");
         let under = decode_all_capped(&compressed, 4096).expect("payload at cap decodes");
         assert_eq!(under, payload);
         let also = decode_all_capped(&compressed, 8192).expect("payload under cap decodes");
@@ -740,8 +740,8 @@ mod tests {
         // Boundary: a payload one byte larger than the cap is the
         // smallest case the limit must reject.
         let payload = vec![3_u8; 4097];
-        let compressed = zstd::stream::encode_all(Cursor::new(&payload), 0)
-            .expect("compress payload");
+        let compressed =
+            zstd::stream::encode_all(Cursor::new(&payload), 0).expect("compress payload");
         let err = decode_all_capped(&compressed, 4096)
             .expect_err("payload one byte over the cap must be rejected");
         assert!(matches!(
@@ -758,8 +758,7 @@ mod tests {
         // exhausting memory.
         let cap = usize::try_from(MAX_DECOMPRESSED_SIZE).expect("cap fits in usize");
         let inflated = vec![0_u8; cap + 1];
-        let compressed =
-            zstd::stream::encode_all(Cursor::new(inflated), 0).expect("compress bomb");
+        let compressed = zstd::stream::encode_all(Cursor::new(inflated), 0).expect("compress bomb");
         let err = unpack(&compressed).expect_err("oversize container must be rejected");
         assert!(matches!(
             err,

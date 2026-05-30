@@ -146,7 +146,11 @@ fn submit_request(faktur_xml: Vec<u8>) -> DjpSubmitRequest {
 
 /// Assemble the canonical `.ikb` evidence bundle: canonical.json (from the IR
 /// document) + formats/ubl.xml + receipt.json (the DJP envelope), then pack.
-fn pack_evidence(doc: &CommercialDocument, ubl_bytes: Vec<u8>, envelope: &DjpSubmitEnvelope) -> Vec<u8> {
+fn pack_evidence(
+    doc: &CommercialDocument,
+    ubl_bytes: Vec<u8>,
+    envelope: &DjpSubmitEnvelope,
+) -> Vec<u8> {
     let canonical = canonicalize_value(&doc.to_value().unwrap())
         .unwrap()
         .into_bytes();
@@ -158,7 +162,10 @@ fn pack_evidence(doc: &CommercialDocument, ubl_bytes: Vec<u8>, envelope: &DjpSub
         serde_json::to_vec(envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     pack(&bundle).unwrap()
 }
 
@@ -187,7 +194,9 @@ fn run_lifecycle() -> (Vec<u8>, invoicekit_report_id_djp::DjpSubmitEnvelope) {
 
     // 3. submit to the DJP mock (runs NPWP + NSFP + payload validation on the way).
     let provider = MockDjpProvider::new();
-    let envelope = provider.submit_faktur(&submit_request(ubl_bytes.clone())).unwrap();
+    let envelope = provider
+        .submit_faktur(&submit_request(ubl_bytes.clone()))
+        .unwrap();
 
     // 4. evidence bundle: canonical doc + national XML + DJP receipt.
     let ikb = pack_evidence(&doc, ubl_bytes, &envelope);
@@ -565,7 +574,9 @@ fn indonesia_kode_jenis_facility_and_dpp_codes_match_djp_taxonomy() {
     assert_eq!(FakturKodeJenis::Exempt.code(), "08");
 
     // A DPP-Nilai-Lain (04) submission for the 11/12 base still clears the mock.
-    let ubl = to_xml(&indonesian_multiline_invoice()).unwrap().into_bytes();
+    let ubl = to_xml(&indonesian_multiline_invoice())
+        .unwrap()
+        .into_bytes();
     let mut req = submit_request(ubl);
     req.kode_jenis = FakturKodeJenis::DppCustom;
     let provider = MockDjpProvider::new();
@@ -617,7 +628,10 @@ fn indonesia_invalid_npwp_lengths_are_rejected_but_15_and_16_pass() {
     // the adapter accepts BOTH and rejects everything else. This pins both the
     // legacy and post-2022 shapes plus the boundary failures.
     use invoicekit_report_id_djp::validate_npwp;
-    assert!(validate_npwp(&"0".repeat(15)).is_ok(), "legacy 15-digit NPWP");
+    assert!(
+        validate_npwp(&"0".repeat(15)).is_ok(),
+        "legacy 15-digit NPWP"
+    );
     assert!(
         validate_npwp(ISSUER_NPWP).is_ok(),
         "PMK 112/2022 16-digit NPWP"

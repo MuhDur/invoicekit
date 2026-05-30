@@ -245,9 +245,7 @@ fn party_nip(party: &Party) -> Option<String> {
     let chosen = party
         .tax_ids
         .iter()
-        .find(|t| {
-            t.scheme.eq_ignore_ascii_case("vat") || t.scheme.eq_ignore_ascii_case("nip")
-        })
+        .find(|t| t.scheme.eq_ignore_ascii_case("vat") || t.scheme.eq_ignore_ascii_case("nip"))
         .or_else(|| party.tax_ids.first())?;
     Some(strip_pl_prefix(&chosen.value))
 }
@@ -255,7 +253,11 @@ fn party_nip(party: &Party) -> Option<String> {
 /// Strip a leading `PL` country prefix from a VAT value (`"PL1234567890"` ->
 /// `"1234567890"`).
 fn strip_pl_prefix(value: &str) -> String {
-    if value.len() > 2 && value.get(0..2).is_some_and(|p| p.eq_ignore_ascii_case("PL")) {
+    if value.len() > 2
+        && value
+            .get(0..2)
+            .is_some_and(|p| p.eq_ignore_ascii_case("PL"))
+    {
         value[2..].to_owned()
     } else {
         value.to_owned()
@@ -405,11 +407,7 @@ pub fn validate_nip(nip: &str) -> Result<(), KsefReportError> {
         )));
     }
     let digits: Vec<u32> = nip.bytes().map(|b| u32::from(b - b'0')).collect();
-    let sum: u32 = NIP_WEIGHTS
-        .iter()
-        .zip(&digits)
-        .map(|(w, d)| w * d)
-        .sum();
+    let sum: u32 = NIP_WEIGHTS.iter().zip(&digits).map(|(w, d)| w * d).sum();
     let check = sum % 11;
     // A check value of 10 cannot equal any single digit; such a NIP is invalid.
     if check == 10 || check != digits[9] {
@@ -614,8 +612,8 @@ mod tests {
     use super::*;
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, CountryCode, DateOnly, DecimalValue,
-        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference, ItemClassification,
-        Iso4217Code, MonetaryTotal, Party, PartyTaxId, PostalAddress, SchemaVersion,
+        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference, Iso4217Code,
+        ItemClassification, MonetaryTotal, Party, PartyTaxId, PostalAddress, SchemaVersion,
         TaxCategorySummary,
     };
     use invoicekit_signer::SoftwareSigner;
@@ -931,8 +929,7 @@ mod tests {
             invoicekit_ir::ReferenceKindClass::PrecedingInvoice
         );
         // (2) Exemption legal-basis free text + code (would feed P_19C / P_19).
-        enriched.tax_summary[0].exemption_reason =
-            Some("art. 43 ust. 1 ustawy o VAT".to_owned());
+        enriched.tax_summary[0].exemption_reason = Some("art. 43 ust. 1 ustawy o VAT".to_owned());
         enriched.tax_summary[0].exemption_reason_code = Some("VATEX-EU-AE".to_owned());
         // (3) A line CN classification (would feed a FaWiersz CN/PKWiU element).
         enriched.lines[0].classifications = vec![ItemClassification {

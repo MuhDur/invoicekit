@@ -79,7 +79,11 @@ fn mexican_invoice() -> CommercialDocument {
         delivery_date: None,
         document_number: DocumentNumber::new("FAC-2026-MX-0001").unwrap(),
         currency: Iso4217Code::new("MXN").unwrap(),
-        supplier: mexican_party("Comercializadora Azteca SA de CV", ISSUER_RFC, "Ciudad de Mexico"),
+        supplier: mexican_party(
+            "Comercializadora Azteca SA de CV",
+            ISSUER_RFC,
+            "Ciudad de Mexico",
+        ),
         customer: mexican_party("Distribuidora Maya SA de CV", "DMA020202BBB", "Monterrey"),
         payee: None,
         payment_terms: None,
@@ -205,7 +209,10 @@ fn run_lifecycle(reject: bool) -> (Vec<u8>, CfdiReport) {
         serde_json::to_vec(&report.envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, report)
 }
@@ -276,7 +283,11 @@ fn mexican_credit_note() -> CommercialDocument {
         delivery_date: None,
         document_number: DocumentNumber::new("NC-2026-MX-0007").unwrap(),
         currency: Iso4217Code::new("MXN").unwrap(),
-        supplier: mexican_party("Comercializadora Azteca SA de CV", ISSUER_RFC, "Ciudad de Mexico"),
+        supplier: mexican_party(
+            "Comercializadora Azteca SA de CV",
+            ISSUER_RFC,
+            "Ciudad de Mexico",
+        ),
         customer: mexican_party("Distribuidora Maya SA de CV", "DMA020202BBB", "Monterrey"),
         payee: None,
         payment_terms: None,
@@ -557,8 +568,14 @@ fn mexico_multiline_mixed_iva_rates() {
         "both invoice lines must serialize as conceptos:\n{xml}"
     );
     // Both SAT IVA fractions are present: 16% -> 0.160000, 8% -> 0.080000.
-    assert!(xml.contains("TasaOCuota=\"0.160000\""), "missing 16% IVA:\n{xml}");
-    assert!(xml.contains("TasaOCuota=\"0.080000\""), "missing 8% border IVA:\n{xml}");
+    assert!(
+        xml.contains("TasaOCuota=\"0.160000\""),
+        "missing 16% IVA:\n{xml}"
+    );
+    assert!(
+        xml.contains("TasaOCuota=\"0.080000\""),
+        "missing 8% border IVA:\n{xml}"
+    );
     // Document-level total traslados: 160.00 + 40.00 = 200.00.
     assert!(
         xml.contains("TotalImpuestosTrasladados=\"200.00\""),
@@ -593,7 +610,10 @@ fn mexico_zero_rate_publico_general() {
         "público-en-general receptor must use the RFC genérico XAXX010101000:\n{xml}"
     );
     // The zero rate is the SAT 0% fraction, not an absent traslado.
-    assert!(xml.contains("TasaOCuota=\"0.000000\""), "missing 0% IVA fraction:\n{xml}");
+    assert!(
+        xml.contains("TasaOCuota=\"0.000000\""),
+        "missing 0% IVA fraction:\n{xml}"
+    );
     // No IVA collected at the document level.
     assert!(xml.contains("TotalImpuestosTrasladados=\"0.00\""));
 

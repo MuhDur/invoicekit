@@ -15,12 +15,10 @@ use invoicekit_canonical::{canonicalize_xml, XmlCanonicalizeError};
 use invoicekit_ir::{
     Attachment, CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly,
     DecimalValue, DocumentAllowanceCharge, DocumentId, DocumentLine, DocumentMeta, DocumentNumber,
-    DocumentReference,
-    DocumentType, IrError, Iso4217Code, ItemClassification, JurisdictionExtension, LocalizedString,
-    LossinessEntry,
-    LossinessLedger, MonetaryTotal, MoneyAmount, Party, PartyTaxId, PaymentInstruction,
-    PaymentInstructionKind, PaymentTerms, PostalAddress, Quantity, ReferenceKindClass,
-    SchemaVersion, TaxCategorySummary,
+    DocumentReference, DocumentType, IrError, Iso4217Code, ItemClassification,
+    JurisdictionExtension, LocalizedString, LossinessEntry, LossinessLedger, MonetaryTotal,
+    MoneyAmount, Party, PartyTaxId, PaymentInstruction, PaymentInstructionKind, PaymentTerms,
+    PostalAddress, Quantity, ReferenceKindClass, SchemaVersion, TaxCategorySummary,
 };
 use quick_xml::events::{attributes::AttrError, BytesDecl, BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
@@ -1404,11 +1402,7 @@ fn write_document_settlement(
 /// element is repeatable, a preserved fragment and native entries legitimately
 /// coexist — so (unlike the 0..1 InvoicePeriod/Delivery/OrderReference) this is
 /// emitted unconditionally after the preserved replay, not gated.
-fn write_native_allowance_charges(
-    xml: &mut String,
-    document: &CommercialDocument,
-    currency: &str,
-) {
+fn write_native_allowance_charges(xml: &mut String, document: &CommercialDocument, currency: &str) {
     for allowance_charge in &document.allowance_charges {
         write_allowance_charge(xml, allowance_charge, currency);
     }
@@ -1666,7 +1660,11 @@ fn write_typed_document_references(
 /// even a parse-then-enrich document that carries BOTH a preserved fragment and a
 /// caller-set `invoice_period` emits `cac:InvoicePeriod` exactly once (preserved
 /// wins) — never a malformed duplicate.
-fn write_native_invoice_period(xml: &mut String, document: &CommercialDocument, slot_element: &str) {
+fn write_native_invoice_period(
+    xml: &mut String,
+    document: &CommercialDocument,
+    slot_element: &str,
+) {
     if slot_element != "cac:InvoicePeriod" {
         return;
     }
@@ -2701,7 +2699,9 @@ mod tests {
         // pins inline xmlns:cbc on the first cbc element inside the category, so
         // match the open tags (with a trailing space or '>') rather than bare
         // elements.
-        let category_pos = xml.find("<cac:TaxCategory>").expect("cac:TaxCategory present");
+        let category_pos = xml
+            .find("<cac:TaxCategory>")
+            .expect("cac:TaxCategory present");
         let id_pos = category_pos
             + xml[category_pos..]
                 .find("</cbc:ID>")
@@ -2901,7 +2901,9 @@ mod tests {
         // Placement: both references sit after the cbc header fields and before
         // cac:AccountingSupplierParty, in UBL Invoice child order
         // (OrderReference precedes BillingReference).
-        let order_pos = xml.find("<cac:OrderReference").expect("OrderReference present");
+        let order_pos = xml
+            .find("<cac:OrderReference")
+            .expect("OrderReference present");
         let billing_pos = xml
             .find("<cac:BillingReference")
             .expect("BillingReference present");
@@ -3197,7 +3199,9 @@ mod tests {
         let currency_pos = xml
             .find("<cbc:DocumentCurrencyCode")
             .expect("currency present");
-        let period_pos = xml.find("<cac:InvoicePeriod").expect("InvoicePeriod present");
+        let period_pos = xml
+            .find("<cac:InvoicePeriod")
+            .expect("InvoicePeriod present");
         let supplier_pos = xml
             .find("<cac:AccountingSupplierParty")
             .expect("supplier present");
@@ -3269,7 +3273,11 @@ mod tests {
         let xml = to_xml(&document).unwrap();
 
         // Exactly one cac:Delivery carrying the date + DeliveryLocation + DeliveryParty.
-        assert_eq!(xml.matches("<cac:Delivery ").count(), 1, "one cac:Delivery:\n{xml}");
+        assert_eq!(
+            xml.matches("<cac:Delivery ").count(),
+            1,
+            "one cac:Delivery:\n{xml}"
+        );
         assert!(xml.contains(">2026-05-28</cbc:ActualDeliveryDate>"));
         assert!(xml.contains(">LOC-7</cbc:ID>"));
         assert!(xml.contains(">Hamburg</cbc:CityName>"));
@@ -3424,7 +3432,10 @@ mod tests {
         // Preserved fragment wins: the original dates survive, not the override.
         assert!(out.contains(">2026-01-01</cbc:StartDate>"));
         assert!(out.contains(">2026-01-15</cbc:ActualDeliveryDate>"));
-        assert!(!out.contains("2099-09-09"), "native override must not appear:\n{out}");
+        assert!(
+            !out.contains("2099-09-09"),
+            "native override must not appear:\n{out}"
+        );
         assert_eq!(canonicalize_xml(&out).unwrap(), out);
     }
 
@@ -3490,7 +3501,9 @@ mod tests {
         // UBL AllowanceChargeType sequence explicitly, since canonical
         // idempotence alone would not catch a mis-ordered (but well-formed)
         // emission. Scope to the first element by slicing up to the second.
-        let first_ac = xml.find("<cac:AllowanceCharge ").expect("allowance present");
+        let first_ac = xml
+            .find("<cac:AllowanceCharge ")
+            .expect("allowance present");
         let second_ac = first_ac
             + 1
             + xml[first_ac + 1..]
@@ -3498,7 +3511,9 @@ mod tests {
                 .expect("second allowance present");
         let allowance = &xml[first_ac..second_ac];
         let indicator = allowance.find(">false</cbc:ChargeIndicator>").unwrap();
-        let reason_code = allowance.find(">95</cbc:AllowanceChargeReasonCode>").unwrap();
+        let reason_code = allowance
+            .find(">95</cbc:AllowanceChargeReasonCode>")
+            .unwrap();
         let reason = allowance.find("</cbc:AllowanceChargeReason>").unwrap();
         let factor = allowance.find("</cbc:MultiplierFactorNumeric>").unwrap();
         let amount = allowance.find("</cbc:Amount>").unwrap();
@@ -3518,7 +3533,9 @@ mod tests {
         let supplier_pos = xml
             .find("<cac:AccountingSupplierParty")
             .expect("supplier present");
-        let ac_pos = xml.find("<cac:AllowanceCharge ").expect("allowance present");
+        let ac_pos = xml
+            .find("<cac:AllowanceCharge ")
+            .expect("allowance present");
         let total_pos = xml
             .find("<cac:LegalMonetaryTotal")
             .expect("monetary total present");
@@ -3783,7 +3800,9 @@ mod tests {
         // captured as preserved/raw XML, this count would double.
         let reserialized = to_xml(&parsed).unwrap();
         assert_eq!(
-            reserialized.matches("<cac:CommodityClassification>").count(),
+            reserialized
+                .matches("<cac:CommodityClassification>")
+                .count(),
             2,
             "re-serialization must emit each classification exactly once:\n{reserialized}"
         );
@@ -3806,7 +3825,10 @@ mod tests {
         );
         let parsed = parse_document(&xml);
         assert!(
-            parsed.lines.iter().all(|line| line.classifications.is_empty()),
+            parsed
+                .lines
+                .iter()
+                .all(|line| line.classifications.is_empty()),
             "an unclassified UBL line must parse to an empty classifications vec"
         );
         assert_eq!(parsed, document);

@@ -170,7 +170,9 @@ fn run_lifecycle() -> (Vec<u8>, FapiaoIssueEnvelope) {
 
     // 3. submit the serialized bytes to the STA clearance mock.
     let provider = MockFapiaoProvider::with_fixed_issued_at(PINNED_ISSUED_AT);
-    let receipt = provider.issue_fapiao(&issue_request(ubl_bytes.clone())).unwrap();
+    let receipt = provider
+        .issue_fapiao(&issue_request(ubl_bytes.clone()))
+        .unwrap();
 
     // 4. evidence bundle: canonical IR + national-family XML + STA receipt.
     let canonical = canonicalize_value(&doc.to_value().unwrap())
@@ -184,7 +186,10 @@ fn run_lifecycle() -> (Vec<u8>, FapiaoIssueEnvelope) {
         serde_json::to_vec(&receipt).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, receipt)
 }
@@ -262,7 +267,10 @@ fn china_refusal_is_a_typed_error_not_a_silent_pass() {
         serde_json::to_vec(&voided).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
     assert!(report.ok, "void-path audit bundle must verify");

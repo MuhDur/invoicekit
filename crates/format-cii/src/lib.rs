@@ -16,11 +16,10 @@ use invoicekit_canonical::{canonicalize_xml, XmlCanonicalizeError};
 use invoicekit_ir::{
     Attachment, CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly,
     DecimalValue, DeliverToParty, DocumentAllowanceCharge, DocumentId, DocumentLine, DocumentMeta,
-    DocumentNumber, DocumentReference,
-    DocumentType, IrError, Iso4217Code, ItemClassification, JurisdictionExtension, LocalizedString,
-    LossinessLedger, MonetaryTotal, MoneyAmount, Party, PartyTaxId, PaymentInstruction,
-    PaymentInstructionKind, PaymentTerms, PostalAddress, Quantity, ReferenceKindClass,
-    SchemaVersion, TaxCategorySummary,
+    DocumentNumber, DocumentReference, DocumentType, IrError, Iso4217Code, ItemClassification,
+    JurisdictionExtension, LocalizedString, LossinessLedger, MonetaryTotal, MoneyAmount, Party,
+    PartyTaxId, PaymentInstruction, PaymentInstructionKind, PaymentTerms, PostalAddress, Quantity,
+    ReferenceKindClass, SchemaVersion, TaxCategorySummary,
 };
 use quick_xml::events::{attributes::AttrError, BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
@@ -528,8 +527,10 @@ impl ParseState {
         }
         if name == "DesignatedProductClassification" {
             if let Some(line) = self.current_line.as_mut() {
-                if let Some(classification) =
-                    line.current_classification.take().and_then(ClassificationBuilder::build)
+                if let Some(classification) = line
+                    .current_classification
+                    .take()
+                    .and_then(ClassificationBuilder::build)
                 {
                     line.classifications.push(classification);
                 }
@@ -806,10 +807,7 @@ impl ParseState {
             // EN 16931 BT-7: ram:ApplicableTradeTax/ram:TaxPointDate is a
             // udt:DateType (content udt:DateString format="102"), NOT a
             // DateTimeType. Replicated per tax category; last (identical) wins.
-            self.tax_point_date = Some(cii_date_to_iso(
-                "ApplicableTradeTax/TaxPointDate",
-                value,
-            )?);
+            self.tax_point_date = Some(cii_date_to_iso("ApplicableTradeTax/TaxPointDate", value)?);
         } else if path_ends(
             stack,
             &[
@@ -1624,16 +1622,27 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
     // no IR home (Quotation 15, OrderResponse 16). The lower bound suppresses a
     // same-order preserved BuyerOrderReferencedDocument when the native BT-13 was
     // emitted, exactly as write_preserved_xml_after_child would (native wins).
-    let buyer_order_lower =
-        cii_child_order("ApplicableHeaderTradeAgreement", "BuyerOrderReferencedDocument")
-            .map(|order| if emitted_buyer_order { order } else { order.saturating_sub(1) });
+    let buyer_order_lower = cii_child_order(
+        "ApplicableHeaderTradeAgreement",
+        "BuyerOrderReferencedDocument",
+    )
+    .map(|order| {
+        if emitted_buyer_order {
+            order
+        } else {
+            order.saturating_sub(1)
+        }
+    });
     write_preserved_xml(
         &mut xml,
         document,
         "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement",
         None,
         buyer_order_lower,
-        cii_child_order("ApplicableHeaderTradeAgreement", "ContractReferencedDocument"),
+        cii_child_order(
+            "ApplicableHeaderTradeAgreement",
+            "ContractReferencedDocument",
+        ),
     )?;
     // BT-12 contract reference (0..1; native wins over a same-order preserved one).
     let emitted_contract = write_single_referenced_document(
@@ -1687,8 +1696,14 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
         document,
         delivery_path,
         None,
-        cii_child_order("ApplicableHeaderTradeDelivery", "RelatedSupplyChainConsignment"),
-        cii_child_order("ApplicableHeaderTradeDelivery", "ActualDeliverySupplyChainEvent"),
+        cii_child_order(
+            "ApplicableHeaderTradeDelivery",
+            "RelatedSupplyChainConsignment",
+        ),
+        cii_child_order(
+            "ApplicableHeaderTradeDelivery",
+            "ActualDeliverySupplyChainEvent",
+        ),
     )?;
     // EN 16931 BT-72 actual delivery date (NOT the tax point date — BT-7 now
     // lives in ram:ApplicableTradeTax/ram:TaxPointDate).
@@ -1708,7 +1723,10 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
         delivery_path,
         None,
         max_known_child_order(container_name(delivery_path)),
-        cii_child_order("ApplicableHeaderTradeDelivery", "DespatchAdviceReferencedDocument"),
+        cii_child_order(
+            "ApplicableHeaderTradeDelivery",
+            "DespatchAdviceReferencedDocument",
+        ),
     )?;
     let emitted_despatch = write_single_referenced_document(
         &mut xml,
@@ -1718,16 +1736,27 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
     );
     // Window (despatch, receiving): suppresses a same-order preserved despatch when
     // the native one was emitted, otherwise replays it.
-    let despatch_lower =
-        cii_child_order("ApplicableHeaderTradeDelivery", "DespatchAdviceReferencedDocument")
-            .map(|order| if emitted_despatch { order } else { order.saturating_sub(1) });
+    let despatch_lower = cii_child_order(
+        "ApplicableHeaderTradeDelivery",
+        "DespatchAdviceReferencedDocument",
+    )
+    .map(|order| {
+        if emitted_despatch {
+            order
+        } else {
+            order.saturating_sub(1)
+        }
+    });
     write_preserved_xml(
         &mut xml,
         document,
         delivery_path,
         None,
         despatch_lower,
-        cii_child_order("ApplicableHeaderTradeDelivery", "ReceivingAdviceReferencedDocument"),
+        cii_child_order(
+            "ApplicableHeaderTradeDelivery",
+            "ReceivingAdviceReferencedDocument",
+        ),
     )?;
     let emitted_receiving = write_single_referenced_document(
         &mut xml,
@@ -1853,7 +1882,10 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
         settlement_path,
         None,
         cii_child_order("ApplicableHeaderTradeSettlement", "BillingSpecifiedPeriod"),
-        cii_child_order("ApplicableHeaderTradeSettlement", "SpecifiedTradePaymentTerms"),
+        cii_child_order(
+            "ApplicableHeaderTradeSettlement",
+            "SpecifiedTradePaymentTerms",
+        ),
     )?;
     if let Some(terms) = &document.payment_terms {
         xml.push_str("<ram:SpecifiedTradePaymentTerms>");
@@ -2978,7 +3010,11 @@ fn write_cii_allowance_charge(xml: &mut String, allowance_charge: &DocumentAllow
     });
     xml.push_str("</udt:Indicator></ram:ChargeIndicator>");
     if let Some(percentage) = &allowance_charge.percentage {
-        write_text_element(xml, "ram:CalculationPercent", &percentage.inner().to_string());
+        write_text_element(
+            xml,
+            "ram:CalculationPercent",
+            &percentage.inner().to_string(),
+        );
     }
     if let Some(base) = &allowance_charge.base_amount {
         write_amount_text_element(xml, "ram:BasisAmount", base.inner());
@@ -3489,7 +3525,9 @@ fn known_cii_children(parent: &str) -> Option<&'static [&'static str]> {
             "SpecifiedLineTradeSettlement",
         ]),
         "AssociatedDocumentLineDocument" => Some(&["LineID"]),
-        "SpecifiedTradeProduct" => Some(&["Name", "Description", "DesignatedProductClassification"]),
+        "SpecifiedTradeProduct" => {
+            Some(&["Name", "Description", "DesignatedProductClassification"])
+        }
         "SpecifiedLineTradeAgreement" => Some(&["NetPriceProductTradePrice"]),
         "NetPriceProductTradePrice" => Some(&["ChargeAmount"]),
         "SpecifiedLineTradeDelivery" => Some(&["BilledQuantity", "CreditedQuantity"]),
@@ -4563,8 +4601,7 @@ mod tests {
         let mut document = fixture(DocumentType::Invoice, 0);
         // Decimal::MIN minus a positive exclusive amount overflows the Sub impl.
         document.monetary_total.tax_inclusive_amount = DecimalValue::new(Decimal::MIN);
-        document.monetary_total.tax_exclusive_amount =
-            DecimalValue::new(Decimal::ONE_HUNDRED);
+        document.monetary_total.tax_exclusive_amount = DecimalValue::new(Decimal::ONE_HUNDRED);
 
         let xml = to_xml(&document).expect("serializer must not panic on overflowing totals");
         // Element is still emitted and well-formed (empty value on overflow).
@@ -5212,7 +5249,12 @@ mod tests {
 
         let serialized = to_xml(&parsed).unwrap();
         // Mapped, not also preserved-raw: appears exactly once.
-        assert_eq!(serialized.matches("<ram:DesignatedProductClassification>").count(), 1);
+        assert_eq!(
+            serialized
+                .matches("<ram:DesignatedProductClassification>")
+                .count(),
+            1
+        );
         assert_eq!(serialized.matches("<ram:ClassCode").count(), 1);
         assert!(serialized.contains(
             r#"<ram:DesignatedProductClassification><ram:ClassCode listID="HS" listVersionID="2023">8471.30</ram:ClassCode></ram:DesignatedProductClassification>"#
@@ -5299,12 +5341,25 @@ mod tests {
         assert!(classification_pos < origin_pos);
 
         // No element dropped: each appears exactly once, plus a stable round-trip.
-        assert_eq!(serialized.matches("<ram:DesignatedProductClassification>").count(), 1);
-        assert_eq!(serialized.matches("<ram:ApplicableProductCharacteristic").count(), 1);
+        assert_eq!(
+            serialized
+                .matches("<ram:DesignatedProductClassification>")
+                .count(),
+            1
+        );
+        assert_eq!(
+            serialized
+                .matches("<ram:ApplicableProductCharacteristic")
+                .count(),
+            1
+        );
         assert_eq!(serialized.matches("<ram:OriginTradeCountry").count(), 1);
 
         let parsed = parse_document(&serialized);
-        assert_eq!(parsed.lines[0].classifications, document.lines[0].classifications);
+        assert_eq!(
+            parsed.lines[0].classifications,
+            document.lines[0].classifications
+        );
         assert_eq!(to_xml(&parsed).unwrap(), serialized);
     }
 
@@ -5333,8 +5388,9 @@ mod tests {
 
         // Both EN 16931 bindings are present, serialized verbatim (no mapping).
         assert!(serialized.contains("<ram:ExemptionReason>Reverse charge</ram:ExemptionReason>"));
-        assert!(serialized
-            .contains("<ram:ExemptionReasonCode>VATEX-EU-AE</ram:ExemptionReasonCode>"));
+        assert!(
+            serialized.contains("<ram:ExemptionReasonCode>VATEX-EU-AE</ram:ExemptionReasonCode>")
+        );
 
         // The exemption bindings live in the header-summary ApplicableTradeTax,
         // not the line-level one. Scope position checks to the header block,
@@ -5347,7 +5403,9 @@ mod tests {
         let type_code = header_tax.find("<ram:TypeCode>VAT</ram:TypeCode>").unwrap();
         let exemption_reason = header_tax.find("<ram:ExemptionReason>").unwrap();
         let basis_amount = header_tax.find("<ram:BasisAmount").unwrap();
-        let category_code = header_tax.find("<ram:CategoryCode>AE</ram:CategoryCode>").unwrap();
+        let category_code = header_tax
+            .find("<ram:CategoryCode>AE</ram:CategoryCode>")
+            .unwrap();
         let exemption_code = header_tax.find("<ram:ExemptionReasonCode>").unwrap();
         let rate = header_tax.find("<ram:RateApplicablePercent>").unwrap();
         assert!(type_code < exemption_reason);
@@ -5432,7 +5490,10 @@ mod tests {
             "parser preserves BillingSpecifiedPeriod as raw XML, does not populate invoice_period"
         );
         assert_eq!(to_xml(&parsed).unwrap(), serialized);
-        assert_eq!(serialized.matches("<ram:BillingSpecifiedPeriod>").count(), 1);
+        assert_eq!(
+            serialized.matches("<ram:BillingSpecifiedPeriod>").count(),
+            1
+        );
     }
 
     #[test]
@@ -5479,7 +5540,10 @@ mod tests {
         );
         // Preserved fragment wins: the original period survives, not the override.
         assert!(out.contains("format=\"102\">20260501</udt:DateTimeString>"));
-        assert!(!out.contains("20990909"), "native override must not appear:\n{out}");
+        assert!(
+            !out.contains("20990909"),
+            "native override must not appear:\n{out}"
+        );
         assert_eq!(canonicalize_xml(&out).unwrap(), out);
     }
 
@@ -5546,9 +5610,7 @@ mod tests {
         let allowance = serialized
             .find("<ram:SpecifiedTradeAllowanceCharge>")
             .unwrap();
-        let terms = serialized
-            .find("<ram:SpecifiedTradePaymentTerms>")
-            .unwrap();
+        let terms = serialized.find("<ram:SpecifiedTradePaymentTerms>").unwrap();
         assert!(
             tax < allowance && allowance < terms,
             "SpecifiedTradeAllowanceCharge must sit after ApplicableTradeTax and before payment terms:\n{serialized}"
@@ -5646,8 +5708,13 @@ mod tests {
         // TradePartyType + delivery child order: ShipToTradeParty (order 2)
         // precedes ActualDeliverySupplyChainEvent (order 7).
         let ship = serialized.find("<ram:ShipToTradeParty>").unwrap();
-        let event = serialized.find("<ram:ActualDeliverySupplyChainEvent>").unwrap();
-        assert!(ship < event, "ShipToTradeParty must precede the delivery event:\n{serialized}");
+        let event = serialized
+            .find("<ram:ActualDeliverySupplyChainEvent>")
+            .unwrap();
+        assert!(
+            ship < event,
+            "ShipToTradeParty must precede the delivery event:\n{serialized}"
+        );
 
         // Preserve-on-parse: the parser keeps ShipToTradeParty as raw XML and does
         // not populate deliver_to; the round trip replays it byte-stably.
@@ -5696,9 +5763,18 @@ mod tests {
             1,
             "exactly one ShipToTradeParty:\n{out}"
         );
-        assert!(out.contains("PRESERVED-SHIPTO"), "preserved present:\n{out}");
-        assert!(!out.contains("NATIVE-SHIPTO"), "native must be suppressed:\n{out}");
-        assert!(!out.contains("LOC-X"), "native id must be suppressed:\n{out}");
+        assert!(
+            out.contains("PRESERVED-SHIPTO"),
+            "preserved present:\n{out}"
+        );
+        assert!(
+            !out.contains("NATIVE-SHIPTO"),
+            "native must be suppressed:\n{out}"
+        );
+        assert!(
+            !out.contains("LOC-X"),
+            "native id must be suppressed:\n{out}"
+        );
 
         // Schema order + byte stability.
         let ship = out.find("<ram:ShipToTradeParty>").unwrap();
@@ -5747,7 +5823,10 @@ mod tests {
 
         // Each element appears exactly once, and the period precedes the allowance.
         assert_eq!(out.matches("<ram:BillingSpecifiedPeriod>").count(), 1);
-        assert_eq!(out.matches("<ram:SpecifiedTradeAllowanceCharge>").count(), 1);
+        assert_eq!(
+            out.matches("<ram:SpecifiedTradeAllowanceCharge>").count(),
+            1
+        );
         let period = out.find("<ram:BillingSpecifiedPeriod>").unwrap();
         let allowance = out.find("<ram:SpecifiedTradeAllowanceCharge>").unwrap();
         assert!(
@@ -5884,7 +5963,10 @@ mod tests {
         // It precedes the line ApplicableTradeTax, and the round trip is lossless.
         let pr = out.find(">LINE-PR-1</ram:PaymentReference>").unwrap();
         let tax = out.find("<ram:ApplicableTradeTax>").unwrap();
-        assert!(pr < tax, "PaymentReference (order 1) must precede ApplicableTradeTax:\n{out}");
+        assert!(
+            pr < tax,
+            "PaymentReference (order 1) must precede ApplicableTradeTax:\n{out}"
+        );
         assert_eq!(canonicalize_xml(&out).unwrap(), out);
         assert_eq!(to_xml(&parse_document(&out)).unwrap(), out);
     }
@@ -5959,7 +6041,9 @@ mod tests {
             .contains("<ram:ExemptionReasonCode>VATEX-EU-132-1A</ram:ExemptionReasonCode>"));
 
         let header_tax = &serialized[serialized.find("<ram:CalculatedAmount").unwrap()..];
-        let category_code = header_tax.find("<ram:CategoryCode>E</ram:CategoryCode>").unwrap();
+        let category_code = header_tax
+            .find("<ram:CategoryCode>E</ram:CategoryCode>")
+            .unwrap();
         let exemption_code = header_tax.find("<ram:ExemptionReasonCode>").unwrap();
         let rate = header_tax.find("<ram:RateApplicablePercent>").unwrap();
         assert!(category_code < exemption_code);
@@ -6009,8 +6093,18 @@ mod tests {
         ));
         assert!(serialized.contains(r#"format="102">20260415</qdt:DateTimeString></ram:FormattedIssueDateTime></ram:InvoiceReferencedDocument>"#));
         // Each typed element emitted exactly once.
-        assert_eq!(serialized.matches("<ram:BuyerOrderReferencedDocument>").count(), 1);
-        assert_eq!(serialized.matches("<ram:InvoiceReferencedDocument>").count(), 1);
+        assert_eq!(
+            serialized
+                .matches("<ram:BuyerOrderReferencedDocument>")
+                .count(),
+            1
+        );
+        assert_eq!(
+            serialized
+                .matches("<ram:InvoiceReferencedDocument>")
+                .count(),
+            1
+        );
 
         // Schema slots: BT-13 sits inside the agreement (after BuyerTradeParty);
         // BT-25 sits inside the settlement (after the monetary summation). The
@@ -6111,7 +6205,12 @@ mod tests {
         ];
 
         let serialized = to_xml(&document).unwrap();
-        assert_eq!(serialized.matches("<ram:InvoiceReferencedDocument>").count(), 2);
+        assert_eq!(
+            serialized
+                .matches("<ram:InvoiceReferencedDocument>")
+                .count(),
+            2
+        );
         assert!(serialized.contains("<ram:IssuerAssignedID>INV-A</ram:IssuerAssignedID>"));
         assert!(serialized.contains("<ram:IssuerAssignedID>INV-B</ram:IssuerAssignedID>"));
         // INV-A keeps order: its element appears before INV-B's.
@@ -6119,7 +6218,10 @@ mod tests {
         let b_pos = serialized.find("INV-B").unwrap();
         assert!(a_pos < b_pos);
         // Only the dated reference carries FormattedIssueDateTime.
-        assert_eq!(serialized.matches("<ram:FormattedIssueDateTime>").count(), 1);
+        assert_eq!(
+            serialized.matches("<ram:FormattedIssueDateTime>").count(),
+            1
+        );
         assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
     }
 
@@ -6164,7 +6266,10 @@ mod tests {
             "expected ram:DespatchAdviceReferencedDocument carrying D-1:\n{serialized}"
         );
         // The unrecognized kind (ReferenceKindClass::Other) has no typed element.
-        assert!(!serialized.contains("X-1"), "Other-kind reference must be skipped:\n{serialized}");
+        assert!(
+            !serialized.contains("X-1"),
+            "Other-kind reference must be skipped:\n{serialized}"
+        );
         assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
     }
 
@@ -6213,7 +6318,9 @@ mod tests {
                 "expected exactly one <{element}>:\n{out}"
             );
             assert!(
-                out.contains(&format!("<{element}><ram:IssuerAssignedID>{id}</ram:IssuerAssignedID></{element}>")),
+                out.contains(&format!(
+                    "<{element}><ram:IssuerAssignedID>{id}</ram:IssuerAssignedID></{element}>"
+                )),
                 "expected <{element}> carrying {id}:\n{out}"
             );
         }
@@ -6285,12 +6392,16 @@ mod tests {
         let reserialized = to_xml(&parsed).unwrap();
         // Each carried element re-emits EXACTLY once — no double from a second path.
         assert_eq!(
-            reserialized.matches("<ram:BuyerOrderReferencedDocument>").count(),
+            reserialized
+                .matches("<ram:BuyerOrderReferencedDocument>")
+                .count(),
             1,
             "BT-13 must re-emit exactly once (preserved replay, not also native)"
         );
         assert_eq!(
-            reserialized.matches("<ram:InvoiceReferencedDocument>").count(),
+            reserialized
+                .matches("<ram:InvoiceReferencedDocument>")
+                .count(),
             1,
             "BT-25 must re-emit exactly once (preserved replay, not also native)"
         );
@@ -6327,8 +6438,18 @@ mod tests {
 
         let serialized = to_xml(&parsed).unwrap();
         // Native BT-13 emitted once; preserved BT-25 replayed once.
-        assert_eq!(serialized.matches("<ram:BuyerOrderReferencedDocument>").count(), 1);
-        assert_eq!(serialized.matches("<ram:InvoiceReferencedDocument>").count(), 1);
+        assert_eq!(
+            serialized
+                .matches("<ram:BuyerOrderReferencedDocument>")
+                .count(),
+            1
+        );
+        assert_eq!(
+            serialized
+                .matches("<ram:InvoiceReferencedDocument>")
+                .count(),
+            1
+        );
         assert!(serialized.contains("PO-NATIVE"));
         assert!(serialized.contains("INV-PRESERVED"));
         // Schema order holds across native + preserved mix.

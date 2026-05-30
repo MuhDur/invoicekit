@@ -55,7 +55,9 @@ use thiserror::Error;
 // Re-export the CFDI signer substrate types this crate's public API surfaces,
 // so downstream callers need not depend on `invoicekit-signer-cfdi` directly.
 pub use invoicekit_signer::Signature;
-pub use invoicekit_signer_cfdi::{CfdiKind as CfdiComprobanteKind, PacEnvironment as CfdiEnvironment};
+pub use invoicekit_signer_cfdi::{
+    CfdiKind as CfdiComprobanteKind, PacEnvironment as CfdiEnvironment,
+};
 
 // ---------------------------------------------------------------------------
 // CFDI serialization (IR -> national cfdi:Comprobante XML)
@@ -203,7 +205,11 @@ pub fn to_cfdi_xml(
             "ClaveProdServ",
             clave_prod_serv(line).unwrap_or("01010101"),
         );
-        attr(&mut out, "ClaveUnidad", line.unit_code.as_deref().unwrap_or("H87"));
+        attr(
+            &mut out,
+            "ClaveUnidad",
+            line.unit_code.as_deref().unwrap_or("H87"),
+        );
         attr(&mut out, "Cantidad", &cantidad);
         attr(&mut out, "Descripcion", &line.description);
         attr(&mut out, "ValorUnitario", &valor_unitario);
@@ -240,7 +246,11 @@ pub fn to_cfdi_xml(
     for summary in &document.tax_summary {
         let rate = summary_rate(summary);
         out.push_str("      <cfdi:Traslado");
-        attr(&mut out, "Base", &fmt_amount(summary.taxable_amount.inner()));
+        attr(
+            &mut out,
+            "Base",
+            &fmt_amount(summary.taxable_amount.inner()),
+        );
         attr(&mut out, "Impuesto", "002");
         attr(&mut out, "TipoFactor", "Tasa");
         attr(&mut out, "TasaOCuota", &fmt_rate(rate));
@@ -263,9 +273,9 @@ fn tipo_de_comprobante(document_type: DocumentType) -> Result<&'static str, Cfdi
     match document_type {
         DocumentType::Invoice => Ok("I"),
         DocumentType::CreditNote => Ok("E"),
-        other @ (DocumentType::DebitNote
-        | DocumentType::ProForma
-        | DocumentType::SelfBilled) => Err(CfdiSerializeError::UnsupportedDocumentType(other)),
+        other @ (DocumentType::DebitNote | DocumentType::ProForma | DocumentType::SelfBilled) => {
+            Err(CfdiSerializeError::UnsupportedDocumentType(other))
+        }
     }
 }
 
@@ -286,7 +296,12 @@ fn party_rfc(party: &Party) -> Option<String> {
         .tax_ids
         .iter()
         .find(|t| t.scheme.eq_ignore_ascii_case("rfc"))
-        .or_else(|| party.tax_ids.iter().find(|t| t.scheme.eq_ignore_ascii_case("vat")))
+        .or_else(|| {
+            party
+                .tax_ids
+                .iter()
+                .find(|t| t.scheme.eq_ignore_ascii_case("vat"))
+        })
         .or_else(|| party.tax_ids.first())?;
     Some(strip_mx_prefix(&chosen.value))
 }
@@ -295,7 +310,11 @@ fn party_rfc(party: &Party) -> Option<String> {
 /// -> `"AAA010101AAA"`). The RFC itself never starts with a country code.
 fn strip_mx_prefix(value: &str) -> String {
     let bytes = value.as_bytes();
-    if bytes.len() > 2 && value.get(0..2).is_some_and(|p| p.eq_ignore_ascii_case("MX")) {
+    if bytes.len() > 2
+        && value
+            .get(0..2)
+            .is_some_and(|p| p.eq_ignore_ascii_case("MX"))
+    {
         value[2..].to_owned()
     } else {
         value.to_owned()
@@ -318,9 +337,15 @@ fn clave_prod_serv(line: &invoicekit_ir::DocumentLine) -> Option<&str> {
 
 /// The `(rate, tax_amount)` for a line, looked up from the tax summary entry
 /// matching the line's tax category.
-fn line_tax(document: &CommercialDocument, line: &invoicekit_ir::DocumentLine) -> Option<(Decimal, Decimal)> {
+fn line_tax(
+    document: &CommercialDocument,
+    line: &invoicekit_ir::DocumentLine,
+) -> Option<(Decimal, Decimal)> {
     let cat = line.tax_category.as_ref()?;
-    let summary = document.tax_summary.iter().find(|s| &s.category_code == cat)?;
+    let summary = document
+        .tax_summary
+        .iter()
+        .find(|s| &s.category_code == cat)?;
     Some((summary_rate(summary), summary.tax_amount.inner()))
 }
 
@@ -650,7 +675,11 @@ fn wrap_tfd_complemento(
     let mut tfd = String::with_capacity(512);
     tfd.push_str("  <cfdi:Complemento>\n");
     tfd.push_str("    <tfd:TimbreFiscalDigital");
-    attr(&mut tfd, "xmlns:tfd", "http://www.sat.gob.mx/TimbreFiscalDigital");
+    attr(
+        &mut tfd,
+        "xmlns:tfd",
+        "http://www.sat.gob.mx/TimbreFiscalDigital",
+    );
     attr(&mut tfd, "Version", "1.1");
     attr(&mut tfd, "UUID", uuid);
     attr(&mut tfd, "FechaTimbrado", fecha_timbrado);
@@ -822,7 +851,11 @@ mod tests {
             delivery_date: None,
             document_number: DocumentNumber::new("FAC-2026-0001").unwrap(),
             currency: Iso4217Code::new("MXN").unwrap(),
-            supplier: mexican_party("Comercializadora Azteca SA de CV", "CAZ010101AAA", "Ciudad de Mexico"),
+            supplier: mexican_party(
+                "Comercializadora Azteca SA de CV",
+                "CAZ010101AAA",
+                "Ciudad de Mexico",
+            ),
             customer: mexican_party("Distribuidora Maya SA de CV", "DMA020202BBB", "Monterrey"),
             payee: None,
             payment_terms: None,
@@ -1017,7 +1050,10 @@ mod tests {
     #[test]
     fn cfdi_rejects_unsupported_document_type() {
         let err = tipo_de_comprobante(DocumentType::DebitNote).unwrap_err();
-        assert!(matches!(err, CfdiSerializeError::UnsupportedDocumentType(_)));
+        assert!(matches!(
+            err,
+            CfdiSerializeError::UnsupportedDocumentType(_)
+        ));
     }
 
     #[test]
@@ -1096,7 +1132,8 @@ mod tests {
         assert!(validate_folio_fiscal("ABCDEF12-3456-7890-ABCD-EF1234567890").is_ok());
         assert!(validate_folio_fiscal("not-a-uuid").is_err());
         assert!(validate_folio_fiscal("00000000-0000-4000-8000-00000000001").is_err()); // short tail
-        assert!(validate_folio_fiscal("0000000Z-0000-4000-8000-000000000001").is_err()); // non-hex
+        assert!(validate_folio_fiscal("0000000Z-0000-4000-8000-000000000001").is_err());
+        // non-hex
     }
 
     #[test]

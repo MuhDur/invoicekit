@@ -176,10 +176,12 @@ impl RdProvider for MockRdProvider {
             *g += 1;
             v
         };
-        let (status, reason) = self.forced_rejection_reason.as_ref().map_or(
-            (RdStatus::Acknowledged, None),
-            |reason| (RdStatus::Rejected, Some(reason.clone())),
-        );
+        let (status, reason) = self
+            .forced_rejection_reason
+            .as_ref()
+            .map_or((RdStatus::Acknowledged, None), |reason| {
+                (RdStatus::Rejected, Some(reason.clone()))
+            });
         Ok(RdSubmitEnvelope {
             rd_ref: format!("TH-{serial:012}"),
             status,

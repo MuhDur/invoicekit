@@ -172,7 +172,9 @@ fn run_lifecycle() -> (Vec<u8>, invoicekit_report_co_dian::DianSubmitEnvelope) {
 
     // 3. submit to the offline mock DIAN provider.
     let provider = MockDianProvider::with_fixed_submitted_at(FIXED_SUBMITTED_AT);
-    let envelope = provider.submit_invoice(&submit_request(ubl_bytes.clone())).unwrap();
+    let envelope = provider
+        .submit_invoice(&submit_request(ubl_bytes.clone()))
+        .unwrap();
 
     // 4. evidence bundle: canonical doc + national UBL XML + DIAN receipt.
     let ikb = bundle_for(&doc, &ubl_bytes, &envelope);
@@ -251,7 +253,11 @@ fn colombia_refusal_is_surfaced_as_err_before_the_wire() {
 /// Build the offline evidence bundle for an arbitrary Colombian document +
 /// DIAN envelope. Mirrors `run_lifecycle`'s step 4 so every scenario produces a
 /// verifiable `.ikb` from the same canonical artefact layout.
-fn bundle_for(doc: &CommercialDocument, ubl_bytes: &[u8], envelope: &DianSubmitEnvelope) -> Vec<u8> {
+fn bundle_for(
+    doc: &CommercialDocument,
+    ubl_bytes: &[u8],
+    envelope: &DianSubmitEnvelope,
+) -> Vec<u8> {
     let canonical = canonicalize_value(&doc.to_value().unwrap())
         .unwrap()
         .into_bytes();
@@ -263,7 +269,11 @@ fn bundle_for(doc: &CommercialDocument, ubl_bytes: &[u8], envelope: &DianSubmitE
         serde_json::to_vec(envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    pack(&EvidenceBundle { manifest, artefacts }).unwrap()
+    pack(&EvidenceBundle {
+        manifest,
+        artefacts,
+    })
+    .unwrap()
 }
 
 /// A Nota Crédito (UBL `CreditNote`, DIAN doc class `NotaCredito`) that fully
@@ -525,8 +535,7 @@ fn colombia_nota_credito_lifecycle_bundles_and_verifies() {
     // element-name opener — no trailing `>` — and on the exact closing tags.)
     assert!(ubl.contains("<CreditNote"), "root must be a UBL CreditNote");
     assert!(
-        ubl.contains("<cbc:CreditNoteTypeCode")
-            && ubl.contains(">381</cbc:CreditNoteTypeCode>"),
+        ubl.contains("<cbc:CreditNoteTypeCode") && ubl.contains(">381</cbc:CreditNoteTypeCode>"),
         "Nota Crédito must carry UBL CreditNoteTypeCode 381"
     );
     assert!(
@@ -606,12 +615,16 @@ fn colombia_multi_line_mixed_iva_serializes_both_tax_subtotals() {
     let ubl_bytes = ubl.into_bytes();
 
     let provider = MockDianProvider::with_fixed_submitted_at(FIXED_SUBMITTED_AT);
-    let envelope = provider.submit_invoice(&submit_request(ubl_bytes.clone())).unwrap();
+    let envelope = provider
+        .submit_invoice(&submit_request(ubl_bytes.clone()))
+        .unwrap();
     assert_eq!(envelope.status, DianStatus::Procesando);
 
     let ikb = bundle_for(&doc, &ubl_bytes, &envelope);
     assert!(
-        verify_packed(&ikb, &VerifyOptions::content_only()).unwrap().ok,
+        verify_packed(&ikb, &VerifyOptions::content_only())
+            .unwrap()
+            .ok,
         "mixed-IVA evidence bundle must verify"
     );
 }
@@ -660,7 +673,9 @@ fn colombia_export_invoice_is_zero_rated_and_b2c_omits_buyer_nit() {
 
     let ikb = bundle_for(&doc, &ubl_bytes, &envelope);
     assert!(
-        verify_packed(&ikb, &VerifyOptions::content_only()).unwrap().ok,
+        verify_packed(&ikb, &VerifyOptions::content_only())
+            .unwrap()
+            .ok,
         "export evidence bundle must verify"
     );
 }
@@ -700,7 +715,9 @@ fn colombia_rechazado_verdict_is_a_status_not_an_err_and_still_bundles() {
     // A rejected verdict bundles + verifies just like a delivered one.
     let ikb = bundle_for(&doc, &ubl_bytes, &rejected);
     assert!(
-        verify_packed(&ikb, &VerifyOptions::content_only()).unwrap().ok,
+        verify_packed(&ikb, &VerifyOptions::content_only())
+            .unwrap()
+            .ok,
         "rejection-path evidence bundle must verify"
     );
 }
@@ -798,5 +815,9 @@ fn colombia_credit_note_lifecycle_is_byte_deterministic() {
         let envelope = provider.submit_invoice(&req).unwrap();
         bundle_for(&doc, &ubl_bytes, &envelope)
     };
-    assert_eq!(run(), run(), "the Nota Crédito lifecycle must be byte-stable");
+    assert_eq!(
+        run(),
+        run(),
+        "the Nota Crédito lifecycle must be byte-stable"
+    );
 }

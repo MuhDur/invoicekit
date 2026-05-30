@@ -432,7 +432,10 @@ fn bundle_for(
         serde_json::to_vec(&receipt).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, ubl, receipt)
 }
@@ -560,7 +563,10 @@ fn taiwan_mof_rejection_is_a_receipt_status_not_an_error() {
     assert_eq!(receipt.random_number.len(), 4);
 
     let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
-    assert!(report.ok, "rejection-path evidence bundle must still verify");
+    assert!(
+        report.ok,
+        "rejection-path evidence bundle must still verify"
+    );
 }
 
 /// A B2C ([`MofInvoiceKind::B2c`], 二聯式) submission of the same invoice must

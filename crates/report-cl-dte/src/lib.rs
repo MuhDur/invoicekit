@@ -142,9 +142,7 @@ pub fn to_dte_xml(
     // mojibake. Production SII submission re-encodes to ISO-8859-1 at the wire;
     // that transcoding belongs in the follow-up report-cl-dte-http crate.
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    out.push_str(
-        "<DTE xmlns=\"http://www.sii.cl/SiiDte\" version=\"1.0\">\n",
-    );
+    out.push_str("<DTE xmlns=\"http://www.sii.cl/SiiDte\" version=\"1.0\">\n");
     // Documento ID convention: "T<tipo>F<folio>" (e.g. T33F4242).
     let doc_id = format!("T{tipo_dte}F{}", context.folio);
     indent(&mut out, 1);
@@ -755,7 +753,9 @@ mod tests {
         assert_eq!(env.status, SiiStatus::Rechazado);
         assert!(env.track_id.starts_with("SII-"));
         assert!(
-            env.glosa.as_deref().is_some_and(|g| g.contains("RECHAZADO")),
+            env.glosa
+                .as_deref()
+                .is_some_and(|g| g.contains("RECHAZADO")),
             "a Rechazado verdict must carry a glosa, got {:?}",
             env.glosa
         );
@@ -768,7 +768,10 @@ mod tests {
         let p = MockSiiProvider::new().with_forced_status(SiiStatus::Rechazado);
         let mut req = sample_request();
         req.issuer_rut = "BAD".to_owned();
-        assert!(matches!(p.submit_dte(&req).unwrap_err(), SiiError::BadRut(_)));
+        assert!(matches!(
+            p.submit_dte(&req).unwrap_err(),
+            SiiError::BadRut(_)
+        ));
     }
 
     #[test]
@@ -794,7 +797,7 @@ mod tests {
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, CountryCode, DateOnly, DecimalValue,
         DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference, DocumentType,
-        ItemClassification, Iso4217Code, MonetaryTotal, Party, PartyTaxId, PostalAddress,
+        Iso4217Code, ItemClassification, MonetaryTotal, Party, PartyTaxId, PostalAddress,
         ReferenceKindClass, SchemaVersion, TaxCategorySummary,
     };
     use rust_decimal::Decimal;

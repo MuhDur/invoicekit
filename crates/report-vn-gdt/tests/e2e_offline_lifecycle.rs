@@ -261,7 +261,10 @@ fn vietnam_refusal_paths_are_errors_not_bundles() {
 /// `.ikb`, reusing the pinned timestamps so output stays byte-stable. The
 /// `provider` is supplied so a caller can force a `Rejected` verdict. Returns
 /// `(ikb, ubl_xml, envelope)`.
-fn bundle_for(doc: &CommercialDocument, provider: &MockGdtProvider) -> (Vec<u8>, String, GdtSubmitEnvelope) {
+fn bundle_for(
+    doc: &CommercialDocument,
+    provider: &MockGdtProvider,
+) -> (Vec<u8>, String, GdtSubmitEnvelope) {
     let ubl = to_xml(doc).unwrap();
     let ubl_bytes = ubl.clone().into_bytes();
     let envelope = provider
@@ -279,7 +282,10 @@ fn bundle_for(doc: &CommercialDocument, provider: &MockGdtProvider) -> (Vec<u8>,
         serde_json::to_vec(&envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, ubl, envelope)
 }
@@ -516,7 +522,10 @@ fn vietnam_credit_note_serializes_as_ubl_creditnote_and_bundles() {
     // The canonicalizer hoists namespace declarations onto the element that
     // introduces a prefix, so element-open tags carry an `xmlns:*` attribute;
     // match on close tags / text-with-close patterns, which stay clean.
-    assert!(ubl.contains("<CreditNote"), "credit note must use the UBL CreditNote root:\n{ubl}");
+    assert!(
+        ubl.contains("<CreditNote"),
+        "credit note must use the UBL CreditNote root:\n{ubl}"
+    );
     assert!(
         ubl.contains("381</cbc:CreditNoteTypeCode>"),
         "a credit note must carry UBL code 381, got:\n{ubl}"
@@ -639,7 +648,10 @@ fn vietnam_authority_rejection_is_receipt_not_error_and_bundles() {
 
     // The rejection still produces a verifiable audit bundle.
     let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
-    assert!(report.ok, "rejected-submission evidence bundle must still verify");
+    assert!(
+        report.ok,
+        "rejected-submission evidence bundle must still verify"
+    );
 }
 
 /// A 13-character issuer MST whose final (branch-suffix) characters are not

@@ -35,10 +35,10 @@ use invoicekit_canonical::canonicalize_value;
 use invoicekit_evidence::{manifest_for, pack, EvidenceBundle};
 use invoicekit_format_ubl::to_xml;
 use invoicekit_ir::{
-    CommercialDocument, CommercialDocumentParts, CountryCode, DateOnly, DecimalValue,
-    DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference, DocumentType,
-    Iso4217Code, JurisdictionExtension, MonetaryTotal, Party, PartyTaxId, PostalAddress,
-    SchemaVersion, TaxCategorySummary,
+    CommercialDocument, CommercialDocumentParts, CountryCode, DateOnly, DecimalValue, DocumentId,
+    DocumentLine, DocumentMeta, DocumentNumber, DocumentReference, DocumentType, Iso4217Code,
+    JurisdictionExtension, MonetaryTotal, Party, PartyTaxId, PostalAddress, SchemaVersion,
+    TaxCategorySummary,
 };
 use invoicekit_report_es_verifactu::{
     qr_payload, validate_nif, MockVeriFactuProvider, VeriFactuEnvironment, VeriFactuMode,
@@ -165,12 +165,19 @@ fn pack_bundle(
     let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     artefacts.insert("canonical.json".to_owned(), canonical);
     artefacts.insert("formats/ubl.xml".to_owned(), ubl_bytes);
-    artefacts.insert("receipt.json".to_owned(), serde_json::to_vec(receipt).unwrap());
+    artefacts.insert(
+        "receipt.json".to_owned(),
+        serde_json::to_vec(receipt).unwrap(),
+    );
     for (name, bytes) in extra {
         artefacts.insert((*name).to_owned(), bytes.clone());
     }
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    pack(&EvidenceBundle { manifest, artefacts }).unwrap()
+    pack(&EvidenceBundle {
+        manifest,
+        artefacts,
+    })
+    .unwrap()
 }
 
 /// Steps 1-4: build -> serialize (UBL) -> register with the AEAT mock ->
@@ -264,7 +271,10 @@ fn spain_hash_chain_continuity_is_accepted() {
     assert_eq!(first.status, VeriFactuStatus::Accepted);
 
     let second = provider
-        .register_invoice(&register_request(ubl_bytes, Some(first.recorded_hash_hex.clone())))
+        .register_invoice(&register_request(
+            ubl_bytes,
+            Some(first.recorded_hash_hex.clone()),
+        ))
         .unwrap();
     assert_eq!(second.status, VeriFactuStatus::Accepted);
     // Distinct CSVs prove the AEAT serial advanced for the chained invoice.
@@ -601,7 +611,12 @@ fn spain_multi_line_mixed_vat_rates_register_and_bundle() {
     let canonical = canonicalize_value(&doc.to_value().unwrap())
         .unwrap()
         .into_bytes();
-    let ikb = pack_bundle(canonical, ubl_bytes, &receipt, &[("qr.txt", qr.into_bytes())]);
+    let ikb = pack_bundle(
+        canonical,
+        ubl_bytes,
+        &receipt,
+        &[("qr.txt", qr.into_bytes())],
+    );
     assert!(
         verify_packed(&ikb, &VerifyOptions::content_only())
             .unwrap()
@@ -651,8 +666,10 @@ fn spain_accepted_with_warnings_records_a_chain_link() {
     // a Huella + CSV exist and the chain advances) but attached a warning. Per
     // the AEAT FAQ this record must NOT be re-sent or it triggers error 3000
     // (duplicate). We assert the chain link is usable downstream.
-    let provider = MockVeriFactuProvider::default()
-        .with_forced_status(VeriFactuStatus::AcceptedWithWarnings, Some("DuplicadoLeve".to_owned()));
+    let provider = MockVeriFactuProvider::default().with_forced_status(
+        VeriFactuStatus::AcceptedWithWarnings,
+        Some("DuplicadoLeve".to_owned()),
+    );
     let ubl_bytes = to_xml(&spanish_invoice()).unwrap().into_bytes();
     let receipt = provider
         .register_invoice(&register_request(ubl_bytes, None))
@@ -670,10 +687,16 @@ fn spain_invalid_identifier_shapes_are_refused_before_the_wire() {
     // letter for NIE/CIF. Anything else is refused before the wire.
     assert!(validate_nif("B12345678").is_ok(), "CIF: leading letter + 8");
     assert!(validate_nif("12345678Z").is_ok(), "DNI: 8 digits + letter");
-    assert!(validate_nif("X1234567L").is_ok(), "NIE: X + 7 digits + letter");
+    assert!(
+        validate_nif("X1234567L").is_ok(),
+        "NIE: X + 7 digits + letter"
+    );
     // 10 chars (one too many) and a lowercased control letter are both refused.
     assert!(validate_nif("B123456789").is_err(), "10 chars is not a NIF");
-    assert!(validate_nif("ESB1234567").is_err(), "11-char VAT with ES prefix");
+    assert!(
+        validate_nif("ESB1234567").is_err(),
+        "11-char VAT with ES prefix"
+    );
 
     // End to end: a malformed issuer NIF is an Err, never a Rejected receipt.
     let provider = MockVeriFactuProvider::default();
@@ -702,5 +725,9 @@ fn spain_corrective_receipt_is_byte_deterministic() {
             .into_bytes();
         pack_bundle(canonical, ubl_bytes, &receipt, &[])
     };
-    assert_eq!(build(), build(), "the corrective lifecycle must be byte-stable");
+    assert_eq!(
+        build(),
+        build(),
+        "the corrective lifecycle must be byte-stable"
+    );
 }

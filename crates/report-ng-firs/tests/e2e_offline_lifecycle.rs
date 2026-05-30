@@ -85,7 +85,13 @@ fn nigerian_invoice() -> CommercialDocument {
         document_number: DocumentNumber::new("INV-2026-NG-0001").unwrap(),
         currency: Iso4217Code::new("NGN").unwrap(),
         supplier: nigerian_party("Acme Nigeria Ltd", "NG12345678901", "Lagos", "LA", "100001"),
-        customer: nigerian_party("Beta Services Plc", "NG98765432109", "Abuja", "FC", "900001"),
+        customer: nigerian_party(
+            "Beta Services Plc",
+            "NG98765432109",
+            "Abuja",
+            "FC",
+            "900001",
+        ),
         payee: None,
         payment_terms: None,
         payment_instructions: Vec::new(),
@@ -167,7 +173,9 @@ fn run_lifecycle() -> (Vec<u8>, FirsSubmitEnvelope) {
 
     // 3. submit to FIRS (offline deterministic mock).
     let provider = MockFirsProvider::with_fixed_recorded_at(RECORDED_AT);
-    let envelope = provider.submit_invoice(&submit_request(ubl_bytes.clone())).unwrap();
+    let envelope = provider
+        .submit_invoice(&submit_request(ubl_bytes.clone()))
+        .unwrap();
 
     // 4. evidence bundle: canonical doc + national UBL XML + FIRS receipt.
     let canonical = canonicalize_value(&doc.to_value().unwrap())
@@ -181,7 +189,10 @@ fn run_lifecycle() -> (Vec<u8>, FirsSubmitEnvelope) {
         serde_json::to_vec(&envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, envelope)
 }
@@ -202,7 +213,11 @@ fn nigeria_offline_lifecycle_produces_verifiable_evidence() {
     );
     // IRN body is the zero-padded 16-digit serial after the `NG-` prefix.
     let serial = envelope.irn.strip_prefix("NG-").expect("NG- prefix");
-    assert_eq!(serial.len(), 16, "IRN serial must be 16 chars, got {serial:?}");
+    assert_eq!(
+        serial.len(),
+        16,
+        "IRN serial must be 16 chars, got {serial:?}"
+    );
     assert!(
         serial.bytes().all(|b| b.is_ascii_digit()),
         "IRN serial must be all ASCII digits, got {serial:?}"
@@ -231,13 +246,18 @@ fn nigeria_irn_serial_advances_per_submission() {
     let provider = MockFirsProvider::with_fixed_recorded_at(RECORDED_AT);
     let ubl_bytes = to_xml(&nigerian_invoice()).unwrap().into_bytes();
 
-    let first = provider.submit_invoice(&submit_request(ubl_bytes.clone())).unwrap();
+    let first = provider
+        .submit_invoice(&submit_request(ubl_bytes.clone()))
+        .unwrap();
     assert_eq!(first.status, FirsStatus::Accepted);
 
     let second = provider.submit_invoice(&submit_request(ubl_bytes)).unwrap();
     assert_eq!(second.status, FirsStatus::Accepted);
 
-    assert_ne!(first.irn, second.irn, "each cleared invoice must get a distinct IRN");
+    assert_ne!(
+        first.irn, second.irn,
+        "each cleared invoice must get a distinct IRN"
+    );
 }
 
 #[test]

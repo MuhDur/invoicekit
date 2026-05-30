@@ -859,10 +859,7 @@ impl DocumentReference {
     /// returns [`ReferenceKindClass::Other`] (do not emit a typed element for it).
     #[must_use]
     pub fn kind_class(&self) -> ReferenceKindClass {
-        let normalized = self
-            .kind
-            .to_ascii_lowercase()
-            .replace(['_', ' '], "-");
+        let normalized = self.kind.to_ascii_lowercase().replace(['_', ' '], "-");
         let k = normalized.as_str();
         // Preceding invoice: the original document a credit/debit note or
         // correction points back to. Covers the diverse national vocabulary
@@ -1909,9 +1906,18 @@ mod tests {
         input["delivery_date"] = json!("2026-05-28");
         let doc = CommercialDocument::try_from_value(input).unwrap();
         let period = doc.invoice_period.as_ref().unwrap();
-        assert_eq!(period.start_date.as_ref().map(DateOnly::as_str), Some("2026-05-01"));
-        assert_eq!(period.end_date.as_ref().map(DateOnly::as_str), Some("2026-05-31"));
-        assert_eq!(doc.delivery_date.as_ref().map(DateOnly::as_str), Some("2026-05-28"));
+        assert_eq!(
+            period.start_date.as_ref().map(DateOnly::as_str),
+            Some("2026-05-01")
+        );
+        assert_eq!(
+            period.end_date.as_ref().map(DateOnly::as_str),
+            Some("2026-05-31")
+        );
+        assert_eq!(
+            doc.delivery_date.as_ref().map(DateOnly::as_str),
+            Some("2026-05-28")
+        );
 
         let out = doc.to_value().unwrap();
         assert_eq!(out["invoice_period"]["start_date"], json!("2026-05-01"));
@@ -1999,7 +2005,10 @@ mod tests {
         );
 
         let out = doc.to_value().unwrap();
-        assert_eq!(out["lines"][0]["allowance_charges"][0]["amount"], json!("5.00"));
+        assert_eq!(
+            out["lines"][0]["allowance_charges"][0]["amount"],
+            json!("5.00")
+        );
     }
 
     #[test]
@@ -2048,17 +2057,22 @@ mod tests {
         let mut input = synthetic_document_json();
         input["invoice_period"] = json!({});
         let err = CommercialDocument::try_from_value(input).unwrap_err();
-        assert!(matches!(err, IrError::MissingRequiredField("invoice_period")));
+        assert!(matches!(
+            err,
+            IrError::MissingRequiredField("invoice_period")
+        ));
     }
 
     #[test]
     fn reference_kind_class_maps_the_national_vocabulary() {
-        let preceding = |k: &str| DocumentReference {
-            kind: k.to_owned(),
-            id: "X".to_owned(),
-            issue_date: None,
-        }
-        .kind_class();
+        let preceding = |k: &str| {
+            DocumentReference {
+                kind: k.to_owned(),
+                id: "X".to_owned(),
+                issue_date: None,
+            }
+            .kind_class()
+        };
         // Every kind string currently produced across the report crates is a
         // preceding-invoice / correction reference.
         for k in [
@@ -2083,8 +2097,14 @@ mod tests {
         assert_eq!(preceding("purchase order"), ReferenceKindClass::Order);
         assert_eq!(preceding("Order_Ref"), ReferenceKindClass::Order);
         assert_eq!(preceding("contract"), ReferenceKindClass::Contract);
-        assert_eq!(preceding("despatch-advice"), ReferenceKindClass::DespatchAdvice);
-        assert_eq!(preceding("receipt-advice"), ReferenceKindClass::ReceivingAdvice);
+        assert_eq!(
+            preceding("despatch-advice"),
+            ReferenceKindClass::DespatchAdvice
+        );
+        assert_eq!(
+            preceding("receipt-advice"),
+            ReferenceKindClass::ReceivingAdvice
+        );
         // An unrecognized kind must not pretend to be a typed reference.
         assert_eq!(preceding("something-bespoke"), ReferenceKindClass::Other);
     }
@@ -2183,16 +2203,12 @@ mod tests {
         // broke the `Eq` invariant against an unpadded lowercase equivalent and
         // poisoned the canonical signing payload. Both `new` and the
         // `Deserialize` path must trim and canonicalise to lowercase `urn:`.
-        let padded = JurisdictionExtension::new(
-            "  URN:invoicekit:ext:fr:ctc:1.0  ",
-            json!({"k": "v"}),
-        )
-        .expect("whitespace-padded uppercase scheme is valid");
-        let canonical = JurisdictionExtension::new(
-            "urn:invoicekit:ext:fr:ctc:1.0",
-            json!({"k": "v"}),
-        )
-        .expect("canonical form is valid");
+        let padded =
+            JurisdictionExtension::new("  URN:invoicekit:ext:fr:ctc:1.0  ", json!({"k": "v"}))
+                .expect("whitespace-padded uppercase scheme is valid");
+        let canonical =
+            JurisdictionExtension::new("urn:invoicekit:ext:fr:ctc:1.0", json!({"k": "v"}))
+                .expect("canonical form is valid");
         assert_eq!(padded.urn, "urn:invoicekit:ext:fr:ctc:1.0");
         assert_eq!(padded, canonical, "Eq invariant must hold after trimming");
 

@@ -81,7 +81,12 @@ fn brazil_invoice() -> CommercialDocument {
         document_number: DocumentNumber::new("NF-2026-BR-0001").unwrap(),
         currency: Iso4217Code::new("BRL").unwrap(),
         supplier: br_party("Acme Comercio LTDA", ISSUER_CNPJ, "Sao Paulo", "SP"),
-        customer: br_party("Beta Servicos LTDA", "11444777000161", "Rio de Janeiro", "RJ"),
+        customer: br_party(
+            "Beta Servicos LTDA",
+            "11444777000161",
+            "Rio de Janeiro",
+            "RJ",
+        ),
         payee: None,
         payment_terms: None,
         payment_instructions: Vec::new(),
@@ -208,7 +213,10 @@ fn run_lifecycle(forced_c_stat: Option<u32>) -> (Vec<u8>, NfeReport) {
         serde_json::to_vec(&report.envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, report)
 }
@@ -359,7 +367,12 @@ fn line(id: &str, description: &str, qty: i64, unit_minor: i64, total_minor: i64
 fn brazil_credit_note_serializes_as_devolucao_fin_nfe_4() {
     let doc = doc_with(
         DocumentType::CreditNote,
-        br_party("Beta Servicos LTDA", "11444777000161", "Rio de Janeiro", "RJ"),
+        br_party(
+            "Beta Servicos LTDA",
+            "11444777000161",
+            "Rio de Janeiro",
+            "RJ",
+        ),
         vec![line("PROD-RET", "Devolucao de mercadoria", 1, 5000, 5000)],
         vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -391,7 +404,10 @@ fn brazil_credit_note_serializes_as_devolucao_fin_nfe_4() {
         xml.contains("<finNFe>4</finNFe>"),
         "credit note must map to finNFe 4 (devolucao):\n{xml}"
     );
-    assert!(xml.contains("<tpNF>0</tpNF>"), "devolucao is an entrada (tpNF 0)");
+    assert!(
+        xml.contains("<tpNF>0</tpNF>"),
+        "devolucao is an entrada (tpNF 0)"
+    );
     assert!(xml.contains("<natOp>Devolucao de venda</natOp>"));
     assert!(xml.contains("<vNF>59.00</vNF>"));
 
@@ -410,7 +426,12 @@ fn brazil_credit_note_serializes_as_devolucao_fin_nfe_4() {
 fn brazil_debit_note_is_unsupported_document_type() {
     let doc = doc_with(
         DocumentType::DebitNote,
-        br_party("Beta Servicos LTDA", "11444777000161", "Rio de Janeiro", "RJ"),
+        br_party(
+            "Beta Servicos LTDA",
+            "11444777000161",
+            "Rio de Janeiro",
+            "RJ",
+        ),
         vec![line("PROD-DEB", "Ajuste", 1, 1000, 1000)],
         vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -449,7 +470,12 @@ fn brazil_debit_note_is_unsupported_document_type() {
 fn brazil_multi_line_invoice_numbers_det_and_aggregates_total() {
     let doc = doc_with(
         DocumentType::Invoice,
-        br_party("Beta Servicos LTDA", "11444777000161", "Rio de Janeiro", "RJ"),
+        br_party(
+            "Beta Servicos LTDA",
+            "11444777000161",
+            "Rio de Janeiro",
+            "RJ",
+        ),
         vec![
             line("PROD-1", "Teclado", 2, 5000, 10000),
             line("PROD-2", "Mouse", 3, 2000, 6000),
@@ -482,7 +508,10 @@ fn brazil_multi_line_invoice_numbers_det_and_aggregates_total() {
     let pos1 = xml.find("<det nItem=\"1\">").unwrap();
     let pos2 = xml.find("<det nItem=\"2\">").unwrap();
     let pos3 = xml.find("<det nItem=\"3\">").unwrap();
-    assert!(pos1 < pos2 && pos2 < pos3, "det order must follow line order");
+    assert!(
+        pos1 < pos2 && pos2 < pos3,
+        "det order must follow line order"
+    );
     assert!(xml.contains("<xProd>Monitor</xProd>"));
     // ICMSTot aggregates across all three lines.
     assert!(xml.contains("<vProd>560.00</vProd>"));
@@ -526,7 +555,10 @@ fn brazil_consumer_recipient_emits_cpf_not_cnpj() {
     let xml = to_inf_nfe_xml(&doc, &NfeContext::default()).unwrap();
     // The emitente is still a CNPJ; the destinatario is a CPF.
     assert!(xml.contains("<emit>"));
-    assert!(xml.contains("<CNPJ>11222333000181</CNPJ>"), "emit keeps its CNPJ");
+    assert!(
+        xml.contains("<CNPJ>11222333000181</CNPJ>"),
+        "emit keeps its CNPJ"
+    );
     // The consumer's CPF appears inside <dest>, and there is no second <CNPJ>.
     let dest_start = xml.find("<dest>").expect("dest block present");
     let dest_block = &xml[dest_start..];
@@ -538,7 +570,10 @@ fn brazil_consumer_recipient_emits_cpf_not_cnpj() {
         !dest_block.contains("<CNPJ>"),
         "a CPF consumer must not get a CNPJ element"
     );
-    assert!(dest_block.contains("<UF>MG</UF>"), "Minas Gerais UF in dest");
+    assert!(
+        dest_block.contains("<UF>MG</UF>"),
+        "Minas Gerais UF in dest"
+    );
 }
 
 /// **ICMS-isento / zero-rated line.** A tax-exempt operation (e.g. an item
@@ -549,8 +584,19 @@ fn brazil_consumer_recipient_emits_cpf_not_cnpj() {
 fn brazil_tax_exempt_line_serializes_zero_icms() {
     let doc = doc_with(
         DocumentType::Invoice,
-        br_party("Beta Servicos LTDA", "11444777000161", "Rio de Janeiro", "RJ"),
-        vec![line("PROD-ISENTO", "Livro (isento de ICMS)", 4, 2500, 10000)],
+        br_party(
+            "Beta Servicos LTDA",
+            "11444777000161",
+            "Rio de Janeiro",
+            "RJ",
+        ),
+        vec![line(
+            "PROD-ISENTO",
+            "Livro (isento de ICMS)",
+            4,
+            2500,
+            10000,
+        )],
         vec![TaxCategorySummary {
             // ICMS isento: taxable base and tax both zero.
             category_code: "S".to_owned(),
@@ -571,8 +617,14 @@ fn brazil_tax_exempt_line_serializes_zero_icms() {
         },
     );
     let xml = to_inf_nfe_xml(&doc, &NfeContext::default()).unwrap();
-    assert!(xml.contains("<vBC>0.00</vBC>"), "exempt base must be 0.00:\n{xml}");
-    assert!(xml.contains("<vICMS>0.00</vICMS>"), "exempt ICMS must be 0.00");
+    assert!(
+        xml.contains("<vBC>0.00</vBC>"),
+        "exempt base must be 0.00:\n{xml}"
+    );
+    assert!(
+        xml.contains("<vICMS>0.00</vICMS>"),
+        "exempt ICMS must be 0.00"
+    );
     // The goods value and the invoice total are unaffected by the exemption.
     assert!(xml.contains("<vProd>100.00</vProd>"));
     assert!(xml.contains("<vNF>100.00</vNF>"));
@@ -594,15 +646,28 @@ fn brazil_distinct_rejection_cstats_are_ok_receipts() {
     use invoicekit_signer_nfe::NfeStatus;
 
     for (c_stat, expected_status, motivo) in [
-        (205_u32, NfeStatus::DeniedInDatabase, "denegada na base de dados"),
+        (
+            205_u32,
+            NfeStatus::DeniedInDatabase,
+            "denegada na base de dados",
+        ),
         (215_u32, NfeStatus::SchemaFailure, "Falha no schema XML"),
         (539_u32, NfeStatus::Duplicate, "Duplicidade de NF-e"),
     ] {
         let (ikb, report) = run_lifecycle(Some(c_stat));
         assert_eq!(report.envelope.c_stat, c_stat, "echoed cStat");
-        assert_eq!(report.envelope.status, expected_status, "typed status for {c_stat}");
-        assert!(!report.envelope.is_authorized(), "{c_stat} is not authorized");
-        assert!(report.envelope.reason.is_some(), "{c_stat} carries a denial reason");
+        assert_eq!(
+            report.envelope.status, expected_status,
+            "typed status for {c_stat}"
+        );
+        assert!(
+            !report.envelope.is_authorized(),
+            "{c_stat} is not authorized"
+        );
+        assert!(
+            report.envelope.reason.is_some(),
+            "{c_stat} carries a denial reason"
+        );
         assert!(
             report.envelope.status_descricao.contains(motivo),
             "cStat {c_stat} xMotivo should mention {motivo:?}, got {:?}",
@@ -715,8 +780,7 @@ fn brazil_producao_environment_authorizes_and_maps_tp_amb() {
     );
 
     // A Produção-bound provider authorises a well-formed NF-e end to end.
-    let signer: Arc<dyn Signer> =
-        Arc::new(SoftwareSigner::new().with_key(CERT_SERIAL, [3_u8; 32]));
+    let signer: Arc<dyn Signer> = Arc::new(SoftwareSigner::new().with_key(CERT_SERIAL, [3_u8; 32]));
     let prod_provider = MockNfeReportProvider::new(signer, NfeReportEnvironment::Producao);
     let xml = to_inf_nfe_xml(&brazil_invoice(), &NfeContext::default())
         .unwrap()

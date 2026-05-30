@@ -165,7 +165,10 @@ pub fn to_inv01_json(
     let mut doc = Map::new();
     doc.insert("Typ".to_owned(), json!(doc_typ));
     doc.insert("No".to_owned(), json!(document.document_number.as_str()));
-    doc.insert("Dt".to_owned(), json!(fmt_doc_date(document.issue_date.as_str())));
+    doc.insert(
+        "Dt".to_owned(),
+        json!(fmt_doc_date(document.issue_date.as_str())),
+    );
     root.insert("DocDtls".to_owned(), Value::Object(doc));
 
     // SellerDtls / BuyerDtls — party blocks.
@@ -387,8 +390,14 @@ fn item_block(
     item.insert("Qty".to_owned(), json!(fmt_qty(line.quantity.inner())));
     // `Unit` is the IRP unit-quantity code (UQC); map the IR unit code onto the
     // UQC set, defaulting to `OTH` ("Others") when absent or unrecognized.
-    item.insert("Unit".to_owned(), json!(unit_uqc(line.unit_code.as_deref())));
-    item.insert("UnitPrice".to_owned(), json!(fmt_amount(line.unit_price.inner())));
+    item.insert(
+        "Unit".to_owned(),
+        json!(unit_uqc(line.unit_code.as_deref())),
+    );
+    item.insert(
+        "UnitPrice".to_owned(),
+        json!(fmt_amount(line.unit_price.inner())),
+    );
     item.insert("TotAmt".to_owned(), json!(fmt_amount(ass_amt)));
     item.insert("AssAmt".to_owned(), json!(fmt_amount(ass_amt)));
     item.insert("GstRt".to_owned(), json!(fmt_amount(rate)));
@@ -462,7 +471,9 @@ fn hsn_code(line: &DocumentLine) -> (String, bool) {
     let chosen = line
         .classifications
         .iter()
-        .find(|c| c.scheme_id.eq_ignore_ascii_case("HSN") || c.scheme_id.eq_ignore_ascii_case("SAC"))
+        .find(|c| {
+            c.scheme_id.eq_ignore_ascii_case("HSN") || c.scheme_id.eq_ignore_ascii_case("SAC")
+        })
         .or_else(|| line.classifications.first());
     chosen.map_or_else(
         // No classification: the generic SAC services heading (chapter 99 ⇒
@@ -998,7 +1009,12 @@ mod inv01_tests {
             delivery_date: None,
             document_number: DocumentNumber::new("INV-2026-IN-0001").unwrap(),
             currency: Iso4217Code::new("INR").unwrap(),
-            supplier: indian_party("Acme Technologies Pvt Ltd", "29AAAPL2356Q1ZS", "Bengaluru", "KA"),
+            supplier: indian_party(
+                "Acme Technologies Pvt Ltd",
+                "29AAAPL2356Q1ZS",
+                "Bengaluru",
+                "KA",
+            ),
             customer: indian_party("Beta Solutions Pvt Ltd", "27AAAPL2356Q1ZT", "Mumbai", "MH"),
             payee: None,
             payment_terms: None,
@@ -1103,7 +1119,10 @@ mod inv01_tests {
         assert_eq!(v["SellerDtls"]["Stcd"], "29");
         // `Addr1` is the first IR address line; the seller carries no `Pos`.
         assert_eq!(v["SellerDtls"]["Addr1"], "1 MG Road");
-        assert!(v["SellerDtls"].get("Pos").is_none(), "seller carries no Pos");
+        assert!(
+            v["SellerDtls"].get("Pos").is_none(),
+            "seller carries no Pos"
+        );
         assert_eq!(v["BuyerDtls"]["Gstin"], "27AAAPL2356Q1ZT");
         assert_eq!(v["BuyerDtls"]["Stcd"], "27");
         assert_eq!(v["BuyerDtls"]["Addr1"], "1 MG Road");
@@ -1126,8 +1145,14 @@ mod inv01_tests {
         assert_eq!(item["GstRt"], "18.00");
         // Inter-state -> IGST at the full 18% (1800.00), no CGST/SGST keys.
         assert_eq!(item["IgstAmt"], "1800.00");
-        assert!(item.get("CgstAmt").is_none(), "inter-state emits no CgstAmt");
-        assert!(item.get("SgstAmt").is_none(), "inter-state emits no SgstAmt");
+        assert!(
+            item.get("CgstAmt").is_none(),
+            "inter-state emits no CgstAmt"
+        );
+        assert!(
+            item.get("SgstAmt").is_none(),
+            "inter-state emits no SgstAmt"
+        );
         assert_eq!(item["TotItemVal"], "11800.00");
 
         assert_eq!(v["ValDtls"]["AssVal"], "10000.00");
@@ -1153,8 +1178,14 @@ mod inv01_tests {
         let json = to_inv01_json(&doc, &Inv01Context::default()).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         let item = &v["ItemList"][0];
-        assert_eq!(item["HsnCd"], "0901", "HsnCd sourced from the IR classification");
-        assert_eq!(item["IsServc"], "N", "HSN-scheme non-chapter-99 code is goods");
+        assert_eq!(
+            item["HsnCd"], "0901",
+            "HsnCd sourced from the IR classification"
+        );
+        assert_eq!(
+            item["IsServc"], "N",
+            "HSN-scheme non-chapter-99 code is goods"
+        );
 
         // A SAC-scheme classification flags a service even when its code does
         // not start with 99 — the flag derives from the chosen scheme.
@@ -1167,7 +1198,10 @@ mod inv01_tests {
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         let item = &v["ItemList"][0];
         assert_eq!(item["HsnCd"], "00440406");
-        assert_eq!(item["IsServc"], "Y", "SAC-scheme classification is a service");
+        assert_eq!(
+            item["IsServc"], "Y",
+            "SAC-scheme classification is a service"
+        );
 
         // Preference: an HSN/SAC classification wins over an unrelated leading
         // entry, so `HsnCd` carries the HSN code, not the first (UNSPSC) one.
@@ -1185,7 +1219,10 @@ mod inv01_tests {
         ];
         let json = to_inv01_json(&doc, &Inv01Context::default()).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["ItemList"][0]["HsnCd"], "0901", "HSN/SAC scheme is preferred");
+        assert_eq!(
+            v["ItemList"][0]["HsnCd"], "0901",
+            "HSN/SAC scheme is preferred"
+        );
     }
 
     #[test]
@@ -1225,7 +1262,10 @@ mod inv01_tests {
         // 18% on 10000 splits into 9% CGST (900.00) + 9% SGST (900.00), no IGST.
         assert_eq!(item["CgstAmt"], "900.00");
         assert_eq!(item["SgstAmt"], "900.00");
-        assert!(item.get("IgstAmt").is_none(), "intra-state emits no IgstAmt");
+        assert!(
+            item.get("IgstAmt").is_none(),
+            "intra-state emits no IgstAmt"
+        );
         assert_eq!(item["TotItemVal"], "11800.00");
         assert_eq!(v["ValDtls"]["CgstVal"], "900.00");
         assert_eq!(v["ValDtls"]["SgstVal"], "900.00");
@@ -1284,7 +1324,10 @@ mod inv01_tests {
         // Behavior-preserving: an invoice with no references emits no RefDtls.
         let inv_json = to_inv01_json(&inter_state_invoice(), &Inv01Context::default()).unwrap();
         let iv: serde_json::Value = serde_json::from_str(&inv_json).unwrap();
-        assert!(iv.get("RefDtls").is_none(), "no references must emit no RefDtls");
+        assert!(
+            iv.get("RefDtls").is_none(),
+            "no references must emit no RefDtls"
+        );
     }
 
     #[test]
@@ -1325,7 +1368,15 @@ mod inv01_tests {
         // Determinism is byte-stable key order; assert the top-level key order
         // matches the INV-01 schema sequence (no map-driven reordering).
         let json = to_inv01_json(&inter_state_invoice(), &Inv01Context::default()).unwrap();
-        let order = ["Version", "TranDtls", "DocDtls", "SellerDtls", "BuyerDtls", "ItemList", "ValDtls"];
+        let order = [
+            "Version",
+            "TranDtls",
+            "DocDtls",
+            "SellerDtls",
+            "BuyerDtls",
+            "ItemList",
+            "ValDtls",
+        ];
         let mut last = 0;
         for key in order {
             let needle = format!("\"{key}\"");

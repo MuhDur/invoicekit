@@ -164,16 +164,26 @@ fn run_lifecycle() -> (Vec<u8>, invoicekit_report_ke_etims::EtimsSubmitEnvelope)
 
     // 3. submit to the existing offline MockEtimsProvider
     let provider = MockEtimsProvider::default();
-    let receipt = provider.submit_invoice(&submit_request(ubl_bytes.clone())).unwrap();
+    let receipt = provider
+        .submit_invoice(&submit_request(ubl_bytes.clone()))
+        .unwrap();
 
     // 4. evidence bundle: canonical doc + national wire XML + KRA receipt
-    let canonical = canonicalize_value(&doc.to_value().unwrap()).unwrap().into_bytes();
+    let canonical = canonicalize_value(&doc.to_value().unwrap())
+        .unwrap()
+        .into_bytes();
     let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     artefacts.insert("canonical.json".to_owned(), canonical);
     artefacts.insert("formats/ubl.xml".to_owned(), ubl_bytes);
-    artefacts.insert("receipt.json".to_owned(), serde_json::to_vec(&receipt).unwrap());
+    artefacts.insert(
+        "receipt.json".to_owned(),
+        serde_json::to_vec(&receipt).unwrap(),
+    );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, receipt)
 }
@@ -231,7 +241,9 @@ fn kenya_refuses_malformed_pin_before_the_wire() {
 fn kenya_refuses_empty_payload_before_the_wire() {
     // The second pre-wire refusal: an empty payload never reaches KRA.
     let provider = MockEtimsProvider::default();
-    let err = provider.submit_invoice(&submit_request(Vec::new())).unwrap_err();
+    let err = provider
+        .submit_invoice(&submit_request(Vec::new()))
+        .unwrap_err();
     assert!(
         matches!(err, EtimsError::BadPayload(_)),
         "empty payload must refuse with BadPayload, got {err:?}"
@@ -347,7 +359,13 @@ fn kenyan_invoice_with_tax(
 #[test]
 fn kenya_standard_rate_16pct_b_label_clears_and_bundles() {
     // 100,000.00 KES net @ 16% -> 16,000.00 VAT, 116,000.00 gross.
-    let doc = kenyan_invoice_with_tax("INV-2026-KE-B16", "Steel reinforcement bar 12mm", "B", 1600, 10_000_000);
+    let doc = kenyan_invoice_with_tax(
+        "INV-2026-KE-B16",
+        "Steel reinforcement bar 12mm",
+        "B",
+        1600,
+        10_000_000,
+    );
     let ubl = to_xml(&doc).unwrap();
 
     // The standard-rate subtotal + 16.00% percent must survive canonicalization.
@@ -364,7 +382,9 @@ fn kenya_standard_rate_16pct_b_label_clears_and_bundles() {
     }
 
     let provider = MockEtimsProvider::default();
-    let receipt = provider.submit_invoice(&submit_request(ubl.into_bytes())).unwrap();
+    let receipt = provider
+        .submit_invoice(&submit_request(ubl.into_bytes()))
+        .unwrap();
     assert_eq!(receipt.status, EtimsStatus::Accepted);
     // §6.23.4: CU Invoice Number is CU-id + sequence; the mock tags it "KE-".
     assert!(receipt.cu_invoice_number.starts_with("KE-"));
@@ -377,7 +397,13 @@ fn kenya_standard_rate_16pct_b_label_clears_and_bundles() {
 #[test]
 fn kenya_zero_rated_c_label_has_zero_tax_but_nonzero_base() {
     // 50,000.00 KES of zero-rated exports -> 0.00 VAT, gross == net.
-    let doc = kenyan_invoice_with_tax("INV-2026-KE-C0", "Exported tea consignment", "C", 0, 5_000_000);
+    let doc = kenyan_invoice_with_tax(
+        "INV-2026-KE-C0",
+        "Exported tea consignment",
+        "C",
+        0,
+        5_000_000,
+    );
     let ubl = to_xml(&doc).unwrap();
 
     for needle in [
@@ -392,10 +418,15 @@ fn kenya_zero_rated_c_label_has_zero_tax_but_nonzero_base() {
         assert!(ubl.contains(needle), "zero-rated UBL missing {needle}");
     }
     // 0% rate is emitted as the percent, distinguishing it from exempt.
-    assert!(ubl.contains(">0.00</cbc:Percent>"), "zero-rated must carry a 0.00 percent");
+    assert!(
+        ubl.contains(">0.00</cbc:Percent>"),
+        "zero-rated must carry a 0.00 percent"
+    );
 
     let provider = MockEtimsProvider::default();
-    let receipt = provider.submit_invoice(&submit_request(ubl.into_bytes())).unwrap();
+    let receipt = provider
+        .submit_invoice(&submit_request(ubl.into_bytes()))
+        .unwrap();
     // Zero-rated is a valid clearable supply, not a refusal.
     assert_eq!(receipt.status, EtimsStatus::Accepted);
     assert!(receipt.reason.is_none());
@@ -407,7 +438,13 @@ fn kenya_zero_rated_c_label_has_zero_tax_but_nonzero_base() {
 #[test]
 fn kenya_exempt_a_label_carries_ex_base_and_zero_tax() {
     // 8,000.00 KES of exempt supply (e.g. unprocessed agricultural produce).
-    let doc = kenyan_invoice_with_tax("INV-2026-KE-AEX", "Unprocessed maize (exempt)", "A", 0, 800_000);
+    let doc = kenyan_invoice_with_tax(
+        "INV-2026-KE-AEX",
+        "Unprocessed maize (exempt)",
+        "A",
+        0,
+        800_000,
+    );
     let ubl = to_xml(&doc).unwrap();
 
     for needle in [
@@ -428,7 +465,9 @@ fn kenya_exempt_a_label_carries_ex_base_and_zero_tax() {
     );
 
     let provider = MockEtimsProvider::default();
-    let receipt = provider.submit_invoice(&submit_request(ubl.into_bytes())).unwrap();
+    let receipt = provider
+        .submit_invoice(&submit_request(ubl.into_bytes()))
+        .unwrap();
     assert_eq!(receipt.status, EtimsStatus::Accepted);
 }
 
@@ -530,7 +569,11 @@ fn kenya_mixed_b_and_a_lines_sum_only_taxable_vat() {
 
     let ubl = to_xml(&doc).unwrap();
     // Two invoice lines.
-    assert_eq!(ubl.matches("</cac:InvoiceLine>").count(), 2, "expected two lines");
+    assert_eq!(
+        ubl.matches("</cac:InvoiceLine>").count(),
+        2,
+        "expected two lines"
+    );
     // Both per-line tax categories present.
     assert!(ubl.contains(">B</cbc:ID>"), "missing B label");
     assert!(ubl.contains(">A</cbc:ID>"), "missing A label");
@@ -548,7 +591,9 @@ fn kenya_mixed_b_and_a_lines_sum_only_taxable_vat() {
     assert!(ubl.contains("currencyID=\"KES\">169200.00</cbc:PayableAmount>"));
 
     let provider = MockEtimsProvider::default();
-    let receipt = provider.submit_invoice(&submit_request(ubl.into_bytes())).unwrap();
+    let receipt = provider
+        .submit_invoice(&submit_request(ubl.into_bytes()))
+        .unwrap();
     assert_eq!(receipt.status, EtimsStatus::Accepted);
 }
 
@@ -566,7 +611,9 @@ fn kenya_credit_note_references_original_cu_invoice_and_clears() {
     let provider = MockEtimsProvider::default();
     let original = kenyan_invoice_with_tax("INV-2026-KE-ORIG", "Gravel /t", "B", 1600, 9_000_000);
     let original_ubl = to_xml(&original).unwrap();
-    let original_receipt = provider.submit_invoice(&submit_request(original_ubl.into_bytes())).unwrap();
+    let original_receipt = provider
+        .submit_invoice(&submit_request(original_ubl.into_bytes()))
+        .unwrap();
     assert_eq!(original_receipt.status, EtimsStatus::Accepted);
     let original_cu = original_receipt.cu_invoice_number;
 
@@ -645,7 +692,10 @@ fn kenya_credit_note_references_original_cu_invoice_and_clears() {
         "credit note must serialize to a UBL CreditNote root"
     );
     assert!(credit_ubl.contains(">381</cbc:CreditNoteTypeCode>"));
-    assert!(!credit_ubl.contains("</cbc:InvoiceTypeCode>"), "must not emit an Invoice type code");
+    assert!(
+        !credit_ubl.contains("</cbc:InvoiceTypeCode>"),
+        "must not emit an Invoice type code"
+    );
 
     // The original CU Invoice Number is carried in the IR references and the
     // canonical artefact (the audit link back to the cancelled sale).
@@ -656,7 +706,9 @@ fn kenya_credit_note_references_original_cu_invoice_and_clears() {
     );
 
     // It clears at eTIMS as its own transaction (the "NC" receipt).
-    let credit_receipt = provider.submit_invoice(&submit_request(credit_ubl.clone().into_bytes())).unwrap();
+    let credit_receipt = provider
+        .submit_invoice(&submit_request(credit_ubl.clone().into_bytes()))
+        .unwrap();
     assert_eq!(credit_receipt.status, EtimsStatus::Accepted);
     // Distinct CU Invoice Number from the original sale (sequence advanced).
     assert_ne!(credit_receipt.cu_invoice_number, original_cu);
@@ -665,9 +717,15 @@ fn kenya_credit_note_references_original_cu_invoice_and_clears() {
     let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     artefacts.insert("canonical.json".to_owned(), canonical.into_bytes());
     artefacts.insert("formats/ubl.xml".to_owned(), credit_ubl.into_bytes());
-    artefacts.insert("receipt.json".to_owned(), serde_json::to_vec(&credit_receipt).unwrap());
+    artefacts.insert(
+        "receipt.json".to_owned(),
+        serde_json::to_vec(&credit_receipt).unwrap(),
+    );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
     assert!(report.ok, "credit-note evidence bundle must verify");
@@ -723,7 +781,12 @@ fn kenya_serialization_is_deterministic_across_categories() {
     ] {
         let first = to_xml(&doc).unwrap();
         let second = to_xml(&doc).unwrap();
-        assert_eq!(first, second, "UBL serialization must be byte-stable for {}", doc.document_number.as_str());
+        assert_eq!(
+            first,
+            second,
+            "UBL serialization must be byte-stable for {}",
+            doc.document_number.as_str()
+        );
 
         // The canonical IR JSON is likewise byte-stable.
         let c1 = canonicalize_value(&doc.to_value().unwrap()).unwrap();

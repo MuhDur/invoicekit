@@ -161,7 +161,10 @@ fn pack_jp_bundle(
         serde_json::to_vec(registration).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     pack(&bundle).unwrap()
 }
 
@@ -410,7 +413,10 @@ fn japan_dual_rate_invoice_breaks_jct_out_per_rate() {
         // Reduced-rate registration number stamped on the supplier.
         ">T8011223344556</cbc:CompanyID>",
     ] {
-        assert!(ubl.contains(needle), "dual-rate UBL missing {needle}\n{ubl}");
+        assert!(
+            ubl.contains(needle),
+            "dual-rate UBL missing {needle}\n{ubl}"
+        );
     }
 
     // The crate's JCT rate table backs those percentages with basis points.

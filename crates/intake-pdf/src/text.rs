@@ -149,10 +149,7 @@ pub fn extract_pdf_text(bytes: &[u8]) -> Result<StructuredText, PdfTextError> {
     let all_pages = doc.get_pages();
     if all_pages.len() > MAX_PAGES {
         return Err(PdfTextError::TooLarge {
-            detail: format!(
-                "page count {} exceeds ceiling {MAX_PAGES}",
-                all_pages.len()
-            ),
+            detail: format!("page count {} exceeds ceiling {MAX_PAGES}", all_pages.len()),
         });
     }
 
@@ -169,9 +166,7 @@ pub fn extract_pdf_text(bytes: &[u8]) -> Result<StructuredText, PdfTextError> {
         fragments_so_far = fragments_so_far.saturating_add(fragments.len());
         if fragments_so_far > MAX_FRAGMENTS_TOTAL {
             return Err(PdfTextError::TooLarge {
-                detail: format!(
-                    "text-fragment count exceeds ceiling {MAX_FRAGMENTS_TOTAL}"
-                ),
+                detail: format!("text-fragment count exceeds ceiling {MAX_FRAGMENTS_TOTAL}"),
             });
         }
         let fragments = crate::script_order::reading_order(fragments);
@@ -816,7 +811,8 @@ mod tests {
         let catalog_id = doc.add_object(Object::Dictionary(catalog));
         doc.trailer.set("Root", Object::Reference(catalog_id));
         let mut bytes = Vec::new();
-        doc.save_to(&mut bytes).expect("serialize many-fragment pdf");
+        doc.save_to(&mut bytes)
+            .expect("serialize many-fragment pdf");
         bytes
     }
 
@@ -824,8 +820,7 @@ mod tests {
     /// writer would, returning the on-wire compressed bytes.
     fn flate_compress(plain: &[u8]) -> Vec<u8> {
         use std::io::Write as _;
-        let mut encoder =
-            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
         encoder.write_all(plain).expect("zlib write");
         encoder.finish().expect("zlib finish")
     }
@@ -885,7 +880,8 @@ mod tests {
         let catalog_id = doc.add_object(Object::Dictionary(catalog));
         doc.trailer.set("Root", Object::Reference(catalog_id));
         let mut bytes = Vec::new();
-        doc.save_to(&mut bytes).expect("serialize flate-content pdf");
+        doc.save_to(&mut bytes)
+            .expect("serialize flate-content pdf");
         bytes
     }
 
@@ -927,9 +923,8 @@ mod tests {
     /// cap is behaviour-preserving for conformant input.
     #[test]
     fn extracts_flate_compressed_page_content() {
-        let pdf = build_pdf_with_flate_page_content(
-            b"BT /F1 12 Tf 72 720 Td (Compressed page) Tj ET\n",
-        );
+        let pdf =
+            build_pdf_with_flate_page_content(b"BT /F1 12 Tf 72 720 Td (Compressed page) Tj ET\n");
         let st = extract_pdf_text(&pdf).expect("flate-compressed page extracts");
         assert_eq!(st.pages.len(), 1);
         assert_eq!(st.pages[0].fragments[0].text, "Compressed page");

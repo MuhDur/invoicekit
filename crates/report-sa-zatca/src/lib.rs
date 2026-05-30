@@ -168,7 +168,9 @@ pub fn to_zatca_ubl_xml(
     context: &ZatcaUblContext,
 ) -> Result<String, ZatcaUblError> {
     if context.uuid.trim().is_empty() {
-        return Err(ZatcaUblError::BadContext("cbc:UUID must not be empty".to_owned()));
+        return Err(ZatcaUblError::BadContext(
+            "cbc:UUID must not be empty".to_owned(),
+        ));
     }
     if context.invoice_counter_value == 0 {
         return Err(ZatcaUblError::BadContext(
@@ -303,9 +305,7 @@ fn pih_reference(out: &mut String, previous_hash_b64: &str) {
     out.push_str("  <cac:AdditionalDocumentReference>\n");
     el(out, 2, "cbc:ID", "PIH");
     out.push_str("    <cac:Attachment>\n");
-    out.push_str(
-        "      <cbc:EmbeddedDocumentBinaryObject mimeCode=\"text/plain\">",
-    );
+    out.push_str("      <cbc:EmbeddedDocumentBinaryObject mimeCode=\"text/plain\">");
     push_escaped(out, previous_hash_b64);
     out.push_str("</cbc:EmbeddedDocumentBinaryObject>\n");
     out.push_str("    </cac:Attachment>\n");
@@ -621,8 +621,12 @@ impl ZatcaReportProvider for MockZatcaReportProvider {
                 .or_insert_with(|| format!("pubkey::{}", self.csid.csid));
         }
 
-        let inner = MockPhase2Provider::new("zatca-fatoora-test", Arc::clone(&self.signer), self.csid.clone())
-            .with_forced_status(self.forced_status);
+        let inner = MockPhase2Provider::new(
+            "zatca-fatoora-test",
+            Arc::clone(&self.signer),
+            self.csid.clone(),
+        )
+        .with_forced_status(self.forced_status);
         let stamp = inner
             .stamp(
                 &ZatcaSignRequest {

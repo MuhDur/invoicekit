@@ -197,11 +197,7 @@ impl MockHaciendaProvider {
     /// (Hacienda only populates `mensaje` on `Rechazado`, mirroring the
     /// `MensajeHacienda` response document).
     #[must_use]
-    pub fn with_forced_status(
-        mut self,
-        status: HaciendaStatus,
-        mensaje: Option<String>,
-    ) -> Self {
+    pub fn with_forced_status(mut self, status: HaciendaStatus, mensaje: Option<String>) -> Self {
         self.forced_status = Some((status, mensaje));
         self
     }
@@ -403,8 +399,7 @@ mod tests {
     fn forced_recibido_models_async_pending_verdict() {
         // Hacienda's recepcion endpoint can return `recibido` (queued) before
         // the asynchronous `MensajeHacienda` resolves to aceptado/rechazado.
-        let p = MockHaciendaProvider::new()
-            .with_forced_status(HaciendaStatus::Recibido, None);
+        let p = MockHaciendaProvider::new().with_forced_status(HaciendaStatus::Recibido, None);
         let env = p.submit_comprobante(&sample_request()).unwrap();
         assert_eq!(env.status, HaciendaStatus::Recibido);
         assert!(env.mensaje.is_none());
@@ -414,8 +409,7 @@ mod tests {
     fn forced_status_still_runs_prewire_shape_validation() {
         // A forced verdict must not bypass local shape checks: a malformed
         // cédula is refused pre-wire regardless of the configured verdict.
-        let p = MockHaciendaProvider::new()
-            .with_forced_status(HaciendaStatus::Rechazado, None);
+        let p = MockHaciendaProvider::new().with_forced_status(HaciendaStatus::Rechazado, None);
         let mut req = sample_request();
         req.issuer_cedula = "BAD".to_owned();
         let err = p.submit_comprobante(&req).unwrap_err();

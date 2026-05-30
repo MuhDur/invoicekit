@@ -90,7 +90,7 @@ fn indian_invoice() -> CommercialDocument {
             description: "Software consulting services (SAC 998314)".to_owned(),
             quantity: DecimalValue::new(Decimal::from(2)),
             unit_code: Some("EA".to_owned()), // UBL family uses EA
-            unit_price: amt(500_000),            // 5000.00
+            unit_price: amt(500_000),         // 5000.00
             line_extension_amount: amt(1_000_000), // 10000.00
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
@@ -100,8 +100,8 @@ fn indian_invoice() -> CommercialDocument {
         tax_summary: vec![TaxCategorySummary {
             // 18% GST (9% CGST + 9% SGST collapses to one EN16931 summary line).
             category_code: "S".to_owned(),
-            taxable_amount: amt(1_000_000),     // 10000.00
-            tax_amount: amt(180_000),           // 1800.00
+            taxable_amount: amt(1_000_000), // 10000.00
+            tax_amount: amt(180_000),       // 1800.00
             tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))), // 18.00
             exemption_reason: None,
             exemption_reason_code: None,
@@ -169,7 +169,9 @@ fn run_lifecycle() -> (Vec<u8>, invoicekit_report_in_gst::IrpRegisterEnvelope) {
 
     // 3. submit the serialized bytes to the IRP mock (it signs + assigns IRN).
     let provider = MockIrpProvider::with_fixed_ack_dt(PINNED_CREATED_AT);
-    let envelope = provider.register_invoice(&register_request(ubl_bytes.clone())).unwrap();
+    let envelope = provider
+        .register_invoice(&register_request(ubl_bytes.clone()))
+        .unwrap();
 
     // 4. evidence bundle: canonical doc + national-family XML + IRP receipt.
     let ikb = pack_bundle(&doc, &ubl_bytes, &envelope);
@@ -189,7 +191,10 @@ fn india_offline_lifecycle_produces_verifiable_evidence() {
         "IRN must be hex"
     );
     assert!(
-        envelope.ack_no.as_ref().is_some_and(|s| s.starts_with("ACK-")),
+        envelope
+            .ack_no
+            .as_ref()
+            .is_some_and(|s| s.starts_with("ACK-")),
         "IRP acknowledgement number present"
     );
     assert_eq!(envelope.ack_dt, PINNED_CREATED_AT);
@@ -227,8 +232,12 @@ fn india_duplicate_resubmit_is_reported_not_errored() {
     let ubl_bytes = to_xml(&doc).unwrap().into_bytes();
     let provider = MockIrpProvider::with_fixed_ack_dt(PINNED_CREATED_AT);
 
-    let first = provider.register_invoice(&register_request(ubl_bytes.clone())).unwrap();
-    let second = provider.register_invoice(&register_request(ubl_bytes)).unwrap();
+    let first = provider
+        .register_invoice(&register_request(ubl_bytes.clone()))
+        .unwrap();
+    let second = provider
+        .register_invoice(&register_request(ubl_bytes))
+        .unwrap();
 
     assert_eq!(first.status, IrpStatus::Accepted);
     assert_eq!(second.status, IrpStatus::Duplicate);
@@ -279,15 +288,16 @@ fn pack_inv01_bundle(
         serde_json::to_vec(envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     pack(&bundle).unwrap()
 }
 
 /// Serialize -> structurally validate -> transmit -> bundle, over the native
 /// INV-01 JSON. Returns `(ikb, inv01_json_string, envelope)`.
-fn run_inv01_lifecycle(
-    doc: &CommercialDocument,
-) -> (Vec<u8>, String, IrpRegisterEnvelope) {
+fn run_inv01_lifecycle(doc: &CommercialDocument) -> (Vec<u8>, String, IrpRegisterEnvelope) {
     // 1. serialize -> REAL national INV-01 JSON (NOT UBL).
     let inv01 = to_inv01_json(doc, &Inv01Context::default()).unwrap();
 
@@ -295,16 +305,37 @@ fn run_inv01_lifecycle(
     //    spine with the schema's actual abbreviated field names.
     let v: serde_json::Value = serde_json::from_str(&inv01).unwrap();
     assert_eq!(v["Version"], "1.1", "INV-01 schema version pin");
-    assert_eq!(v["TranDtls"]["TaxSch"], "GST", "TranDtls.TaxSch must be GST");
+    assert_eq!(
+        v["TranDtls"]["TaxSch"], "GST",
+        "TranDtls.TaxSch must be GST"
+    );
     assert!(v["DocDtls"]["Typ"].is_string(), "DocDtls.Typ present");
     assert!(v["DocDtls"]["No"].is_string(), "DocDtls.No present");
-    assert!(v["SellerDtls"]["Gstin"].is_string(), "SellerDtls.Gstin present");
-    assert!(v["BuyerDtls"]["Gstin"].is_string(), "BuyerDtls.Gstin present");
+    assert!(
+        v["SellerDtls"]["Gstin"].is_string(),
+        "SellerDtls.Gstin present"
+    );
+    assert!(
+        v["BuyerDtls"]["Gstin"].is_string(),
+        "BuyerDtls.Gstin present"
+    );
     assert!(v["ItemList"].is_array(), "ItemList is an array");
-    assert!(v["ValDtls"]["TotInvVal"].is_string(), "ValDtls.TotInvVal present");
+    assert!(
+        v["ValDtls"]["TotInvVal"].is_string(),
+        "ValDtls.TotInvVal present"
+    );
     // Each item carries the mandatory per-line fields.
     for item in v["ItemList"].as_array().unwrap() {
-        for key in ["SlNo", "HsnCd", "Qty", "UnitPrice", "TotAmt", "AssAmt", "GstRt", "TotItemVal"] {
+        for key in [
+            "SlNo",
+            "HsnCd",
+            "Qty",
+            "UnitPrice",
+            "TotAmt",
+            "AssAmt",
+            "GstRt",
+            "TotItemVal",
+        ] {
             assert!(item.get(key).is_some(), "ItemList entry missing {key}");
         }
     }
@@ -334,8 +365,14 @@ fn india_native_inv01_lifecycle_produces_verifiable_evidence() {
     assert_eq!(v["SellerDtls"]["Stcd"], "29", "Karnataka state code");
     assert_eq!(v["BuyerDtls"]["Stcd"], "27", "Maharashtra state code");
     let item = &v["ItemList"][0];
-    assert_eq!(item["IgstAmt"], "1800.00", "18% IGST on 10000.00 inter-state");
-    assert!(item.get("CgstAmt").is_none(), "inter-state carries no CgstAmt");
+    assert_eq!(
+        item["IgstAmt"], "1800.00",
+        "18% IGST on 10000.00 inter-state"
+    );
+    assert!(
+        item.get("CgstAmt").is_none(),
+        "inter-state carries no CgstAmt"
+    );
     assert_eq!(v["ValDtls"]["IgstVal"], "1800.00");
     assert_eq!(v["ValDtls"]["TotInvVal"], "11800.00");
 
@@ -419,7 +456,10 @@ fn india_native_inv01_intra_state_splits_cgst_sgst() {
     let item = &v["ItemList"][0];
     assert_eq!(item["CgstAmt"], "900.00", "9% CGST on 10000.00");
     assert_eq!(item["SgstAmt"], "900.00", "9% SGST on 10000.00");
-    assert!(item.get("IgstAmt").is_none(), "intra-state carries no IgstAmt");
+    assert!(
+        item.get("IgstAmt").is_none(),
+        "intra-state carries no IgstAmt"
+    );
     assert_eq!(v["ValDtls"]["CgstVal"], "900.00");
     assert_eq!(v["ValDtls"]["SgstVal"], "900.00");
     assert_eq!(v["ValDtls"]["IgstVal"], "0.00");
@@ -439,7 +479,10 @@ fn india_native_inv01_lifecycle_is_byte_deterministic() {
     let (a, json_a, env_a) = run_inv01_lifecycle(&doc);
     let (b, json_b, env_b) = run_inv01_lifecycle(&doc);
     assert_eq!(json_a, json_b, "INV-01 serialization must be byte-stable");
-    assert_eq!(a, b, "the whole native-format lifecycle must be byte-stable");
+    assert_eq!(
+        a, b,
+        "the whole native-format lifecycle must be byte-stable"
+    );
     assert_eq!(env_a.irn, env_b.irn, "IRN derivation is deterministic");
 }
 
@@ -451,7 +494,10 @@ fn india_native_inv01_credit_note_maps_to_crn() {
     let doc = indian_credit_note();
     let (ikb, inv01, envelope) = run_inv01_lifecycle(&doc);
     let v: serde_json::Value = serde_json::from_str(&inv01).unwrap();
-    assert_eq!(v["DocDtls"]["Typ"], "CRN", "credit note maps to INV-01 Typ CRN");
+    assert_eq!(
+        v["DocDtls"]["Typ"], "CRN",
+        "credit note maps to INV-01 Typ CRN"
+    );
     assert_eq!(v["DocDtls"]["No"], "CRN-2026-IN-0001");
     assert_eq!(envelope.status, IrpStatus::Accepted);
     let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
@@ -719,7 +765,11 @@ fn indian_export_lut_invoice() -> CommercialDocument {
 
 /// Build a packed `.ikb` bundle for a given document + registered envelope so
 /// the new scenarios reuse the same evidence assembly as `run_lifecycle`.
-fn pack_bundle(doc: &CommercialDocument, ubl_bytes: &[u8], envelope: &IrpRegisterEnvelope) -> Vec<u8> {
+fn pack_bundle(
+    doc: &CommercialDocument,
+    ubl_bytes: &[u8],
+    envelope: &IrpRegisterEnvelope,
+) -> Vec<u8> {
     let canonical = canonicalize_value(&doc.to_value().unwrap())
         .unwrap()
         .into_bytes();
@@ -731,7 +781,10 @@ fn pack_bundle(doc: &CommercialDocument, ubl_bytes: &[u8], envelope: &IrpRegiste
         serde_json::to_vec(envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     pack(&bundle).unwrap()
 }
 
@@ -930,7 +983,10 @@ fn india_intra_state_reverse_charge_invoice_registers() {
     );
     let envelope = provider.register_invoice(&req).unwrap();
     assert_eq!(envelope.status, IrpStatus::Accepted);
-    assert!(envelope.signed_qr_code.is_some(), "signed QR for the printed invoice");
+    assert!(
+        envelope.signed_qr_code.is_some(),
+        "signed QR for the printed invoice"
+    );
 }
 
 #[test]
@@ -973,7 +1029,10 @@ fn india_irp_rejection_receipt_round_trips() {
     let json = serde_json::to_string(&rejected).unwrap();
     // skip_serializing_if drops the None fields from the wire entirely.
     assert!(!json.contains("\"irn\""), "absent IRN is not serialized");
-    assert!(!json.contains("signed_qr_code"), "absent QR is not serialized");
+    assert!(
+        !json.contains("signed_qr_code"),
+        "absent QR is not serialized"
+    );
     let back: IrpRegisterEnvelope = serde_json::from_str(&json).unwrap();
     assert_eq!(back, rejected, "rejection receipt round-trips byte-stable");
 }

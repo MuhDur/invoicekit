@@ -598,8 +598,7 @@ fn percent_encode_path_segment(input: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut out = String::with_capacity(input.len());
     for &byte in input.as_bytes() {
-        let unreserved = byte.is_ascii_alphanumeric()
-            || matches!(byte, b'-' | b'.' | b'_' | b'~');
+        let unreserved = byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~');
         if unreserved {
             out.push(byte as char);
         } else {
@@ -978,10 +977,7 @@ mod tests {
         assert!(!encoded.contains(' '), "space leaked: {encoded}");
         // A literal `%` from the input is itself encoded to `%25`, so
         // the only `%` sequences left are the encoder's own escapes.
-        assert_eq!(
-            encoded,
-            "..%2F..%2Fadmin%3Fx%3D1%23frag%20with%252e"
-        );
+        assert_eq!(encoded, "..%2F..%2Fadmin%3Fx%3D1%23frag%20with%252e");
     }
 
     #[test]

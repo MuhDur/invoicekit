@@ -121,9 +121,7 @@ pub fn validate_siret(siret: &str) -> Result<(), FrCtcReportError> {
     }
     // The first 9 digits must themselves form a valid SIREN.
     validate_siren(&siret[..9]).map_err(|_| {
-        FrCtcReportError::BadIdentifier(format!(
-            "SIRET prefix is not a valid SIREN, got {siret:?}"
-        ))
+        FrCtcReportError::BadIdentifier(format!("SIRET prefix is not a valid SIREN, got {siret:?}"))
     })
 }
 
@@ -421,9 +419,11 @@ impl FrCtcReportProvider for MockFrCtcReportProvider {
             }
         });
         let reason = if lifecycle.is_rejected() {
-            Some(self.forced_reason.clone().unwrap_or_else(|| {
-                "platform rejected the invoice (motif de rejet)".to_owned()
-            }))
+            Some(
+                self.forced_reason
+                    .clone()
+                    .unwrap_or_else(|| "platform rejected the invoice (motif de rejet)".to_owned()),
+            )
         } else {
             None
         };
@@ -592,7 +592,10 @@ mod tests {
         let xml = to_factur_x_xml(&doc).unwrap();
         // France rides EN 16931 via Factur-X (CII), not a national format.
         assert!(xml.contains("<rsm:CrossIndustryInvoice"), "not CII:\n{xml}");
-        assert!(xml.contains("urn:cen.eu:en16931:2017"), "not EN 16931:\n{xml}");
+        assert!(
+            xml.contains("urn:cen.eu:en16931:2017"),
+            "not EN 16931:\n{xml}"
+        );
         assert!(xml.contains("<ram:GrandTotalAmount>120.00</ram:GrandTotalAmount>"));
         assert_eq!(xml, to_factur_x_xml(&doc).unwrap(), "must be byte-stable");
     }

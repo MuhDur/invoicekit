@@ -179,7 +179,9 @@ fn run_lifecycle() -> (Vec<u8>, invoicekit_report_do_dgii::DgiiSubmitEnvelope) {
 
     // 3. submit those bytes to the existing MockDgiiProvider.
     let provider = MockDgiiProvider::with_fixed_received_at(FIXED_RECEIVED_AT);
-    let envelope = provider.submit_ecf(&submit_request(ubl_bytes.clone())).unwrap();
+    let envelope = provider
+        .submit_ecf(&submit_request(ubl_bytes.clone()))
+        .unwrap();
 
     // 4. evidence bundle: canonical doc + UBL XML + DGII receipt.
     let canonical = canonicalize_value(&doc.to_value().unwrap())
@@ -193,7 +195,10 @@ fn run_lifecycle() -> (Vec<u8>, invoicekit_report_do_dgii::DgiiSubmitEnvelope) {
         serde_json::to_vec(&envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, envelope)
 }

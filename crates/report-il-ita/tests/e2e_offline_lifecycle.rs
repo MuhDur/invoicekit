@@ -200,7 +200,10 @@ fn israel_offline_lifecycle_produces_verifiable_evidence() {
         9,
         "ITA Allocation Number is a 9-digit numeric"
     );
-    assert!(envelope.allocation_number.bytes().all(|b| b.is_ascii_digit()));
+    assert!(envelope
+        .allocation_number
+        .bytes()
+        .all(|b| b.is_ascii_digit()));
     assert_eq!(envelope.issued_at, FIXED_ISSUED_AT);
     assert!(envelope.reason.is_none());
 
@@ -505,7 +508,10 @@ fn run_lifecycle_for(
         serde_json::to_vec(&envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, envelope)
 }
@@ -550,7 +556,10 @@ fn israel_multiline_invoice_serializes_18_percent() {
     let xml = String::from_utf8(to_xml(&doc).unwrap().into_bytes()).unwrap();
     // Two invoice lines (canonicalizer expands to start tags `<cac:InvoiceLine`).
     let line_count = xml.matches("<cac:InvoiceLine").count();
-    assert_eq!(line_count, 2, "multi-line invoice must emit 2 InvoiceLine:\n{xml}");
+    assert_eq!(
+        line_count, 2,
+        "multi-line invoice must emit 2 InvoiceLine:\n{xml}"
+    );
     assert!(
         xml.contains(">18.00</cbc:Percent>"),
         "standard Israeli VAT percent is 18 since 2025-01-01:\n{xml}"
@@ -560,7 +569,10 @@ fn israel_multiline_invoice_serializes_18_percent() {
         "tax scheme id must be VAT:\n{xml}"
     );
     // Tax math the IR carries: 250.00 base, 45.00 tax, 295.00 payable.
-    assert!(xml.contains(">295.00</cbc:PayableAmount>"), "payable 295.00:\n{xml}");
+    assert!(
+        xml.contains(">295.00</cbc:PayableAmount>"),
+        "payable 295.00:\n{xml}"
+    );
     assert!(
         xml.contains(">45.00</cbc:TaxAmount>"),
         "aggregate VAT is 45.00:\n{xml}"
@@ -581,8 +593,14 @@ fn israel_multiline_invoice_serializes_18_percent() {
 fn israel_zero_rated_export_charges_no_vat() {
     let doc = israeli_zero_rated_export();
     let xml = String::from_utf8(to_xml(&doc).unwrap().into_bytes()).unwrap();
-    assert!(xml.contains(">Z</cbc:ID>"), "zero-rate category id is Z:\n{xml}");
-    assert!(xml.contains(">0.00</cbc:Percent>"), "export VAT percent is 0:\n{xml}");
+    assert!(
+        xml.contains(">Z</cbc:ID>"),
+        "zero-rate category id is Z:\n{xml}"
+    );
+    assert!(
+        xml.contains(">0.00</cbc:Percent>"),
+        "export VAT percent is 0:\n{xml}"
+    );
     assert!(
         xml.contains(">0.00</cbc:TaxAmount>"),
         "zero-rated export charges 0.00 VAT:\n{xml}"
@@ -634,9 +652,7 @@ impl ItaProvider for ThresholdItaProvider {
                 allocation_number: "000000000".to_owned(),
                 status: ItaStatus::Rejected,
                 issued_at: self.issued_at.clone(),
-                reason: Some(
-                    "below SHAAM allocation threshold (NIS 5,000 before VAT)".to_owned(),
-                ),
+                reason: Some("below SHAAM allocation threshold (NIS 5,000 before VAT)".to_owned()),
             });
         }
         Ok(invoicekit_report_il_ita::ItaAllocationEnvelope {
@@ -668,7 +684,10 @@ fn israel_below_threshold_is_rejected_not_errored() {
         envelope.allocation_number, "000000000",
         "a refused request carries no usable Allocation Number"
     );
-    let reason = envelope.reason.as_deref().expect("rejection carries a reason");
+    let reason = envelope
+        .reason
+        .as_deref()
+        .expect("rejection carries a reason");
     assert!(
         reason.contains("threshold"),
         "rejection reason explains the SHAAM threshold: {reason:?}"
@@ -692,7 +711,10 @@ fn israel_over_threshold_is_allocated() {
     let (_ikb, envelope) = run_lifecycle_for(&doc, gross_bp(6_000, 0), &provider);
     assert_eq!(envelope.status, ItaStatus::Allocated);
     assert!(envelope.reason.is_none());
-    assert!(envelope.allocation_number.bytes().all(|b| b.is_ascii_digit()));
+    assert!(envelope
+        .allocation_number
+        .bytes()
+        .all(|b| b.is_ascii_digit()));
 }
 
 /// ITA tax identifiers are exactly **9 ASCII digits** (the issuer/buyer
@@ -766,7 +788,10 @@ fn rejected_allocation_envelope_round_trips() {
     };
     let json = serde_json::to_string(&env).unwrap();
     // kebab-case serde on the status enum.
-    assert!(json.contains("\"status\":\"rejected\""), "status serialises kebab-case: {json}");
+    assert!(
+        json.contains("\"status\":\"rejected\""),
+        "status serialises kebab-case: {json}"
+    );
     let parsed: invoicekit_report_il_ita::ItaAllocationEnvelope =
         serde_json::from_str(&json).unwrap();
     assert_eq!(parsed, env);

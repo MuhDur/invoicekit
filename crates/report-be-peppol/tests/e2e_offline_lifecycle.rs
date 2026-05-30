@@ -177,7 +177,9 @@ fn run_lifecycle() -> (
 
     // 3. deliver through the offline Mercurius/Hermes mock.
     let provider = MockBePeppolProvider::with_fixed_delivered_at(FIXED_DELIVERED_AT);
-    let delivered = provider.deliver(&deliver_request(ubl_bytes.clone())).unwrap();
+    let delivered = provider
+        .deliver(&deliver_request(ubl_bytes.clone()))
+        .unwrap();
 
     // 4. advance the async Peppol ladder: Delivered -> Accepted.
     let accepted = provider
@@ -196,7 +198,10 @@ fn run_lifecycle() -> (
         serde_json::to_vec(&accepted).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, delivered, accepted)
 }
@@ -504,8 +509,7 @@ fn belgium_credit_note_serializes_as_ubl_creditnote_and_delivers() {
     let provider = MockBePeppolProvider::with_fixed_delivered_at(FIXED_DELIVERED_AT);
     let mut req = deliver_request(ubl.into_bytes());
     req.mandate = BePeppolMandate::B2b;
-    req.receiver =
-        BePeppolReceiver::PeppolParticipant("9925:BE0987654310".to_owned()); // EAS 9925 = BE VAT
+    req.receiver = BePeppolReceiver::PeppolParticipant("9925:BE0987654310".to_owned()); // EAS 9925 = BE VAT
     let env = provider.deliver(&req).unwrap();
     assert_eq!(env.status, BePeppolStatus::Delivered);
     assert!(

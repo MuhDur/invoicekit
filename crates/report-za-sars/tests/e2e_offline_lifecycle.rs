@@ -577,7 +577,10 @@ fn bundle_for(
         serde_json::to_vec(&receipt).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, ubl_xml, receipt)
 }
@@ -827,6 +830,9 @@ fn za_deepened_lifecycles_are_byte_deterministic() {
         let (ikb_a, ubl_a, _) = bundle_for(&doc, &MockSarsProvider::default());
         let (ikb_b, ubl_b, _) = bundle_for(&doc, &MockSarsProvider::default());
         assert_eq!(ubl_a, ubl_b, "UBL serialization must be byte-stable");
-        assert_eq!(ikb_a, ikb_b, "the whole offline lifecycle must be byte-stable");
+        assert_eq!(
+            ikb_a, ikb_b,
+            "the whole offline lifecycle must be byte-stable"
+        );
     }
 }

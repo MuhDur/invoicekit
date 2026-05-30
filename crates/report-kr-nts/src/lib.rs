@@ -183,10 +183,12 @@ impl NtsProvider for MockNtsProvider {
         // approval number, but stamps the verdict Rejected with a
         // reason. Surfacing it inside the envelope lets the engine
         // persist the refusal in its audit trail.
-        let (status, reason) = self.forced_rejection.as_ref().map_or(
-            (NtsStatus::Approved, None),
-            |reason| (NtsStatus::Rejected, Some(reason.clone())),
-        );
+        let (status, reason) = self
+            .forced_rejection
+            .as_ref()
+            .map_or((NtsStatus::Approved, None), |reason| {
+                (NtsStatus::Rejected, Some(reason.clone()))
+            });
         Ok(NtsSubmitEnvelope {
             approval_no: format!("KR-{serial:0>21}"),
             status,
@@ -234,10 +236,7 @@ const BRN_CHECKSUM_WEIGHTS: [u32; 9] = [1, 3, 7, 1, 3, 7, 1, 3, 5];
 /// computed check digit does not match the tenth digit.
 pub fn validate_brn_checksum(brn: &str) -> Result<(), NtsError> {
     validate_brn(brn)?;
-    let digits: Vec<u32> = brn
-        .chars()
-        .filter_map(|c| c.to_digit(10))
-        .collect();
+    let digits: Vec<u32> = brn.chars().filter_map(|c| c.to_digit(10)).collect();
     let mut sum: u32 = BRN_CHECKSUM_WEIGHTS
         .iter()
         .zip(&digits)

@@ -154,7 +154,10 @@ fn submit_request(comprobante_xml: Vec<u8>) -> HaciendaSubmitRequest {
 /// assemble + pack the evidence bundle. This is the canonical happy-path
 /// Factura wiring; the submit/bundle/pack chain is shared with the
 /// parameterized [`run_lifecycle_for`].
-fn run_lifecycle() -> (Vec<u8>, invoicekit_report_cr_hacienda::HaciendaSubmitEnvelope) {
+fn run_lifecycle() -> (
+    Vec<u8>,
+    invoicekit_report_cr_hacienda::HaciendaSubmitEnvelope,
+) {
     // 1. build
     let doc = costa_rican_invoice();
 
@@ -163,8 +166,8 @@ fn run_lifecycle() -> (Vec<u8>, invoicekit_report_cr_hacienda::HaciendaSubmitEnv
     // The serializer canonicalizes (XML C14N 1.1): namespace declarations are
     // inlined onto every element, so match on the tag + value separately rather
     // than a literal `<cbc:Tag>value</cbc:Tag>` slice.
-    let ubl_str = String::from_utf8(invoicekit_format_ubl::to_xml(&doc).unwrap().into_bytes())
-        .unwrap();
+    let ubl_str =
+        String::from_utf8(invoicekit_format_ubl::to_xml(&doc).unwrap().into_bytes()).unwrap();
     for needle in [
         "<Invoice xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:Invoice-2\">",
         "<cbc:DocumentCurrencyCode",
@@ -457,7 +460,10 @@ fn run_lifecycle_for(
         serde_json::to_vec(&envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, envelope, ubl_str)
 }
@@ -494,7 +500,10 @@ fn costa_rica_multiline_export_invoice_mixed_iva_tariffs() {
     assert_eq!(ubl.matches("<cac:InvoiceLine ").count(), 2);
     // The 13%-taxed line and the zero-rated export line both serialize their
     // classified tax category code (S = standard-rated, Z = zero-rated).
-    assert!(ubl.contains(">S</cbc:ID>"), "13% IVA category S must appear");
+    assert!(
+        ubl.contains(">S</cbc:ID>"),
+        "13% IVA category S must appear"
+    );
     assert!(
         ubl.contains(">Z</cbc:ID>"),
         "zero-rated export category Z must appear"
@@ -507,7 +516,10 @@ fn costa_rica_multiline_export_invoice_mixed_iva_tariffs() {
     assert!(ubl.contains(">213.00</cbc:TaxInclusiveAmount>"));
     assert!(ubl.contains(">200.00</cbc:LineExtensionAmount>"));
     assert!(ubl.contains(">13.00</cbc:TaxAmount>"), "13% IVA = 13.00");
-    assert!(ubl.contains(">0.00</cbc:TaxAmount>"), "zero-rated subtotal = 0.00");
+    assert!(
+        ubl.contains(">0.00</cbc:TaxAmount>"),
+        "zero-rated subtotal = 0.00"
+    );
 
     assert_eq!(envelope.status, HaciendaStatus::Aceptado);
     let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
@@ -588,7 +600,10 @@ fn costa_rica_authority_rechazado_is_a_receipt_status_not_an_error() {
     );
 
     assert_eq!(envelope.status, HaciendaStatus::Rechazado);
-    assert_eq!(envelope.mensaje.as_deref(), Some("Clave numérica duplicada"));
+    assert_eq!(
+        envelope.mensaje.as_deref(),
+        Some("Clave numérica duplicada")
+    );
     // The clave is still echoed so the rejection correlates with the upload.
     assert_eq!(envelope.clave_numerica.len(), 50);
 
@@ -607,7 +622,10 @@ fn costa_rica_invalid_identifiers_are_refused_pre_wire() {
     bad_clave.clave_numerica = "5".repeat(49);
     let err = provider.submit_comprobante(&bad_clave).unwrap_err();
     assert!(
-        matches!(err, invoicekit_report_cr_hacienda::HaciendaError::BadClave(_)),
+        matches!(
+            err,
+            invoicekit_report_cr_hacienda::HaciendaError::BadClave(_)
+        ),
         "49-digit clave must be refused, got {err:?}"
     );
 
@@ -616,7 +634,10 @@ fn costa_rica_invalid_identifiers_are_refused_pre_wire() {
     alpha_clave.clave_numerica = format!("{}A", "5".repeat(49));
     let err = provider.submit_comprobante(&alpha_clave).unwrap_err();
     assert!(
-        matches!(err, invoicekit_report_cr_hacienda::HaciendaError::BadClave(_)),
+        matches!(
+            err,
+            invoicekit_report_cr_hacienda::HaciendaError::BadClave(_)
+        ),
         "non-numeric clave must be refused, got {err:?}"
     );
 

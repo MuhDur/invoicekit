@@ -942,9 +942,7 @@ mod tests {
 
     /// Flatten every seed manifest into `(list, effective_from, effective_to,
     /// entry)` tuples for the lookup property tests.
-    fn seed_window_cases(
-        registry: &Registry,
-    ) -> Vec<(String, String, Option<String>, Entry)> {
+    fn seed_window_cases(registry: &Registry) -> Vec<(String, String, Option<String>, Entry)> {
         registry
             .manifests()
             .flat_map(|manifest| {

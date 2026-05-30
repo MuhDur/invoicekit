@@ -216,7 +216,10 @@ fn bundle_lifecycle(
         serde_json::to_vec(&envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, envelope)
 }
@@ -701,7 +704,10 @@ fn egypt_vat_exempt_supply_has_zero_output_tax() {
     );
     assert!(xml.contains(r#"currencyID="EGP">1000.00</cbc:PayableAmount>"#));
     // The tax category carried into the UBL line is the exempt code "E".
-    assert!(xml.contains(">E</cbc:ID>"), "exempt category code E must appear");
+    assert!(
+        xml.contains(">E</cbc:ID>"),
+        "exempt category code E must appear"
+    );
 
     let provider = MockEtaProvider::new();
     let (ikb, _) = bundle_lifecycle(
@@ -719,7 +725,10 @@ fn egypt_export_invoice_is_zero_rated_to_a_foreign_buyer() {
 
     // ETA subtype V001 "Export": foreign buyer, foreign-currency invoice,
     // zero output VAT.
-    assert_eq!(doc.customer.address.country, CountryCode::new("DE").unwrap());
+    assert_eq!(
+        doc.customer.address.country,
+        CountryCode::new("DE").unwrap()
+    );
     let xml = to_xml(&doc).unwrap();
     assert!(
         xml.contains(">USD</cbc:DocumentCurrencyCode>"),
@@ -856,7 +865,8 @@ fn egypt_canonical_serialization_is_deterministic_across_classes() {
         let a = canonicalize_value(&doc.to_value().unwrap()).unwrap();
         let b = canonicalize_value(&doc.to_value().unwrap()).unwrap();
         assert_eq!(
-            a, b,
+            a,
+            b,
             "canonical JSON for {:?} {} must be byte-stable",
             doc.document_type,
             doc.document_number.as_str()

@@ -433,9 +433,11 @@ impl KmsAdapter for InMemoryKms {
                 tenant: tenant.clone(),
                 version: wrapped.key_version,
             })?;
-        let bytes: [u8; 32] = wrapped.bytes.as_slice().try_into().map_err(|_| {
-            KmsError::Aead("wrapped DEK is not 32 bytes".into())
-        })?;
+        let bytes: [u8; 32] = wrapped
+            .bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| KmsError::Aead("wrapped DEK is not 32 bytes".into()))?;
         Ok(PlaintextDek(xor32(&bytes, &master)))
     }
 }

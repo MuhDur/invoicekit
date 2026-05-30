@@ -193,7 +193,9 @@ fn run_lifecycle() -> (Vec<u8>, MyDataReportEnvelope) {
 
     // 3. report to the offline IAPR mock.
     let provider = MockMyDataProvider::with_fixed_reported_at(PINNED_REPORTED_AT);
-    let envelope = provider.report_invoice(&report_request(ubl_bytes.clone())).unwrap();
+    let envelope = provider
+        .report_invoice(&report_request(ubl_bytes.clone()))
+        .unwrap();
 
     // 4. evidence bundle: canonical doc + national/family XML + receipt.
     let ikb = pack_bundle(&doc, ubl_bytes, &envelope);
@@ -209,8 +211,14 @@ fn greece_offline_lifecycle_produces_verifiable_evidence() {
     assert_eq!(envelope.reported_at, PINNED_REPORTED_AT);
     assert!(envelope.message.is_none());
 
-    let mark = envelope.mark.as_ref().expect("accepted invoice carries a MARK");
-    let uid = envelope.uid.as_ref().expect("accepted invoice carries a UID");
+    let mark = envelope
+        .mark
+        .as_ref()
+        .expect("accepted invoice carries a MARK");
+    let uid = envelope
+        .uid
+        .as_ref()
+        .expect("accepted invoice carries a UID");
     // The mock derives a 16-digit IAPR-shaped MARK from its serial.
     assert!(mark.as_str().starts_with("4000"));
     assert!(uid.as_str().starts_with("MYDATA-MOCK-UID-"));
@@ -280,7 +288,11 @@ fn greece_refuses_invalid_afm_and_empty_payload_before_the_wire() {
 
 /// Pack a document + authority envelope into a `.ikb` evidence bundle the same
 /// way `run_lifecycle` does, so the deepened scenarios reuse the proven path.
-fn pack_bundle(doc: &CommercialDocument, ubl_bytes: Vec<u8>, envelope: &MyDataReportEnvelope) -> Vec<u8> {
+fn pack_bundle(
+    doc: &CommercialDocument,
+    ubl_bytes: Vec<u8>,
+    envelope: &MyDataReportEnvelope,
+) -> Vec<u8> {
     let canonical = canonicalize_value(&doc.to_value().unwrap())
         .unwrap()
         .into_bytes();
@@ -292,7 +304,10 @@ fn pack_bundle(doc: &CommercialDocument, ubl_bytes: Vec<u8>, envelope: &MyDataRe
         serde_json::to_vec(envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     pack(&bundle).unwrap()
 }
 
@@ -393,7 +408,10 @@ fn greece_associated_credit_note_5_1_reports_and_bundles() {
     // Country/format specifics: a CreditNote root with the 381 type code and
     // no InvoiceTypeCode. (UBL emits inline namespace declarations on each
     // element, so we match the value-bearing close tag, which is stable.)
-    assert!(ubl_xml.contains("<CreditNote"), "must serialize a UBL CreditNote root");
+    assert!(
+        ubl_xml.contains("<CreditNote"),
+        "must serialize a UBL CreditNote root"
+    );
     assert!(
         ubl_xml.contains(">381</cbc:CreditNoteTypeCode>"),
         "credit note must carry CreditNoteTypeCode 381, got: {ubl_xml}"
@@ -425,7 +443,10 @@ fn greece_associated_credit_note_5_1_reports_and_bundles() {
     assert_eq!(req.category.code(), "5.1");
     let envelope = provider.report_invoice(&req).unwrap();
     assert_eq!(envelope.status, MyDataStatus::Accepted);
-    let mark = envelope.mark.as_ref().expect("accepted credit note carries a MARK");
+    let mark = envelope
+        .mark
+        .as_ref()
+        .expect("accepted credit note carries a MARK");
     assert!(mark.as_str().starts_with("4000"));
 
     // The whole credit-note lifecycle bundles into verifiable evidence.
@@ -460,7 +481,13 @@ fn greek_multiline_invoice() -> CommercialDocument {
             "Athina",
             "11523",
         ),
-        customer: greek_party("Beta EPE", "EL987654321", "Egnatia 100", "Thessaloniki", "54622"),
+        customer: greek_party(
+            "Beta EPE",
+            "EL987654321",
+            "Egnatia 100",
+            "Thessaloniki",
+            "54622",
+        ),
         payee: None,
         payment_terms: None,
         payment_instructions: Vec::new(),
@@ -605,7 +632,13 @@ fn greek_exempt_invoice() -> CommercialDocument {
         ),
         // Domestic exempt supply (e.g. an Article-22 exempt service): a Greek
         // customer, so the wire keeps the GR country code consistent.
-        customer: greek_party("Gamma EPE", "EL555555555", "Akti Miaouli 7", "Pireas", "18535"),
+        customer: greek_party(
+            "Gamma EPE",
+            "EL555555555",
+            "Akti Miaouli 7",
+            "Pireas",
+            "18535",
+        ),
         payee: None,
         payment_terms: None,
         payment_instructions: Vec::new(),
@@ -719,7 +752,9 @@ fn greece_authority_rejection_is_a_status_not_an_error_and_stays_auditable() {
         status: MyDataStatus::Rejected,
         mark: None,
         uid: None,
-        message: Some("102: invalid invoice — vatCategory/vatExemptionCategory mismatch".to_owned()),
+        message: Some(
+            "102: invalid invoice — vatCategory/vatExemptionCategory mismatch".to_owned(),
+        ),
         reported_at: PINNED_REPORTED_AT.to_owned(),
     };
 
@@ -736,7 +771,10 @@ fn greece_authority_rejection_is_a_status_not_an_error_and_stays_auditable() {
     assert_eq!(parsed, rejected);
     // Rejected status serializes in kebab-case and omits the absent MARK/UID.
     assert!(json.contains("\"status\":\"rejected\""));
-    assert!(!json.contains("\"mark\""), "rejected receipt must omit MARK");
+    assert!(
+        !json.contains("\"mark\""),
+        "rejected receipt must omit MARK"
+    );
     assert!(!json.contains("\"uid\""), "rejected receipt must omit UID");
 
     // (c) The rejection still bundles into verifiable evidence — the audit
@@ -839,7 +877,10 @@ fn pack_native_bundle(
         serde_json::to_vec(envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     pack(&bundle).unwrap()
 }
 
@@ -912,7 +953,10 @@ fn greece_native_invoices_doc_lifecycle_produces_verifiable_evidence() {
 
     // The IAPR accepted and assigned a MARK + UID.
     assert_eq!(envelope.status, MyDataStatus::Accepted);
-    let mark = envelope.mark.as_ref().expect("accepted invoice carries a MARK");
+    let mark = envelope
+        .mark
+        .as_ref()
+        .expect("accepted invoice carries a MARK");
     assert!(mark.as_str().starts_with("4000"));
 
     // The bundle verifies (exit 0 == report.ok).
@@ -924,8 +968,14 @@ fn greece_native_invoices_doc_lifecycle_produces_verifiable_evidence() {
 fn greece_native_lifecycle_is_byte_deterministic() {
     let (a, xml_a, _) = run_native_lifecycle();
     let (b, xml_b, _) = run_native_lifecycle();
-    assert_eq!(xml_a, xml_b, "native InvoicesDoc serialization must be stable");
-    assert_eq!(a, b, "the whole native offline lifecycle must be byte-stable");
+    assert_eq!(
+        xml_a, xml_b,
+        "native InvoicesDoc serialization must be stable"
+    );
+    assert_eq!(
+        a, b,
+        "the whole native offline lifecycle must be byte-stable"
+    );
 }
 
 #[test]
@@ -1002,7 +1052,10 @@ fn greece_native_exempt_line_emits_vat_category_7_and_exemption() {
     assert_eq!(envelope.status, MyDataStatus::Accepted);
     let ikb = pack_native_bundle(&doc, xml.into_bytes(), &envelope);
     let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
-    assert!(report.ok, "native exempt-invoice evidence bundle must verify");
+    assert!(
+        report.ok,
+        "native exempt-invoice evidence bundle must verify"
+    );
 }
 
 #[test]

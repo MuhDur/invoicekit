@@ -288,7 +288,10 @@ mod tests {
         let env = p.submit_invoice(&sample_request()).unwrap();
         assert_eq!(env.status, GdtStatus::Rejected);
         assert!(env.ma_cqt.is_empty(), "a refused invoice gets no mã CQT");
-        assert_eq!(env.message.as_deref(), Some("MST người bán không hoạt động"));
+        assert_eq!(
+            env.message.as_deref(),
+            Some("MST người bán không hoạt động")
+        );
     }
 
     #[test]

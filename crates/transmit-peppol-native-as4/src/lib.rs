@@ -89,8 +89,9 @@ pub enum SignerError {
 }
 
 /// Boxed future returned by [`Transport::push`].
-pub type PushFuture<'a> =
-    Pin<Box<dyn std::future::Future<Output = Result<TransportResponse, TransportError>> + Send + 'a>>;
+pub type PushFuture<'a> = Pin<
+    Box<dyn std::future::Future<Output = Result<TransportResponse, TransportError>> + Send + 'a>,
+>;
 
 /// HTTPS transport abstraction.
 pub trait Transport: Send + Sync {
@@ -308,7 +309,11 @@ impl GatewayAdapter for NativeAs4Adapter {
         // receipt; a follow-up bead wires the actual outbox lookup.
         let submission_id = request.submission_id.clone();
         Box::pin(async move {
-            pending_receipt(GatewayOperation::Poll, request.context.clone(), submission_id)
+            pending_receipt(
+                GatewayOperation::Poll,
+                request.context.clone(),
+                submission_id,
+            )
         })
     }
 

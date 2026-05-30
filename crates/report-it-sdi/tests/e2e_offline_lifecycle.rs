@@ -496,14 +496,20 @@ fn bundle_for(
         .into_bytes();
     let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     artefacts.insert("canonical.json".to_owned(), canonical);
-    artefacts.insert("formats/fattura.xml".to_owned(), fattura.clone().into_bytes());
+    artefacts.insert(
+        "formats/fattura.xml".to_owned(),
+        fattura.clone().into_bytes(),
+    );
     artefacts.insert("signed.xml".to_owned(), report.signed_fattura_xml.clone());
     artefacts.insert(
         "receipt.json".to_owned(),
         serde_json::to_vec(&report.envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, fattura, report)
 }
@@ -640,7 +646,10 @@ fn italy_mancata_consegna_is_non_delivered_without_rejection_reason() {
     let doc = italian_invoice();
     let (ikb, _fattura, report) = bundle_for(&doc, Some(SdiReceiptKind::MancataConsegna));
 
-    assert_eq!(report.envelope.receipt_kind, SdiReceiptKind::MancataConsegna);
+    assert_eq!(
+        report.envelope.receipt_kind,
+        SdiReceiptKind::MancataConsegna
+    );
     assert!(
         !report.envelope.receipt_kind.is_delivered(),
         "Mancata Consegna is a non-delivered outcome"
@@ -689,6 +698,9 @@ fn italy_multiline_lifecycle_is_byte_deterministic() {
     let doc = italian_multiline_mixed_rate_invoice();
     let (a, fattura_a, _) = bundle_for(&doc, None);
     let (b, fattura_b, _) = bundle_for(&doc, None);
-    assert_eq!(fattura_a, fattura_b, "FatturaPA serialization must be stable");
+    assert_eq!(
+        fattura_a, fattura_b,
+        "FatturaPA serialization must be stable"
+    );
     assert_eq!(a, b, "the whole multi-line lifecycle must be byte-stable");
 }

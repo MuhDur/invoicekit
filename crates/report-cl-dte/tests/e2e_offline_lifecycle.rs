@@ -193,7 +193,9 @@ fn run_lifecycle() -> (Vec<u8>, SiiSubmitEnvelope) {
     // 3. submit to the existing Chilean mock; this runs the real RUT + folio
     //    validators and synthesizes a SII TrackId receipt.
     let provider = MockSiiProvider::new();
-    let envelope = provider.submit_dte(&submit_request(ubl_bytes.clone())).unwrap();
+    let envelope = provider
+        .submit_dte(&submit_request(ubl_bytes.clone()))
+        .unwrap();
 
     // 5. evidence bundle: canonical doc + UBL XML + SII receipt. Reuses the
     //    same packing machinery as the deepened scenarios so the happy path and
@@ -521,7 +523,11 @@ fn chilean_multiline_invoice() -> CommercialDocument {
 /// Pack a freshly-built bundle from a document + a submit envelope and return
 /// the `.ikb` bytes, so the credit-note / exempt scenarios reuse the same
 /// evidence machinery as the happy path without weakening `run_lifecycle`.
-fn pack_bundle(doc: &CommercialDocument, ubl_bytes: &[u8], envelope: &SiiSubmitEnvelope) -> Vec<u8> {
+fn pack_bundle(
+    doc: &CommercialDocument,
+    ubl_bytes: &[u8],
+    envelope: &SiiSubmitEnvelope,
+) -> Vec<u8> {
     let canonical = canonicalize_value(&doc.to_value().unwrap())
         .unwrap()
         .into_bytes();
@@ -533,7 +539,10 @@ fn pack_bundle(doc: &CommercialDocument, ubl_bytes: &[u8], envelope: &SiiSubmitE
         serde_json::to_vec(envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     pack(&bundle).unwrap()
 }
 
@@ -556,7 +565,10 @@ fn pack_bundle_dte(
         serde_json::to_vec(envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     pack(&bundle).unwrap()
 }
 
@@ -630,7 +642,10 @@ fn cl_native_dte_lifecycle_produces_verifiable_evidence() {
     let dte_xml_again = to_dte_xml(&doc, &ctx).unwrap();
     assert_eq!(dte_xml, dte_xml_again, "DTE serialization must be stable");
     let ikb_again = pack_bundle_dte(&doc, &dte_xml_again.into_bytes(), &envelope);
-    assert_eq!(ikb, ikb_again, "the native-DTE lifecycle must be byte-stable");
+    assert_eq!(
+        ikb, ikb_again,
+        "the native-DTE lifecycle must be byte-stable"
+    );
 }
 
 /// Native-format Nota de Crédito (tipo 61): the IR credit note serializes to SII
@@ -730,8 +745,7 @@ fn cl_exempt_factura_tipo_34_has_zero_iva() {
     assert_eq!(summary.tax_amount, amt(0));
     assert_eq!(doc.monetary_total.payable_amount, amt(10000));
     assert_eq!(
-        doc.monetary_total.tax_inclusive_amount,
-        doc.monetary_total.tax_exclusive_amount,
+        doc.monetary_total.tax_inclusive_amount, doc.monetary_total.tax_exclusive_amount,
         "an exempt factura adds no IVA: inclusive == exclusive"
     );
 
@@ -858,5 +872,9 @@ fn cl_credit_note_lifecycle_is_byte_deterministic() {
             .unwrap();
         pack_bundle(&doc, &ubl_bytes, &envelope)
     };
-    assert_eq!(build(), build(), "credit-note lifecycle must be byte-stable");
+    assert_eq!(
+        build(),
+        build(),
+        "credit-note lifecycle must be byte-stable"
+    );
 }

@@ -148,7 +148,11 @@ fn submit_request(invoice_xml: Vec<u8>) -> MyInvoisSubmitRequest {
 /// Bundle layout (matching the reference Italy SDI pattern): `canonical.json`
 /// (the canonicalized IR) + `formats/ubl.xml` (the national serialization) +
 /// `receipt.json` (the authority envelope).
-fn pack_evidence(doc: &CommercialDocument, ubl_bytes: Vec<u8>, envelope: &MyInvoisSubmitEnvelope) -> Vec<u8> {
+fn pack_evidence(
+    doc: &CommercialDocument,
+    ubl_bytes: Vec<u8>,
+    envelope: &MyInvoisSubmitEnvelope,
+) -> Vec<u8> {
     let canonical = canonicalize_value(&doc.to_value().unwrap())
         .unwrap()
         .into_bytes();
@@ -160,7 +164,11 @@ fn pack_evidence(doc: &CommercialDocument, ubl_bytes: Vec<u8>, envelope: &MyInvo
         serde_json::to_vec(envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    pack(&EvidenceBundle { manifest, artefacts }).unwrap()
+    pack(&EvidenceBundle {
+        manifest,
+        artefacts,
+    })
+    .unwrap()
 }
 
 /// Steps 1-4: build -> serialize -> submit -> assemble + pack evidence bundle.
@@ -177,7 +185,9 @@ fn run_lifecycle() -> (Vec<u8>, MyInvoisSubmitEnvelope) {
 
     // 3. submit the UBL bytes to the existing offline mock provider
     let provider = MockMyInvoisProvider::with_fixed_submitted_at(PINNED_CREATED_AT);
-    let envelope = provider.submit_invoice(&submit_request(ubl_bytes.clone())).unwrap();
+    let envelope = provider
+        .submit_invoice(&submit_request(ubl_bytes.clone()))
+        .unwrap();
 
     // 4. evidence bundle: canonical doc + national UBL + authority receipt
     let ikb = pack_evidence(&doc, ubl_bytes, &envelope);
@@ -204,7 +214,10 @@ fn malaysia_offline_lifecycle_produces_verifiable_evidence() {
         "LHDNM content hash is a 64-char hex digest"
     );
     assert!(
-        envelope.content_hash_hex.bytes().all(|b| b.is_ascii_hexdigit()),
+        envelope
+            .content_hash_hex
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit()),
         "content hash must be hex"
     );
     assert_eq!(envelope.submitted_at, PINNED_CREATED_AT);
@@ -721,9 +734,7 @@ fn malaysia_document_hash_is_sha256_shaped_and_payload_bound() {
     let a = provider
         .submit_invoice(&submit_request(invoice.clone()))
         .unwrap();
-    let b = provider
-        .submit_invoice(&submit_request(invoice))
-        .unwrap();
+    let b = provider.submit_invoice(&submit_request(invoice)).unwrap();
     let c = provider.submit_invoice(&submit_request(credit)).unwrap();
 
     // SHA-256 shape: exactly 64 lowercase hex chars.

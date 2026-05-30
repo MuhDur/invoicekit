@@ -525,7 +525,9 @@ mod tests {
 
     #[test]
     fn run_in_empty_dir_writes_scaffold_files() {
-        let _cwd = CWD_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _cwd = CWD_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = tempfile::tempdir().unwrap();
         let prev = std::env::current_dir().unwrap();
         std::env::set_current_dir(dir.path()).unwrap();
@@ -538,7 +540,9 @@ mod tests {
 
     #[test]
     fn run_refuses_to_overwrite_existing_dir_without_force() {
-        let _cwd = CWD_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _cwd = CWD_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir(dir.path().join("invoicekit")).unwrap();
         let prev = std::env::current_dir().unwrap();

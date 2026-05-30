@@ -208,10 +208,7 @@ fn turkey_mock_refuses_malformed_vkn_pre_wire() {
     bad.issuer_vkn = "12345".to_owned(); // not 10 digits
     let err = provider.submit_invoice(&bad).unwrap_err();
     assert!(
-        matches!(
-            err,
-            invoicekit_report_tr_efatura::EFaturaError::BadTaxId(_)
-        ),
+        matches!(err, invoicekit_report_tr_efatura::EFaturaError::BadTaxId(_)),
         "malformed VKN must refuse pre-wire, got {err:?}"
     );
 }
@@ -359,7 +356,10 @@ fn bundle_for(
         serde_json::to_vec(&envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, ubl_xml, envelope)
 }
@@ -455,7 +455,10 @@ fn turkey_standard_kdv_band_renders_twenty_percent() {
     // VAT scheme id and the taxable/charged amounts for the band.
     assert!(ubl.contains(">VAT<"), "the tax scheme id must be VAT");
     assert!(ubl.contains(">100.00<"), "taxable base 100.00 must appear");
-    assert!(ubl.contains(">120.00<"), "tax-inclusive total 120.00 must appear");
+    assert!(
+        ubl.contains(">120.00<"),
+        "tax-inclusive total 120.00 must appear"
+    );
     assert_eq!(envelope.status, EFaturaStatus::Cleared);
     let verify = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
     assert!(verify.ok, "standard-rate evidence bundle must verify");
@@ -490,8 +493,14 @@ fn turkey_reduced_kdv_band_renders_ten_percent() {
         "the standard 20% band must not leak into a reduced-rate-only invoice"
     );
     // 10% of 200.00 == 20.00 KDV, total 220.00.
-    assert!(ubl.contains(">200.00<"), "reduced-rate taxable base 200.00 must appear");
-    assert!(ubl.contains(">220.00<"), "reduced-rate total 220.00 must appear");
+    assert!(
+        ubl.contains(">200.00<"),
+        "reduced-rate taxable base 200.00 must appear"
+    );
+    assert!(
+        ubl.contains(">220.00<"),
+        "reduced-rate total 220.00 must appear"
+    );
     assert_eq!(envelope.status, EFaturaStatus::Cleared);
     let verify = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
     assert!(verify.ok, "reduced-rate evidence bundle must verify");
@@ -527,7 +536,10 @@ fn turkey_istisna_exempt_invoice_is_zero_rated() {
         "the exempt tax-category code E must appear in the ClassifiedTaxCategory"
     );
     // No VAT charged: taxable base equals the payable total (500.00).
-    assert!(ubl.contains(">500.00<"), "the exempt taxable/payable amount 500.00 must appear");
+    assert!(
+        ubl.contains(">500.00<"),
+        "the exempt taxable/payable amount 500.00 must appear"
+    );
     assert!(
         !ubl.contains(">20.00</cbc:Percent>"),
         "the 20% standard band must not appear on an exempt invoice"
@@ -627,10 +639,7 @@ fn turkey_eleven_digit_issuer_vkn_refused_pre_wire() {
     bad.issuer_vkn = "12345678901".to_owned(); // 11 digits => TCKN shape, invalid VKN
     let err = provider.submit_invoice(&bad).unwrap_err();
     assert!(
-        matches!(
-            err,
-            invoicekit_report_tr_efatura::EFaturaError::BadTaxId(_)
-        ),
+        matches!(err, invoicekit_report_tr_efatura::EFaturaError::BadTaxId(_)),
         "an 11-digit issuer VKN must refuse pre-wire as BadTaxId, got {err:?}"
     );
 }
@@ -645,10 +654,7 @@ fn turkey_non_numeric_buyer_tax_id_refused_pre_wire() {
     bad.buyer_tax_id = Some("TR-NOT-DIGITS".to_owned());
     let err = provider.submit_invoice(&bad).unwrap_err();
     assert!(
-        matches!(
-            err,
-            invoicekit_report_tr_efatura::EFaturaError::BadTaxId(_)
-        ),
+        matches!(err, invoicekit_report_tr_efatura::EFaturaError::BadTaxId(_)),
         "a non-numeric buyer tax id must refuse pre-wire as BadTaxId, got {err:?}"
     );
 }
@@ -699,11 +705,17 @@ fn turkey_buyer_rejection_red_yaniti_is_receipt_not_error() {
     artefacts.insert("formats/ubl.xml".to_owned(), ubl_bytes);
     artefacts.insert("receipt.json".to_owned(), receipt_bytes);
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
 
     let verify = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
-    assert!(verify.ok, "rejected-receipt evidence bundle must still verify");
+    assert!(
+        verify.ok,
+        "rejected-receipt evidence bundle must still verify"
+    );
 }
 
 /// İptal (cancellation) within the legal window is a `Cancelled` receipt, not an

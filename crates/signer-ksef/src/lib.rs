@@ -263,7 +263,6 @@ impl MockKsefProvider {
     pub fn submissions(&self) -> Vec<KsefSubmitRequest> {
         self.submissions.lock().unwrap().clone()
     }
-
 }
 
 /// Read a monotonic counter and post-increment it, returning the

@@ -246,7 +246,11 @@ fn submit_request_for(
 /// Pack a {canonical.json, formats/ubl.xml, receipt.json} `.ikb` for `doc` +
 /// `envelope` (the same artefact layout the happy-path lifecycle uses). Returns
 /// the packed bytes so a scenario can assert it `verify`s.
-fn bundle_for(doc: &CommercialDocument, ubl_bytes: &[u8], envelope: &SunatSubmitEnvelope) -> Vec<u8> {
+fn bundle_for(
+    doc: &CommercialDocument,
+    ubl_bytes: &[u8],
+    envelope: &SunatSubmitEnvelope,
+) -> Vec<u8> {
     let canonical = canonicalize_value(&doc.to_value().unwrap())
         .unwrap()
         .into_bytes();
@@ -258,7 +262,10 @@ fn bundle_for(doc: &CommercialDocument, ubl_bytes: &[u8], envelope: &SunatSubmit
         serde_json::to_vec(envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     pack(&bundle).unwrap()
 }
 
@@ -335,10 +342,7 @@ fn peru_bad_ruc_is_refused_before_the_wire() {
     req.issuer_ruc = "2012345678".to_owned(); // 10 digits — too short
     let err = provider.submit_document(&req).unwrap_err();
     assert!(
-        matches!(
-            err,
-            invoicekit_report_pe_sunat::SunatError::BadRuc(_)
-        ),
+        matches!(err, invoicekit_report_pe_sunat::SunatError::BadRuc(_)),
         "short RUC must be refused with BadRuc, got {err:?}"
     );
 }
@@ -446,7 +450,7 @@ fn peru_export_invoice_is_zero_rated_in_usd() {
         DocumentType::Invoice,
         "F001-00099001",
         "USD",
-        "40", // Exportación
+        "40",   // Exportación
         50_000, // 500.00 net
         0,      // no IGV on an export
         0,      // 0.00% rate
@@ -504,7 +508,7 @@ fn peru_exonerated_invoice_carries_pen_zero_igv() {
         DocumentType::Invoice,
         "F001-00099002",
         "PEN",
-        "20", // Exonerado
+        "20",   // Exonerado
         30_000, // 300.00 net
         0,      // exonerado => no IGV
         0,
@@ -774,7 +778,11 @@ fn peru_credit_note_lifecycle_is_byte_deterministic() {
             .unwrap();
         bundle_for(&cn, &ubl_bytes, &envelope)
     };
-    assert_eq!(build(), build(), "credit-note lifecycle must be byte-stable");
+    assert_eq!(
+        build(),
+        build(),
+        "credit-note lifecycle must be byte-stable"
+    );
 }
 
 /// Every SUNAT catálogo-06 document class the crate models clears the wire and

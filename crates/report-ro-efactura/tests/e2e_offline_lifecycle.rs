@@ -418,7 +418,10 @@ fn run_lifecycle_for(
         serde_json::to_vec(&cleared).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, uploaded, cleared)
 }
@@ -489,10 +492,7 @@ fn romania_refuses_bad_cui_before_the_wire() {
     req.issuer_cui = "NOT-A-CUI".to_owned();
     let err = provider.upload(&req).unwrap_err();
     assert!(
-        matches!(
-            err,
-            invoicekit_report_ro_efactura::EFacturaError::BadCui(_)
-        ),
+        matches!(err, invoicekit_report_ro_efactura::EFacturaError::BadCui(_)),
         "bad issuer CUI must be refused with BadCui, got {err:?}"
     );
 }
@@ -502,10 +502,7 @@ fn romania_refuses_empty_payload_before_the_wire() {
     let provider = MockEFacturaProvider::default();
     let err = provider.upload(&upload_request(Vec::new())).unwrap_err();
     assert!(
-        matches!(
-            err,
-            invoicekit_report_ro_efactura::EFacturaError::BadXml(_)
-        ),
+        matches!(err, invoicekit_report_ro_efactura::EFacturaError::BadXml(_)),
         "empty payload must be refused with BadXml, got {err:?}"
     );
 }
@@ -550,8 +547,7 @@ fn romania_credit_note_serializes_as_ubl_credit_note_and_verifies() {
         "the storno document number must be present:\n{ubl}"
     );
 
-    let (ikb, uploaded, cleared) =
-        run_lifecycle_for(&doc, EFacturaDocumentKind::CreditNote);
+    let (ikb, uploaded, cleared) = run_lifecycle_for(&doc, EFacturaDocumentKind::CreditNote);
     assert_eq!(uploaded.status, EFacturaStatus::Uploaded);
     assert!(uploaded.indice_incarcare.starts_with("ANAF-"));
     assert_eq!(cleared.status, EFacturaStatus::Cleared);
@@ -589,8 +585,7 @@ fn romania_multiline_mixed_rate_emits_both_vat_percentages() {
     // VAT scheme stays VAT for both subtotals.
     assert!(ubl.contains(">VAT</cbc:ID></cac:TaxScheme>"));
 
-    let (ikb, uploaded, _cleared) =
-        run_lifecycle_for(&doc, EFacturaDocumentKind::Invoice);
+    let (ikb, uploaded, _cleared) = run_lifecycle_for(&doc, EFacturaDocumentKind::Invoice);
     assert_eq!(uploaded.status, EFacturaStatus::Uploaded);
     let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
     assert!(report.ok, "mixed-rate evidence bundle must verify");
@@ -609,8 +604,7 @@ fn romania_reverse_charge_emits_zero_rate_ae_category() {
     // (cbc namespace is re-declared per element after canonicalization, so the
     // assertions anchor on each element's value/close.)
     assert!(
-        ubl.contains("<cac:TaxCategory><cbc:ID")
-            && ubl.contains(">AE</cbc:ID><cbc:Percent"),
+        ubl.contains("<cac:TaxCategory><cbc:ID") && ubl.contains(">AE</cbc:ID><cbc:Percent"),
         "reverse-charge subtotal must carry VAT category AE:\n{ubl}"
     );
     assert!(
@@ -624,8 +618,7 @@ fn romania_reverse_charge_emits_zero_rate_ae_category() {
         "with no VAT charged the tax-inclusive total equals the net:\n{ubl}"
     );
 
-    let (ikb, uploaded, _cleared) =
-        run_lifecycle_for(&doc, EFacturaDocumentKind::Invoice);
+    let (ikb, uploaded, _cleared) = run_lifecycle_for(&doc, EFacturaDocumentKind::Invoice);
     assert_eq!(uploaded.status, EFacturaStatus::Uploaded);
     let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
     assert!(report.ok, "reverse-charge evidence bundle must verify");

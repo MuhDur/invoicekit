@@ -427,7 +427,9 @@ fn scheme_archive_id(
     version_id.map_or_else(
         || ArchiveId::new(format!("{scheme}://{namespace}/{object}")),
         |version_id| {
-            ArchiveId::new(format!("{scheme}://{namespace}/{object}#versionId={version_id}"))
+            ArchiveId::new(format!(
+                "{scheme}://{namespace}/{object}#versionId={version_id}"
+            ))
         },
     )
 }
@@ -488,7 +490,10 @@ impl LocalFsArchive {
         // and guarantees the `&hex[..2]` shard slice lands on a
         // char boundary (it is pure ASCII). Mirrors the
         // `object_from_scheme_id` guard the S3/Azure backends use.
-        if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        if hex.len() != 64
+            || !hex
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
         {
             return Err(ArchiveError::InvalidId(hex.to_owned()));
         }
@@ -978,15 +983,18 @@ mod tests {
         // Too short, too long, uppercase, and non-hex are all
         // rejected; only 64 lowercase hex chars are valid.
         for bad in [
-            "deadbeef",                                                            // too short
-            &"a".repeat(63),                                                       // 63 chars
-            &"a".repeat(65),                                                       // 65 chars
-            "DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF",     // uppercase
-            "zz00000000000000000000000000000000000000000000000000000000000000",    // non-hex
+            "deadbeef",                                                         // too short
+            &"a".repeat(63),                                                    // 63 chars
+            &"a".repeat(65),                                                    // 65 chars
+            "DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF", // uppercase
+            "zz00000000000000000000000000000000000000000000000000000000000000", // non-hex
         ] {
             let id = ArchiveId::new(bad);
             let err = archive.retrieve(&id).unwrap_err();
-            assert!(matches!(err, ArchiveError::InvalidId(_)), "id {bad:?} got {err:?}");
+            assert!(
+                matches!(err, ArchiveError::InvalidId(_)),
+                "id {bad:?} got {err:?}"
+            );
             assert!(!archive.exists(&id), "id {bad:?} should not exist");
         }
     }

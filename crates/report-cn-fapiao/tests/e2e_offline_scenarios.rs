@@ -155,7 +155,11 @@ fn issue_request(payload: Vec<u8>, kind: FapiaoKind) -> FapiaoIssueRequest {
 
 /// Pack canonical IR + national-family UBL + STA receipt into an `.ikb` and
 /// return the bytes so callers can assert the bundle verifies (exit 0 == ok).
-fn bundle_for(doc: &CommercialDocument, ubl_bytes: &[u8], receipt: &FapiaoIssueEnvelope) -> Vec<u8> {
+fn bundle_for(
+    doc: &CommercialDocument,
+    ubl_bytes: &[u8],
+    receipt: &FapiaoIssueEnvelope,
+) -> Vec<u8> {
     let canonical = canonicalize_value(&doc.to_value().unwrap())
         .unwrap()
         .into_bytes();
@@ -167,7 +171,10 @@ fn bundle_for(doc: &CommercialDocument, ubl_bytes: &[u8], receipt: &FapiaoIssueE
         serde_json::to_vec(receipt).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     pack(&bundle).unwrap()
 }
 
@@ -248,13 +255,19 @@ fn china_red_letter_credit_note_serializes_and_clears() {
         ubl.contains(r#"currencyID="CNY">-1060.00</cbc:PayableAmount>"#),
         "the negative red-letter payable amount must appear in the UBL"
     );
-    assert!(ubl.contains(BUYER_USCC), "buyer USCC survives serialization");
+    assert!(
+        ubl.contains(BUYER_USCC),
+        "buyer USCC survives serialization"
+    );
 
     // STA clearance of the corrective document still yields a fapiao identity.
     let provider = MockFapiaoProvider::with_fixed_issued_at(PINNED_ISSUED_AT);
     let ubl_bytes = ubl.into_bytes();
     let receipt = provider
-        .issue_fapiao(&issue_request(ubl_bytes.clone(), FapiaoKind::ElectronicSpecial))
+        .issue_fapiao(&issue_request(
+            ubl_bytes.clone(),
+            FapiaoKind::ElectronicSpecial,
+        ))
         .unwrap();
     assert_eq!(receipt.status, FapiaoStatus::Issued);
     assert_eq!(receipt.fapiao_number.len(), 20);
@@ -382,7 +395,14 @@ fn china_multi_line_mixed_vat_bands_serialize_with_subtotal_per_band() {
 /// (国家税务总局, <https://www.chinatax.gov.cn/>). This proves the serializer
 /// emits `Percent` 0 and a zero `TaxAmount` rather than dropping the band.
 fn zero_rated_export_invoice() -> CommercialDocument {
-    let lines = vec![line("1", "出口货物 (exported goods, zero-rated)", 1, 200_000, 200_000, "Z")];
+    let lines = vec![line(
+        "1",
+        "出口货物 (exported goods, zero-rated)",
+        1,
+        200_000,
+        200_000,
+        "Z",
+    )];
     let tax_summary = vec![TaxCategorySummary {
         category_code: "Z".to_owned(),
         taxable_amount: amt(200_000),
@@ -441,7 +461,10 @@ fn china_zero_rated_export_carries_zero_percent_band() {
     let provider = MockFapiaoProvider::with_fixed_issued_at(PINNED_ISSUED_AT);
     let ubl_bytes = ubl.into_bytes();
     let receipt = provider
-        .issue_fapiao(&issue_request(ubl_bytes.clone(), FapiaoKind::ElectronicGeneral))
+        .issue_fapiao(&issue_request(
+            ubl_bytes.clone(),
+            FapiaoKind::ElectronicGeneral,
+        ))
         .unwrap();
     let ikb = bundle_for(&doc, &ubl_bytes, &receipt);
     assert!(
@@ -502,9 +525,15 @@ fn china_sta_rejection_is_a_receipt_status_and_still_bundles() {
     );
 
     let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-    artefacts.insert("receipt.json".to_owned(), serde_json::to_vec(&rejected).unwrap());
+    artefacts.insert(
+        "receipt.json".to_owned(),
+        serde_json::to_vec(&rejected).unwrap(),
+    );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     assert!(
         verify_packed(&ikb, &VerifyOptions::content_only())
@@ -573,7 +602,10 @@ fn china_credit_note_lifecycle_is_byte_deterministic() {
         let ubl_bytes = ubl.into_bytes();
         let provider = MockFapiaoProvider::with_fixed_issued_at(PINNED_ISSUED_AT);
         let receipt = provider
-            .issue_fapiao(&issue_request(ubl_bytes.clone(), FapiaoKind::ElectronicSpecial))
+            .issue_fapiao(&issue_request(
+                ubl_bytes.clone(),
+                FapiaoKind::ElectronicSpecial,
+            ))
             .unwrap();
         bundle_for(&doc, &ubl_bytes, &receipt)
     };

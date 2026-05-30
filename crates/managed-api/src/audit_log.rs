@@ -360,7 +360,9 @@ pub fn handle_audit_query(
         (&query.target_id, "target_id"),
     ] {
         if value.as_deref().is_some_and(str::is_empty) {
-            return Err(AuditQueryError::Filter(format!("{field} must not be blank")));
+            return Err(AuditQueryError::Filter(format!(
+                "{field} must not be blank"
+            )));
         }
     }
 

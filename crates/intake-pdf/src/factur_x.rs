@@ -215,8 +215,8 @@ fn walk_name_tree(
 /// keys are inspected, and within the `EF` entry we accept either
 /// `F` (legacy ASCII name) or `UF` (Unicode name).
 fn read_filespec(doc: &Document, filespec: &Dictionary) -> Option<Vec<u8>> {
-    let name = resolved_string(doc, filespec, b"F")
-        .or_else(|| resolved_string(doc, filespec, b"UF"))?;
+    let name =
+        resolved_string(doc, filespec, b"F").or_else(|| resolved_string(doc, filespec, b"UF"))?;
     if !is_canonical_factur_x_name(&name) {
         // Wrong attachment name — skip silently, we may be looking
         // at /AF entries that aren't the XML payload.
@@ -444,8 +444,7 @@ mod tests {
     /// a `/Filter /FlateDecode` stream.
     fn flate_compress(plain: &[u8]) -> Vec<u8> {
         use std::io::Write as _;
-        let mut encoder =
-            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
         encoder.write_all(plain).expect("zlib write");
         encoder.finish().expect("zlib finish")
     }
@@ -466,7 +465,9 @@ mod tests {
         // Mark the on-wire bytes as FlateDecode so the extractor decodes
         // them. `Stream::new` already set `/Length` to the compressed
         // size, which is what we want.
-        xml_stream.dict.set("Filter", Object::Name(b"FlateDecode".to_vec()));
+        xml_stream
+            .dict
+            .set("Filter", Object::Name(b"FlateDecode".to_vec()));
         let xml_stream_id = doc.add_object(xml_stream);
 
         let filespec_id = doc.add_object(dictionary! {
@@ -520,7 +521,8 @@ mod tests {
         doc.trailer.set("Root", catalog_id);
 
         let mut bytes = Vec::new();
-        doc.save_to(&mut bytes).expect("serialize flate fixture pdf");
+        doc.save_to(&mut bytes)
+            .expect("serialize flate fixture pdf");
         bytes
     }
 

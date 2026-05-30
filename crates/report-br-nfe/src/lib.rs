@@ -130,13 +130,16 @@ pub fn to_inf_nfe_xml(
         return Err(InfNfeError::BadContext("nNF must be >= 1".to_owned()));
     }
     if context.nat_op.trim().is_empty() {
-        return Err(InfNfeError::BadContext("natOp must not be empty".to_owned()));
+        return Err(InfNfeError::BadContext(
+            "natOp must not be empty".to_owned(),
+        ));
     }
     let fin_nfe = fin_nfe(document.document_type)?;
     let emit_id = party_tax_id(&document.supplier).ok_or(InfNfeError::MissingEmitenteTaxId)?;
 
     // The infNFe Id attribute is `NFe` + the 44-digit chave de acesso.
-    let chave = invoicekit_signer_nfe::build_chave_acesso(context.uf, emit_id.digits(), context.n_nf);
+    let chave =
+        invoicekit_signer_nfe::build_chave_acesso(context.uf, emit_id.digits(), context.n_nf);
 
     let mut out = String::with_capacity(2048);
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
@@ -153,7 +156,12 @@ pub fn to_inf_nfe_xml(
     el(&mut out, 3, "mod", "55");
     el(&mut out, 3, "serie", &context.serie.to_string());
     el(&mut out, 3, "nNF", &context.n_nf.to_string());
-    el(&mut out, 3, "dhEmi", &format!("{}T00:00:00-03:00", document.issue_date.as_str()));
+    el(
+        &mut out,
+        3,
+        "dhEmi",
+        &format!("{}T00:00:00-03:00", document.issue_date.as_str()),
+    );
     el(&mut out, 3, "tpNF", &context.tp_nf.to_string());
     el(&mut out, 3, "finNFe", fin_nfe);
     close(&mut out, 2, "ide");
@@ -238,9 +246,10 @@ impl BrazilTaxId {
 /// Extract a Brazilian taxpayer id from a party: the first tax id whose digit
 /// count is 14 (CNPJ) or 11 (CPF), preferring a `cnpj`/`cpf` scheme when set.
 fn party_tax_id(party: &Party) -> Option<BrazilTaxId> {
-    let scheme_match = party.tax_ids.iter().find(|t| {
-        t.scheme.eq_ignore_ascii_case("cnpj") || t.scheme.eq_ignore_ascii_case("cpf")
-    });
+    let scheme_match = party
+        .tax_ids
+        .iter()
+        .find(|t| t.scheme.eq_ignore_ascii_case("cnpj") || t.scheme.eq_ignore_ascii_case("cpf"));
     let chosen = scheme_match.or_else(|| party.tax_ids.first())?;
     let digits: String = chosen.value.chars().filter(char::is_ascii_digit).collect();
     match digits.len() {
@@ -263,7 +272,11 @@ fn write_party(
         return Err(InfNfeError::MissingEmitenteTaxId);
     }
     // Address element name follows the block: <enderEmit> / <enderDest>.
-    let ender_tag = if tag == "emit" { "enderEmit" } else { "enderDest" };
+    let ender_tag = if tag == "emit" {
+        "enderEmit"
+    } else {
+        "enderDest"
+    };
     open(out, 2, tag);
     if let Some(id) = &tax_id {
         el(out, 3, id.element(), id.digits());
@@ -302,7 +315,12 @@ fn write_det(out: &mut String, numero: usize, line: &DocumentLine) {
     el(out, 4, "uCom", line.unit_code.as_deref().unwrap_or("UN"));
     el(out, 4, "qCom", &fmt_amount(line.quantity.inner()));
     el(out, 4, "vUnCom", &fmt_amount(line.unit_price.inner()));
-    el(out, 4, "vProd", &fmt_amount(line.line_extension_amount.inner()));
+    el(
+        out,
+        4,
+        "vProd",
+        &fmt_amount(line.line_extension_amount.inner()),
+    );
     close(out, 3, "prod");
     close(out, 2, "det");
 }
@@ -757,12 +775,12 @@ pub const fn crate_name() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use invoicekit_ir::DecimalValue;
     use invoicekit_ir::{
         CommercialDocumentParts, CountryCode, DateOnly, DocumentId, DocumentMeta, DocumentNumber,
-        ItemClassification, Iso4217Code, MonetaryTotal, PartyTaxId, PostalAddress, SchemaVersion,
+        Iso4217Code, ItemClassification, MonetaryTotal, PartyTaxId, PostalAddress, SchemaVersion,
         TaxCategorySummary,
     };
-    use invoicekit_ir::DecimalValue;
     use invoicekit_signer::SoftwareSigner;
 
     const CERT_SERIAL: &str = "ABCDEF1234567890";
@@ -803,8 +821,20 @@ mod tests {
             document_number: DocumentNumber::new("NF-2026-0001").unwrap(),
             currency: Iso4217Code::new("BRL").unwrap(),
             // Real valid CNPJ / CPF (check digits computed).
-            supplier: br_party("Acme Comercio LTDA", "cnpj", "11.222.333/0001-81", "Sao Paulo", "SP"),
-            customer: br_party("Beta Servicos LTDA", "cnpj", "11444777000161", "Rio de Janeiro", "RJ"),
+            supplier: br_party(
+                "Acme Comercio LTDA",
+                "cnpj",
+                "11.222.333/0001-81",
+                "Sao Paulo",
+                "SP",
+            ),
+            customer: br_party(
+                "Beta Servicos LTDA",
+                "cnpj",
+                "11444777000161",
+                "Rio de Janeiro",
+                "RJ",
+            ),
             payee: None,
             payment_terms: None,
             payment_instructions: Vec::new(),
@@ -918,7 +948,10 @@ mod tests {
         // The sample invoice's line has empty `classifications`; the serialized
         // <prod> block must carry no <NCM> element (behavior-preserving).
         let xml = to_inf_nfe_xml(&sample_invoice(), &NfeContext::default()).unwrap();
-        assert!(!xml.contains("<NCM>"), "no NCM classification => no <NCM>:\n{xml}");
+        assert!(
+            !xml.contains("<NCM>"),
+            "no NCM classification => no <NCM>:\n{xml}"
+        );
     }
 
     #[test]
@@ -949,7 +982,10 @@ mod tests {
             "expected <NCM>85285200</NCM> in:\n{xml}"
         );
         // The non-NCM (SAC) classification is not surfaced by this national adapter.
-        assert!(!xml.contains("9983"), "SAC code must not leak into NF-e:\n{xml}");
+        assert!(
+            !xml.contains("9983"),
+            "SAC code must not leak into NF-e:\n{xml}"
+        );
         // Position: <xProd> ... <NCM> ... <uCom>, all inside the first <prod>.
         let prod = xml.find("<prod>").expect("prod block present");
         let xprod = xml.find("<xProd>").expect("xProd present");
@@ -1127,7 +1163,10 @@ mod tests {
         let xml = to_inf_nfe_xml(&sample_invoice(), &NfeContext::default())
             .unwrap()
             .into_bytes();
-        let env = provider(None).report(&sample_request(xml)).unwrap().envelope;
+        let env = provider(None)
+            .report(&sample_request(xml))
+            .unwrap()
+            .envelope;
         let json = serde_json::to_string(&env).unwrap();
         let back: NfeReportEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(back, env);

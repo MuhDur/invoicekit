@@ -220,11 +220,7 @@ impl MockVeriFactuProvider {
     /// non-empty payload) still run first — a forced verdict
     /// never bypasses pre-wire `Err` refusal.
     #[must_use]
-    pub fn with_forced_status(
-        mut self,
-        status: VeriFactuStatus,
-        message: Option<String>,
-    ) -> Self {
+    pub fn with_forced_status(mut self, status: VeriFactuStatus, message: Option<String>) -> Self {
         self.forced_status = status;
         self.forced_message = message;
         self
@@ -516,8 +512,8 @@ mod tests {
     #[test]
     fn forced_status_still_refuses_bad_shapes_before_the_wire() {
         // A forced verdict must never bypass pre-wire shape `Err` refusal.
-        let p = MockVeriFactuProvider::default()
-            .with_forced_status(VeriFactuStatus::Rejected, None);
+        let p =
+            MockVeriFactuProvider::default().with_forced_status(VeriFactuStatus::Rejected, None);
         let mut req = sample_request();
         req.issuer_nif = "BAD".to_owned();
         assert!(matches!(

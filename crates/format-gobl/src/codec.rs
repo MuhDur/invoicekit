@@ -748,7 +748,9 @@ fn tax_summary_to_gobl(summary: &[TaxCategorySummary]) -> Value {
     // values are unaffected.
     let sum = summary
         .iter()
-        .try_fold(Decimal::ZERO, |acc, s| acc.checked_add(s.tax_amount.inner()))
+        .try_fold(Decimal::ZERO, |acc, s| {
+            acc.checked_add(s.tax_amount.inner())
+        })
         .unwrap_or(Decimal::ZERO);
     json!({
         "categories": categories,
@@ -1210,7 +1212,10 @@ mod tests {
         let value = tax_summary_to_gobl(&summary);
         // Categories are still emitted; the unrepresentable sum falls back to "0".
         assert_eq!(
-            value.get("categories").and_then(Value::as_array).map(Vec::len),
+            value
+                .get("categories")
+                .and_then(Value::as_array)
+                .map(Vec::len),
             Some(2)
         );
         assert_eq!(value.get("sum").and_then(Value::as_str), Some("0"));

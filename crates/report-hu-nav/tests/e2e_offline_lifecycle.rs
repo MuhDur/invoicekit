@@ -234,7 +234,10 @@ fn run_lifecycle() -> (
         serde_json::to_vec(&done).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, received, done)
 }
@@ -351,7 +354,10 @@ fn hungary_native_invoice_data_emits_full_8_1_2_tax_number() {
     let pid = invoice_data.find("<base:taxpayerId>").unwrap();
     let vat = invoice_data.find("<base:vatCode>").unwrap();
     let county = invoice_data.find("<base:countyCode>").unwrap();
-    assert!(pid < vat && vat < county, "taxNumber sub-elements out of order");
+    assert!(
+        pid < vat && vat < county,
+        "taxNumber sub-elements out of order"
+    );
 }
 
 #[test]
@@ -476,7 +482,9 @@ fn hungary_mock_refuses_empty_payload_and_bad_tax_id() {
     let provider = MockNavProvider::with_fixed_recorded_at(FIXED_RECORDED_AT);
 
     // Empty manageInvoiceRequest payload -> BadXml.
-    let empty = provider.manage_invoice(&manage_request(Vec::new())).unwrap_err();
+    let empty = provider
+        .manage_invoice(&manage_request(Vec::new()))
+        .unwrap_err();
     assert!(
         matches!(empty, NavError::BadXml(_)),
         "empty payload must be refused as BadXml, got {empty:?}"
@@ -617,7 +625,10 @@ fn hungary_credit_note_serializes_as_storno_corrective() {
         ">27.00</cbc:Percent>",
         "currencyID=\"HUF\"",
     ] {
-        assert!(ubl.contains(needle), "HU CreditNote UBL missing {needle}\n{ubl}");
+        assert!(
+            ubl.contains(needle),
+            "HU CreditNote UBL missing {needle}\n{ubl}"
+        );
     }
     // A CreditNote must NOT carry an Invoice type code or a top-level due date.
     assert!(
@@ -654,8 +665,8 @@ fn hungary_multi_line_mixed_rate_invoice_reports_each_band() {
     //   L2: 1 x 40.00 =  40.00 @ 18%  -> tax  7.20  (R18)
     //   L3: 3 x 10.00 =  30.00 @  5%  -> tax  1.50  (R5)
     //   net 170.00 ; VAT 35.70 ; gross 205.70
-    let line = |id: &str, desc: &str, qty: i64, unit_minor: i64, ext_minor: i64, cat: &str| {
-        DocumentLine {
+    let line =
+        |id: &str, desc: &str, qty: i64, unit_minor: i64, ext_minor: i64, cat: &str| DocumentLine {
             id: id.to_owned(),
             description: desc.to_owned(),
             quantity: DecimalValue::new(Decimal::from(qty)),
@@ -666,16 +677,16 @@ fn hungary_multi_line_mixed_rate_invoice_reports_each_band() {
             classifications: Vec::new(),
             extensions: Vec::new(),
             allowance_charges: Vec::new(),
-        }
-    };
-    let band = |cat: &str, taxable_minor: i64, tax_minor: i64, rate_minor: i64| TaxCategorySummary {
-        category_code: cat.to_owned(),
-        taxable_amount: amt(taxable_minor),
-        tax_amount: amt(tax_minor),
-        tax_rate: Some(DecimalValue::new(Decimal::new(rate_minor, 2))),
-        exemption_reason: None,
-        exemption_reason_code: None,
-    };
+        };
+    let band =
+        |cat: &str, taxable_minor: i64, tax_minor: i64, rate_minor: i64| TaxCategorySummary {
+            category_code: cat.to_owned(),
+            taxable_amount: amt(taxable_minor),
+            tax_amount: amt(tax_minor),
+            tax_rate: Some(DecimalValue::new(Decimal::new(rate_minor, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
+        };
 
     let doc = CommercialDocument::new(CommercialDocumentParts {
         schema_version: SchemaVersion::default(),
@@ -739,7 +750,10 @@ fn hungary_multi_line_mixed_rate_invoice_reports_each_band() {
         // The gross payable.
         "currencyID=\"HUF\">205.70</cbc:PayableAmount>",
     ] {
-        assert!(ubl.contains(needle), "mixed-rate UBL missing {needle}\n{ubl}");
+        assert!(
+            ubl.contains(needle),
+            "mixed-rate UBL missing {needle}\n{ubl}"
+        );
     }
     // Three invoice lines survived (the open tag carries an inline xmlns:cac).
     assert_eq!(ubl.matches("<cac:InvoiceLine ").count(), 3);
@@ -748,7 +762,9 @@ fn hungary_multi_line_mixed_rate_invoice_reports_each_band() {
 
     // The whole document still submits and gets a NAV transaction id.
     let provider = MockNavProvider::with_fixed_recorded_at(FIXED_RECORDED_AT);
-    let env = provider.manage_invoice(&manage_request(ubl.into_bytes())).unwrap();
+    let env = provider
+        .manage_invoice(&manage_request(ubl.into_bytes()))
+        .unwrap();
     assert_eq!(env.status, NavStatus::Received);
 }
 
@@ -838,7 +854,9 @@ fn hungary_domestic_reverse_charge_invoice_carries_no_vat() {
     }
 
     let provider = MockNavProvider::with_fixed_recorded_at(FIXED_RECORDED_AT);
-    let env = provider.manage_invoice(&manage_request(ubl.into_bytes())).unwrap();
+    let env = provider
+        .manage_invoice(&manage_request(ubl.into_bytes()))
+        .unwrap();
     assert_eq!(env.status, NavStatus::Received);
 }
 
@@ -922,7 +940,9 @@ fn hungary_subjective_exemption_invoice_is_zero_rated() {
     }
 
     let provider = MockNavProvider::with_fixed_recorded_at(FIXED_RECORDED_AT);
-    let env = provider.manage_invoice(&manage_request(ubl.into_bytes())).unwrap();
+    let env = provider
+        .manage_invoice(&manage_request(ubl.into_bytes()))
+        .unwrap();
     assert_eq!(env.status, NavStatus::Received);
 }
 
@@ -986,9 +1006,15 @@ fn hungary_aborted_verdict_is_ok_envelope_not_err_and_still_bundles() {
     let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     artefacts.insert("canonical.json".to_owned(), canonical);
     artefacts.insert("formats/ubl.xml".to_owned(), ubl);
-    artefacts.insert("receipt.json".to_owned(), serde_json::to_vec(&aborted).unwrap());
+    artefacts.insert(
+        "receipt.json".to_owned(),
+        serde_json::to_vec(&aborted).unwrap(),
+    );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     let verify = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
     assert!(

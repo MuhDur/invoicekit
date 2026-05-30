@@ -118,7 +118,10 @@ fn submit_and_bundle(
         serde_json::to_vec(&envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
     assert!(report.ok, "evidence bundle must verify");
@@ -214,18 +217,30 @@ fn nota_credito_type_34_corrective_submits_and_bundles() {
     // carry InvoiceTypeCode 380). The canonicalizer injects per-element xmlns
     // declarations onto open tags, so match the close tag / bounded value the
     // way `format-ubl`'s own corpus test does (`">381<"`).
-    assert!(ubl.contains("<CreditNote"), "must serialize a UBL CreditNote root");
+    assert!(
+        ubl.contains("<CreditNote"),
+        "must serialize a UBL CreditNote root"
+    );
     assert!(
         ubl.contains("CreditNoteTypeCode") && ubl.contains(">381<"),
         "UBL CreditNote carries type code 381 (not the Invoice 380)"
     );
-    assert!(!ubl.contains("InvoiceTypeCode"), "a CreditNote must not carry InvoiceTypeCode");
-    assert!(ubl.contains(">DOP</cbc:DocumentCurrencyCode>"), "denominated in DOP");
+    assert!(
+        !ubl.contains("InvoiceTypeCode"),
+        "a CreditNote must not carry InvoiceTypeCode"
+    );
+    assert!(
+        ubl.contains(">DOP</cbc:DocumentCurrencyCode>"),
+        "denominated in DOP"
+    );
 
     // DGII catálogo: a Nota de Crédito is comprobante type 34, e-NCF series E34…
     assert_eq!(DgiiDocumentKind::NotaCredito.code(), 34);
     let e_ncf = "E340000000001";
-    assert!(e_ncf.starts_with("E34"), "Nota de Crédito e-NCF series is E34");
+    assert!(
+        e_ncf.starts_with("E34"),
+        "Nota de Crédito e-NCF series is E34"
+    );
 
     let request = DgiiSubmitRequest {
         tenant_id: TENANT.to_owned(),
@@ -275,7 +290,7 @@ fn factura_consumo_type_32_multiline_18pct_itbis() {
             description: "Arroz selecto (saco)".to_owned(),
             quantity: DecimalValue::new(Decimal::from(3)),
             unit_code: Some("EA".to_owned()),
-            unit_price: amt(2000), // 20.00
+            unit_price: amt(2000),            // 20.00
             line_extension_amount: amt(6000), // 60.00
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
@@ -287,7 +302,7 @@ fn factura_consumo_type_32_multiline_18pct_itbis() {
             description: "Aceite vegetal (litro)".to_owned(),
             quantity: DecimalValue::new(Decimal::from(2)),
             unit_code: Some("EA".to_owned()),
-            unit_price: amt(1500), // 15.00
+            unit_price: amt(1500),            // 15.00
             line_extension_amount: amt(3000), // 30.00
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
@@ -299,7 +314,7 @@ fn factura_consumo_type_32_multiline_18pct_itbis() {
             description: "Detergente en polvo (kg)".to_owned(),
             quantity: DecimalValue::new(Decimal::from(1)),
             unit_code: Some("EA".to_owned()),
-            unit_price: amt(1000), // 10.00
+            unit_price: amt(1000),            // 10.00
             line_extension_amount: amt(1000), // 10.00
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
@@ -463,15 +478,30 @@ fn exportacion_type_46_is_itbis_exempt_zero_rated() {
     .unwrap();
 
     let ubl = to_xml(&doc).unwrap();
-    assert!(ubl.contains(">USD</cbc:DocumentCurrencyCode>"), "export priced in USD");
+    assert!(
+        ubl.contains(">USD</cbc:DocumentCurrencyCode>"),
+        "export priced in USD"
+    );
     // Exempt category surfaces in the UBL tax classification as cbc:ID == "E"
     // (the canonicalizer injects xmlns onto open tags, so match the bounded
     // value `>E<`). It must NOT carry the standard-rate "S".
-    assert!(ubl.contains(">E<"), "exempt tax category id `E` must appear in the UBL artifact");
-    assert!(!ubl.contains(">S<"), "an export must not carry the standard-rate category `S`");
+    assert!(
+        ubl.contains(">E<"),
+        "exempt tax category id `E` must appear in the UBL artifact"
+    );
+    assert!(
+        !ubl.contains(">S<"),
+        "an export must not carry the standard-rate category `S`"
+    );
     // ITBIS-exempt: the tax total is zero (0.00), never the 18% an `S` line bears.
-    assert!(ubl.contains(">0.00<"), "ITBIS-exempt export carries a 0.00 tax amount");
-    assert!(!ubl.contains(">18<"), "an exempt export must not carry an 18% ITBIS rate");
+    assert!(
+        ubl.contains(">0.00<"),
+        "ITBIS-exempt export carries a 0.00 tax amount"
+    );
+    assert!(
+        !ubl.contains(">18<"),
+        "an exempt export must not carry an 18% ITBIS rate"
+    );
 
     assert_eq!(DgiiDocumentKind::Exportaciones.code(), 46);
     let request = DgiiSubmitRequest {
@@ -565,7 +595,10 @@ fn authority_rechazado_is_a_receipt_status_not_an_error() {
         Some("RNC del receptor no registrado en DGII"),
         "Rechazado verdict must carry the DGII mensaje for the audit trail"
     );
-    assert_eq!(envelope.e_ncf, "E310000000123", "DGII echoes the e-NCF even on rejection");
+    assert_eq!(
+        envelope.e_ncf, "E310000000123",
+        "DGII echoes the e-NCF even on rejection"
+    );
 
     // The rejection still produces a verifiable evidence bundle.
     let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
@@ -574,10 +607,16 @@ fn authority_rechazado_is_a_receipt_status_not_an_error() {
         serde_json::to_vec(&envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
-    assert!(report.ok, "rejection-path evidence bundle must still verify");
+    assert!(
+        report.ok,
+        "rejection-path evidence bundle must still verify"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -601,7 +640,10 @@ fn aceptado_condicional_and_en_proceso_round_trip_through_serde() {
     .submit_ecf(&minimal_b2b_request())
     .unwrap();
     assert_eq!(cond.status, DgiiStatus::AceptadoCondicional);
-    assert!(cond.mensaje.is_some(), "conditional acceptance carries observations");
+    assert!(
+        cond.mensaje.is_some(),
+        "conditional acceptance carries observations"
+    );
 
     let json = serde_json::to_string(&cond).unwrap();
     // serde rename_all = "kebab-case" maps the variant to "aceptado-condicional".
@@ -610,7 +652,10 @@ fn aceptado_condicional_and_en_proceso_round_trip_through_serde() {
         "AceptadoCondicional serializes kebab-case, got {json}"
     );
     let parsed: DgiiSubmitEnvelope = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed, cond, "AceptadoCondicional must round-trip through serde");
+    assert_eq!(
+        parsed, cond,
+        "AceptadoCondicional must round-trip through serde"
+    );
 
     // EnProceso is the async-pending state, returned before a terminal verdict.
     let pending = ForcedVerdictProvider {
@@ -658,13 +703,19 @@ fn malformed_dominican_identifiers_are_refused_before_the_wire() {
     // (b) RNC of the right length but containing a non-digit.
     let mut alpha_rnc = minimal_b2b_request();
     alpha_rnc.issuer_rnc = "13123456X".to_owned();
-    assert!(matches!(provider.submit_ecf(&alpha_rnc), Err(DgiiError::BadRnc(_))));
+    assert!(matches!(
+        provider.submit_ecf(&alpha_rnc),
+        Err(DgiiError::BadRnc(_))
+    ));
 
     // (c) e-NCF missing the mandatory `E` prefix.
     let mut no_e_prefix = minimal_b2b_request();
     no_e_prefix.e_ncf = "3100000000012".to_owned(); // 13 chars but starts with '3'
     assert!(
-        matches!(provider.submit_ecf(&no_e_prefix), Err(DgiiError::BadENcf(_))),
+        matches!(
+            provider.submit_ecf(&no_e_prefix),
+            Err(DgiiError::BadENcf(_))
+        ),
         "an e-NCF without the leading `E` must be refused"
     );
 
@@ -707,5 +758,8 @@ fn dgii_receipt_serialization_is_byte_deterministic() {
     let env = provider.submit_ecf(&minimal_b2b_request()).unwrap();
     let canon_a = canonicalize_value(&serde_json::to_value(&env).unwrap()).unwrap();
     let canon_b = canonicalize_value(&serde_json::to_value(&env).unwrap()).unwrap();
-    assert_eq!(canon_a, canon_b, "canonical receipt bytes must be byte-stable");
+    assert_eq!(
+        canon_a, canon_b,
+        "canonical receipt bytes must be byte-stable"
+    );
 }

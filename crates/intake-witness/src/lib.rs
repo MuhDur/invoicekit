@@ -203,10 +203,7 @@ fn check_line_totals(doc: &ExtractedDocument, tolerance: Decimal) -> Vec<Witness
             });
             continue;
         };
-        let Some(diff) = expected
-            .checked_sub(line.line_net_amount)
-            .map(|d| d.abs())
-        else {
+        let Some(diff) = expected.checked_sub(line.line_net_amount).map(|d| d.abs()) else {
             out.push(WitnessFailure {
                 rule_id: rules::LINE_TOTAL_RECONCILES.to_owned(),
                 cited_fields,
@@ -248,7 +245,10 @@ fn check_vat_subtotals(doc: &ExtractedDocument, tolerance: Decimal) -> Vec<Witne
         .lines
         .iter()
         .try_fold(Decimal::ZERO, |acc, l| acc.checked_add(l.vat_amount))
-        .and_then(|sum| sum.checked_sub(doc.document_vat_total).map(|d| (sum, d.abs())));
+        .and_then(|sum| {
+            sum.checked_sub(doc.document_vat_total)
+                .map(|d| (sum, d.abs()))
+        });
     match computed {
         None => vec![WitnessFailure {
             rule_id: rules::VAT_SUBTOTALS_CLOSE.to_owned(),
@@ -624,7 +624,9 @@ mod tests {
             .collect();
         assert_eq!(vt.len(), 1);
         assert!(vt[0].message.contains("unverifiable"), "got {:?}", vt[0]);
-        assert!(vt[0].cited_fields.contains(&"/document_vat_total".to_owned()));
+        assert!(vt[0]
+            .cited_fields
+            .contains(&"/document_vat_total".to_owned()));
     }
 
     #[test]

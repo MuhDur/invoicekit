@@ -162,7 +162,9 @@ fn run_lifecycle() -> (Vec<u8>, invoicekit_report_kr_nts::NtsSubmitEnvelope) {
     let ubl_bytes = invoicekit_format_ubl::to_xml(&doc).unwrap().into_bytes();
 
     // 3. submit to the existing NTS mock provider; assert NTS receipt fields.
-    let envelope = provider().submit(&submit_request(ubl_bytes.clone())).unwrap();
+    let envelope = provider()
+        .submit(&submit_request(ubl_bytes.clone()))
+        .unwrap();
 
     // 4. evidence bundle: canonical IR + national/UBL XML + NTS receipt.
     let ikb = bundle_for(&doc, &ubl_bytes, &envelope);
@@ -188,7 +190,11 @@ fn bundle_for(
         serde_json::to_vec(envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    pack(&EvidenceBundle { manifest, artefacts }).unwrap()
+    pack(&EvidenceBundle {
+        manifest,
+        artefacts,
+    })
+    .unwrap()
 }
 
 /// 면세 (tax-exempt) e-Tax Invoice: a VAT-exempt supply such as financial,
@@ -477,8 +483,8 @@ fn korea_authority_rejection_is_a_receipt() {
     let ubl_bytes = invoicekit_format_ubl::to_xml(&doc).unwrap().into_bytes();
 
     let reason = "공급받는자 사업자등록번호가 국세청에 등록되어 있지 않습니다";
-    let provider = MockNtsProvider::with_fixed_issued_at(FIXED_ISSUED_AT)
-        .with_forced_rejection(reason);
+    let provider =
+        MockNtsProvider::with_fixed_issued_at(FIXED_ISSUED_AT).with_forced_rejection(reason);
     let envelope = provider.submit(&submit_request(ubl_bytes.clone())).unwrap();
 
     // The refusal is a receipt, not an Err.
@@ -493,7 +499,10 @@ fn korea_authority_rejection_is_a_receipt() {
     // The rejection receipt still packs into a verifiable evidence bundle.
     let ikb = bundle_for(&doc, &ubl_bytes, &envelope);
     let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
-    assert!(report.ok, "a rejection receipt must still verify as evidence");
+    assert!(
+        report.ok,
+        "a rejection receipt must still verify as evidence"
+    );
 }
 
 /// 면세 (tax-exempt) e-Tax Invoice lifecycle.
@@ -528,7 +537,11 @@ fn korea_tax_exempt_invoice_carries_zero_vat() {
     assert_eq!(envelope.status, NtsStatus::Approved);
 
     let ikb = bundle_for(&doc, &ubl_bytes, &envelope);
-    assert!(verify_packed(&ikb, &VerifyOptions::content_only()).unwrap().ok);
+    assert!(
+        verify_packed(&ikb, &VerifyOptions::content_only())
+            .unwrap()
+            .ok
+    );
 }
 
 /// 수정세금계산서 (correction / credit note) lifecycle.
@@ -565,7 +578,11 @@ fn korea_correction_note_lifecycle() {
     assert_eq!(envelope.status, NtsStatus::Approved);
 
     let ikb = bundle_for(&doc, &ubl_bytes, &envelope);
-    assert!(verify_packed(&ikb, &VerifyOptions::content_only()).unwrap().ok);
+    assert!(
+        verify_packed(&ikb, &VerifyOptions::content_only())
+            .unwrap()
+            .ok
+    );
 }
 
 /// Multi-line standard invoice: two taxable lines summing to one 10% VAT
@@ -592,11 +609,17 @@ fn korea_multiline_invoice_lifecycle() {
     assert!(xml.contains("연간 유지보수"));
 
     let ubl_bytes = xml.into_bytes();
-    let envelope = provider().submit(&submit_request(ubl_bytes.clone())).unwrap();
+    let envelope = provider()
+        .submit(&submit_request(ubl_bytes.clone()))
+        .unwrap();
     assert_eq!(envelope.status, NtsStatus::Approved);
 
     let ikb = bundle_for(&doc, &ubl_bytes, &envelope);
-    assert!(verify_packed(&ikb, &VerifyOptions::content_only()).unwrap().ok);
+    assert!(
+        verify_packed(&ikb, &VerifyOptions::content_only())
+            .unwrap()
+            .ok
+    );
 }
 
 /// Invalid issuer identifier rejected by the real NTS check-digit rule.

@@ -173,10 +173,14 @@ fn run_lifecycle() -> (Vec<u8>, invoicekit_report_ph_bir::EisSubmitEnvelope) {
     // 3. submit those bytes to the crate's MockEisProvider (deterministic
     //    pinned acknowledgement timestamp + serial reference number).
     let provider = MockEisProvider::with_fixed_acknowledged_at(PINNED_ACKNOWLEDGED_AT);
-    let envelope = provider.submit_invoice(&submit_request(ubl_bytes.clone())).unwrap();
+    let envelope = provider
+        .submit_invoice(&submit_request(ubl_bytes.clone()))
+        .unwrap();
 
     // 4. evidence bundle: canonical IR JSON + UBL XML + BIR receipt JSON.
-    let canonical = canonicalize_value(&doc.to_value().unwrap()).unwrap().into_bytes();
+    let canonical = canonicalize_value(&doc.to_value().unwrap())
+        .unwrap()
+        .into_bytes();
     let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     artefacts.insert("canonical.json".to_owned(), canonical);
     artefacts.insert("formats/ubl.xml".to_owned(), ubl_bytes);
@@ -185,7 +189,10 @@ fn run_lifecycle() -> (Vec<u8>, invoicekit_report_ph_bir::EisSubmitEnvelope) {
         serde_json::to_vec(&envelope).unwrap(),
     );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, envelope)
 }

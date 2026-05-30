@@ -419,7 +419,9 @@ fn credit_memo_serializes_as_ubl_credit_note_and_bundles() {
     // The root carries the default-namespace declaration; child cbc/cac
     // elements carry inline namespaces, so child matches use the suffix shape.
     assert!(
-        ubl.starts_with("<CreditNote xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2\">"),
+        ubl.starts_with(
+            "<CreditNote xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2\">"
+        ),
         "credit memo must serialize with a UBL CreditNote root, got:\n{ubl}"
     );
     assert!(
@@ -701,5 +703,9 @@ fn zero_rated_lifecycle_is_byte_deterministic() {
             .unwrap();
         bundle_for(&doc, ubl.as_bytes(), &envelope)
     };
-    assert_eq!(run(), run(), "zero-rated offline lifecycle must be byte-stable");
+    assert_eq!(
+        run(),
+        run(),
+        "zero-rated offline lifecycle must be byte-stable"
+    );
 }

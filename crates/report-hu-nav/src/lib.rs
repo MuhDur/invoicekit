@@ -110,8 +110,18 @@ pub fn to_invoice_data_xml(document: &CommercialDocument) -> Result<String, Invo
     out.push_str("\">\n");
 
     // --- invoiceNumber / invoiceIssueDate (InvoiceData header) ---
-    el(&mut out, 1, "invoiceNumber", document.document_number.as_str());
-    el(&mut out, 1, "invoiceIssueDate", document.issue_date.as_str());
+    el(
+        &mut out,
+        1,
+        "invoiceNumber",
+        document.document_number.as_str(),
+    );
+    el(
+        &mut out,
+        1,
+        "invoiceIssueDate",
+        document.issue_date.as_str(),
+    );
     el(&mut out, 1, "completenessIndicator", "false");
 
     open(&mut out, 1, "invoiceMain");
@@ -143,7 +153,12 @@ pub fn to_invoice_data_xml(document: &CommercialDocument) -> Result<String, Invo
 
     open(&mut out, 4, "invoiceDetail");
     el(&mut out, 5, "invoiceCategory", invoice_category);
-    el(&mut out, 5, "invoiceDeliveryDate", document.issue_date.as_str());
+    el(
+        &mut out,
+        5,
+        "invoiceDeliveryDate",
+        document.issue_date.as_str(),
+    );
     el(&mut out, 5, "currencyCode", document.currency.as_str());
     // Reported in HUF; a foreign currency would carry an exchangeRate here.
     el(&mut out, 5, "exchangeRate", "1");
@@ -181,7 +196,12 @@ pub fn to_invoice_data_xml(document: &CommercialDocument) -> Result<String, Invo
         el(&mut out, 6, "lineDescription", &line.description);
         close(&mut out, 5, "lineDescription");
         el(&mut out, 5, "quantity", &fmt_amount(line.quantity.inner()));
-        el(&mut out, 5, "unitPrice", &fmt_amount(line.unit_price.inner()));
+        el(
+            &mut out,
+            5,
+            "unitPrice",
+            &fmt_amount(line.unit_price.inner()),
+        );
 
         open(&mut out, 5, "lineAmountsNormal");
         open(&mut out, 6, "lineNetAmountData");
@@ -210,12 +230,20 @@ pub fn to_invoice_data_xml(document: &CommercialDocument) -> Result<String, Invo
     el(&mut out, 5, "invoiceVatAmountHUF", &fmt_amount(vat_total));
     close(&mut out, 4, "summaryNormal");
     // checked_add: net + vat can overflow even when each total fits on its own.
-    let gross_total = net_total
-        .checked_add(vat_total)
-        .ok_or(InvoiceDataError::TotalsUnrepresentable("invoiceGrossAmount"))?;
+    let gross_total =
+        net_total
+            .checked_add(vat_total)
+            .ok_or(InvoiceDataError::TotalsUnrepresentable(
+                "invoiceGrossAmount",
+            ))?;
     open(&mut out, 4, "summaryGrossData");
     el(&mut out, 5, "invoiceGrossAmount", &fmt_amount(gross_total));
-    el(&mut out, 5, "invoiceGrossAmountHUF", &fmt_amount(gross_total));
+    el(
+        &mut out,
+        5,
+        "invoiceGrossAmountHUF",
+        &fmt_amount(gross_total),
+    );
     close(&mut out, 4, "summaryGrossData");
     close(&mut out, 3, "invoiceSummary");
 
@@ -288,11 +316,7 @@ fn party_tax_number(party: &Party) -> Option<HuTaxNumber> {
         .iter()
         .find(|t| t.scheme.eq_ignore_ascii_case("vat"))
         .or_else(|| party.tax_ids.first())?;
-    let digits: String = chosen
-        .value
-        .chars()
-        .filter(char::is_ascii_digit)
-        .collect();
+    let digits: String = chosen.value.chars().filter(char::is_ascii_digit).collect();
     if digits.len() < 8 {
         return None;
     }
@@ -783,7 +807,10 @@ mod tests {
             // XML escaping is applied to text content.
             "<lineDescription>Szoftverfejlesztés &amp; tanácsadás</lineDescription>",
         ] {
-            assert!(xml.contains(needle), "InvoiceData missing {needle:?}:\n{xml}");
+            assert!(
+                xml.contains(needle),
+                "InvoiceData missing {needle:?}:\n{xml}"
+            );
         }
     }
 
@@ -813,7 +840,10 @@ mod tests {
     fn invoice_data_credit_note_is_normal_category() {
         // A credit note still serializes as a NORMAL invoiceCategory (the
         // reversal is carried by the upstream STORNO invoiceOperation).
-        assert_eq!(invoice_category(DocumentType::CreditNote).unwrap(), "NORMAL");
+        assert_eq!(
+            invoice_category(DocumentType::CreditNote).unwrap(),
+            "NORMAL"
+        );
     }
 
     #[test]

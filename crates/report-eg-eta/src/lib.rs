@@ -294,8 +294,10 @@ mod tests {
     fn submit_honours_forced_invalid_verdict() {
         // The ETA `Invalid` clearance verdict is a per-document STATUS, not an
         // `Err` — the adapter contract surfaces it inside the envelope.
-        let p = MockEtaProvider::new()
-            .with_forced_verdict(EtaStatus::Invalid, Some("EINV reference missing".to_owned()));
+        let p = MockEtaProvider::new().with_forced_verdict(
+            EtaStatus::Invalid,
+            Some("EINV reference missing".to_owned()),
+        );
         let env = p.submit(&sample_request()).unwrap();
         assert_eq!(env.status, EtaStatus::Invalid);
         assert_eq!(env.reason.as_deref(), Some("EINV reference missing"));

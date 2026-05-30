@@ -125,7 +125,10 @@ mod tests {
         // char boundary — which used to panic; it must now error instead.
         let input = "#a\u{00e9}ZZZ";
         assert_eq!(input.len(), 7);
-        assert!(!input.is_char_boundary(3), "input must straddle the 1..3 slice cut");
+        assert!(
+            !input.is_char_boundary(3),
+            "input must straddle the 1..3 slice cut"
+        );
         assert!(parse_hex(input).is_err());
         assert!(contrast_ratio(input, "#ffffff").is_err());
     }

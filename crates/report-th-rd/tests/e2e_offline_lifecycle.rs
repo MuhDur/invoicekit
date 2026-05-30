@@ -184,7 +184,10 @@ fn thailand_offline_lifecycle_produces_verifiable_evidence() {
         receipt.rd_ref
     );
     assert_eq!(receipt.acknowledged_at, PINNED_ACKNOWLEDGED_AT);
-    assert!(receipt.reason.is_none(), "happy path carries no rejection reason");
+    assert!(
+        receipt.reason.is_none(),
+        "happy path carries no rejection reason"
+    );
 
     // Step-4 success criterion: the bundle verifies (exit 0 == report.ok).
     let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
@@ -213,13 +216,19 @@ fn thailand_rejection_is_a_refusal() {
     let mut empty = submit_request(Vec::new());
     empty.payload.clear();
     let err = p.submit_invoice(&empty).unwrap_err();
-    assert!(matches!(err, RdError::BadPayload(_)), "empty payload must be a BadPayload Err");
+    assert!(
+        matches!(err, RdError::BadPayload(_)),
+        "empty payload must be a BadPayload Err"
+    );
 
     // A malformed Thai tax id is refused before the wire.
     let mut bad_id = submit_request(b"<Invoice/>".to_vec());
     bad_id.issuer_tax_id = "NOT-13-DIGITS".to_owned();
     let err = p.submit_invoice(&bad_id).unwrap_err();
-    assert!(matches!(err, RdError::BadTaxId(_)), "malformed tax id must be a BadTaxId Err");
+    assert!(
+        matches!(err, RdError::BadTaxId(_)),
+        "malformed tax id must be a BadTaxId Err"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -497,17 +506,27 @@ fn bundle_for(
     let ubl_xml = to_xml(doc).unwrap();
     let ubl_bytes = ubl_xml.clone().into_bytes();
 
-    let provider = forced_rejection
-        .map_or_else(provider, |reason| provider().with_forced_rejection(reason));
-    let receipt = provider.submit_invoice(&submit_request(ubl_bytes.clone())).unwrap();
+    let provider =
+        forced_rejection.map_or_else(provider, |reason| provider().with_forced_rejection(reason));
+    let receipt = provider
+        .submit_invoice(&submit_request(ubl_bytes.clone()))
+        .unwrap();
 
-    let canonical = canonicalize_value(&doc.to_value().unwrap()).unwrap().into_bytes();
+    let canonical = canonicalize_value(&doc.to_value().unwrap())
+        .unwrap()
+        .into_bytes();
     let mut artefacts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     artefacts.insert("canonical.json".to_owned(), canonical);
     artefacts.insert("formats/ubl.xml".to_owned(), ubl_bytes);
-    artefacts.insert("receipt.json".to_owned(), serde_json::to_vec(&receipt).unwrap());
+    artefacts.insert(
+        "receipt.json".to_owned(),
+        serde_json::to_vec(&receipt).unwrap(),
+    );
     let manifest = manifest_for(&artefacts, TENANT, TRACE, PINNED_CREATED_AT);
-    let bundle = EvidenceBundle { manifest, artefacts };
+    let bundle = EvidenceBundle {
+        manifest,
+        artefacts,
+    };
     let ikb = pack(&bundle).unwrap();
     (ikb, ubl_xml, receipt)
 }
@@ -523,7 +542,9 @@ fn thailand_credit_note_serializes_as_creditnote_381_and_bundles() {
 
     // CreditNote root + UNCL1001 type code 381.
     assert!(
-        ubl.contains("<CreditNote xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2\""),
+        ubl.contains(
+            "<CreditNote xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2\""
+        ),
         "a Thai credit note must serialize under the UBL CreditNote root, got:\n{ubl}"
     );
     assert!(
@@ -562,21 +583,48 @@ fn thailand_mixed_standard_and_zero_rated_emits_per_band_subtotals() {
         "a mixed-rate invoice must emit one TaxSubtotal per VAT band, got:\n{ubl}"
     );
     // The 7% standard band and the 0% zero-rated band both appear.
-    assert!(ubl.contains(">7.00</cbc:Percent>"), "the 7% standard band must render");
-    assert!(ubl.contains(">0.00</cbc:Percent>"), "the 0% zero-rated band must render");
+    assert!(
+        ubl.contains(">7.00</cbc:Percent>"),
+        "the 7% standard band must render"
+    );
+    assert!(
+        ubl.contains(">0.00</cbc:Percent>"),
+        "the 0% zero-rated band must render"
+    );
     // Tax category codes: S (standard) and Z (zero-rated).
-    assert!(ubl.contains(">S</cbc:ID>"), "the standard band carries category S");
-    assert!(ubl.contains(">Z</cbc:ID>"), "the zero-rated band carries category Z");
+    assert!(
+        ubl.contains(">S</cbc:ID>"),
+        "the standard band carries category S"
+    );
+    assert!(
+        ubl.contains(">Z</cbc:ID>"),
+        "the zero-rated band carries category Z"
+    );
     // The export line's taxable base appears at 2000.00, the standard line at
     // 1000.00 — one TaxableAmount per band.
-    assert!(ubl.contains(">2000.00</cbc:TaxableAmount>"), "zero-rated band taxable base 2000.00");
-    assert!(ubl.contains(">1000.00</cbc:TaxableAmount>"), "standard band taxable base 1000.00");
+    assert!(
+        ubl.contains(">2000.00</cbc:TaxableAmount>"),
+        "zero-rated band taxable base 2000.00"
+    );
+    assert!(
+        ubl.contains(">1000.00</cbc:TaxableAmount>"),
+        "standard band taxable base 1000.00"
+    );
     // Header VAT (cac:TaxTotal/cbc:TaxAmount) is 70.00 — 7% of the 1000.00
     // domestic line only; the export line contributes 0.00.
-    assert!(ubl.contains(">70.00</cbc:TaxAmount>"), "header VAT must be 70.00 (7% of the standard line)");
+    assert!(
+        ubl.contains(">70.00</cbc:TaxAmount>"),
+        "header VAT must be 70.00 (7% of the standard line)"
+    );
     // Tax-inclusive total = 3000.00 base + 70.00 VAT = 3070.00.
-    assert!(ubl.contains(">3070.00</cbc:TaxInclusiveAmount>"), "tax-inclusive total must be 3070.00");
-    assert!(ubl.contains(">3070.00</cbc:PayableAmount>"), "payable total must be 3070.00");
+    assert!(
+        ubl.contains(">3070.00</cbc:TaxInclusiveAmount>"),
+        "tax-inclusive total must be 3070.00"
+    );
+    assert!(
+        ubl.contains(">3070.00</cbc:PayableAmount>"),
+        "payable total must be 3070.00"
+    );
 
     assert_eq!(receipt.status, RdStatus::Acknowledged);
     let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
@@ -591,13 +639,19 @@ fn thailand_exempt_invoice_charges_no_vat() {
     let doc = thai_exempt_invoice();
     let (ikb, ubl, receipt) = bundle_for(&doc, None);
 
-    assert!(ubl.contains(">E</cbc:ID>"), "an exempt line must carry tax category E, got:\n{ubl}");
+    assert!(
+        ubl.contains(">E</cbc:ID>"),
+        "an exempt line must carry tax category E, got:\n{ubl}"
+    );
     // No VAT: the tax-exclusive and tax-inclusive totals are equal at 800.00.
     assert!(ubl.contains(">800.00</cbc:TaxExclusiveAmount>"));
     assert!(ubl.contains(">800.00</cbc:TaxInclusiveAmount>"));
     assert!(ubl.contains(">800.00</cbc:PayableAmount>"));
     // The 7% standard band must NOT appear on an exempt invoice.
-    assert!(!ubl.contains(">7.00</cbc:Percent>"), "an exempt supply charges no 7% VAT");
+    assert!(
+        !ubl.contains(">7.00</cbc:Percent>"),
+        "an exempt supply charges no 7% VAT"
+    );
 
     assert_eq!(receipt.status, RdStatus::Acknowledged);
     let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
@@ -627,7 +681,10 @@ fn thailand_authority_rejection_is_a_receipt_not_an_error() {
         "a rejected RD receipt must carry the refusal reason"
     );
     // An RD reference is still assigned on a rejection.
-    assert!(receipt.rd_ref.starts_with("TH-"), "rejected receipt still carries a TH- reference");
+    assert!(
+        receipt.rd_ref.starts_with("TH-"),
+        "rejected receipt still carries a TH- reference"
+    );
 
     // The rejection-path bundle must still verify (exit 0 == report.ok).
     let report = verify_packed(&ikb, &VerifyOptions::content_only()).unwrap();
@@ -649,7 +706,11 @@ fn thailand_rejects_thirteen_char_non_digit_tax_id_pre_wire() {
     let mut req = submit_request(ubl_bytes);
     // 13 chars, but the last is a letter — right length, wrong shape.
     req.issuer_tax_id = "123456789012X".to_owned();
-    assert_eq!(req.issuer_tax_id.len(), 13, "fixture must be exactly 13 chars");
+    assert_eq!(
+        req.issuer_tax_id.len(),
+        13,
+        "fixture must be exactly 13 chars"
+    );
 
     let err = provider().submit_invoice(&req).unwrap_err();
     assert!(
