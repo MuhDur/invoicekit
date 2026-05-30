@@ -2211,9 +2211,7 @@ dependencies = [
  "invoicekit-evidence",
  "invoicekit-ir",
  "invoicekit-migration",
- "invoicekit-reconcile",
  "invoicekit-replay",
- "invoicekit-signer",
  "invoicekit-timestamping",
  "invoicekit-transmit-peppol-byok",
  "invoicekit-validate",
@@ -2403,7 +2401,6 @@ dependencies = [
 name = "invoicekit-intake-witness"
 version = "0.2.0"
 dependencies = [
- "invoicekit-intake-citation",
  "rust_decimal",
  "serde",
  "serde_json",
@@ -2464,16 +2461,13 @@ name = "invoicekit-managed-api-server"
 version = "0.2.0"
 dependencies = [
  "axum",
- "http",
  "http-body-util",
  "invoicekit-managed-api",
- "invoicekit-reconcile",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tower",
- "tracing",
 ]
 
 [[package]]
@@ -2528,8 +2522,6 @@ dependencies = [
  "base32",
  "md-5 0.10.6",
  "quick-xml 0.40.1",
- "serde",
- "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -2550,7 +2542,6 @@ version = "0.2.0"
 dependencies = [
  "invoicekit-format-ubl",
  "invoicekit-ir",
- "serde",
  "serde_json",
  "thiserror 2.0.18",
 ]
@@ -2561,7 +2552,6 @@ version = "0.2.0"
 dependencies = [
  "invoicekit-format-ubl",
  "invoicekit-ir",
- "serde",
  "serde_json",
  "thiserror 2.0.18",
 ]
@@ -2572,7 +2562,6 @@ version = "0.2.0"
 dependencies = [
  "invoicekit-format-ubl",
  "invoicekit-ir",
- "serde",
  "serde_json",
  "thiserror 2.0.18",
 ]
@@ -2604,7 +2593,6 @@ version = "0.2.0"
 dependencies = [
  "invoicekit-render-pdf",
  "invoicekit-render-pdf-postproc",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3208,7 +3196,6 @@ dependencies = [
  "invoicekit-signer",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3236,7 +3223,6 @@ dependencies = [
 name = "invoicekit-signer-france-ctc"
 version = "0.2.0"
 dependencies = [
- "invoicekit-signer",
  "invoicekit-signer-eidas",
  "serde",
  "serde_json",
