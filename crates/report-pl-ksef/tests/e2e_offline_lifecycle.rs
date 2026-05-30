@@ -343,6 +343,7 @@ fn polish_corrective_invoice() -> CommercialDocument {
 /// standard rate, 8 % and 5 % reduced rates, a 0 % rate, and a "zw" exemption
 /// (ustawa o VAT, art. 41 / art. 146ef). The FA(3) `FaWiersz` block must carry
 /// each line's own `P_12` rate while `P_13_1`/`P_14_1` aggregate the bases.
+#[allow(clippy::too_many_lines)] // multi-line fixture; length is inherent to the scenario
 fn polish_mixed_rate_invoice() -> CommercialDocument {
     CommercialDocument::new(CommercialDocumentParts {
         schema_version: SchemaVersion::default(),
