@@ -141,6 +141,7 @@ fn egyptian_invoice() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -344,6 +345,7 @@ fn egyptian_multiline_invoice() -> CommercialDocument {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
             DocumentLine {
                 id: "2".to_owned(),
@@ -355,6 +357,7 @@ fn egyptian_multiline_invoice() -> CommercialDocument {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
         ],
         // 14% Egyptian standard VAT on 5,000.00 EGP base = 700.00 EGP.
@@ -420,6 +423,7 @@ fn egyptian_credit_note(original_uuid: &str) -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -486,6 +490,7 @@ fn egyptian_exempt_invoice() -> CommercialDocument {
             tax_category: Some("E".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "E".to_owned(),
@@ -562,6 +567,7 @@ fn egyptian_export_invoice() -> CommercialDocument {
             tax_category: Some("Z".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         // Zero-rated export: tax base recorded, output tax zero.
         tax_summary: vec![TaxCategorySummary {

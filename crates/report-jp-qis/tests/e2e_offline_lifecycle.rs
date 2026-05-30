@@ -99,6 +99,7 @@ fn japanese_invoice() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -315,6 +316,7 @@ fn dual_rate_invoice() -> CommercialDocument {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
             // 8% reduced: bottled tea (a non-alcoholic beverage qualifies for
             // the 軽減税率 reduced rate).
@@ -328,6 +330,7 @@ fn dual_rate_invoice() -> CommercialDocument {
                 tax_category: Some("AA".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
         ],
         tax_summary: vec![
@@ -463,6 +466,7 @@ fn qualified_return_credit_note() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),

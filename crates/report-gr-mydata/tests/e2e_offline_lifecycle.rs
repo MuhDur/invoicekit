@@ -117,6 +117,7 @@ fn greek_invoice() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         // Greek standard VAT rate is 24%.
         tax_summary: vec![TaxCategorySummary {
@@ -344,6 +345,7 @@ fn greek_credit_note() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -474,6 +476,7 @@ fn greek_multiline_invoice() -> CommercialDocument {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
             // Line 2: reduced-rate item, 13% (e.g. certain foodstuffs/services).
             DocumentLine {
@@ -486,6 +489,7 @@ fn greek_multiline_invoice() -> CommercialDocument {
                 tax_category: Some("AA".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
         ],
         tax_summary: vec![
@@ -615,6 +619,7 @@ fn greek_exempt_invoice() -> CommercialDocument {
             tax_category: Some("E".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "E".to_owned(),

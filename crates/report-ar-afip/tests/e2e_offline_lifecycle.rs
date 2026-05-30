@@ -110,6 +110,7 @@ fn argentine_invoice() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -289,6 +290,7 @@ fn line(id: &str, desc: &str, qty: i64, unit_minor: i64, ext_minor: i64) -> Docu
         tax_category: Some("S".to_owned()),
         classifications: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
     }
 }
 

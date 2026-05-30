@@ -93,6 +93,7 @@ fn turkish_invoice() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -296,6 +297,7 @@ fn tr_doc(
             tax_category: Some(category_code.to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: category_code.to_owned(),

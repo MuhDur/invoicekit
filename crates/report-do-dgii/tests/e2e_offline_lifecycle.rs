@@ -110,6 +110,7 @@ fn dominican_invoice() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         // ITBIS (the Dominican VAT) is 18%.
         tax_summary: vec![TaxCategorySummary {

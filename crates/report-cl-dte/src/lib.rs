@@ -849,6 +849,7 @@ mod tests {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             }],
             // IVA (Chilean VAT) is a flat 19%.
             tax_summary: vec![TaxCategorySummary {
@@ -974,6 +975,7 @@ mod tests {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         });
         let xml = to_dte_xml(&doc, &sample_ctx()).unwrap();
         assert_eq!(xml.matches("<Detalle>").count(), 2);

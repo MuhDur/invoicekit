@@ -96,6 +96,7 @@ fn costa_rican_invoice() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -285,6 +286,7 @@ fn costa_rican_export_invoice() -> CommercialDocument {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
             // Line 2: exported goods, zero-rated (tasa cero / exportación).
             DocumentLine {
@@ -297,6 +299,7 @@ fn costa_rican_export_invoice() -> CommercialDocument {
                 tax_category: Some("Z".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
         ],
         tax_summary: vec![
@@ -374,6 +377,7 @@ fn costa_rican_credit_note() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),

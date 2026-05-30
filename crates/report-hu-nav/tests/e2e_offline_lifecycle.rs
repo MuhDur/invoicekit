@@ -106,6 +106,7 @@ fn hungarian_invoice() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             // Hungary's standard VAT is 27% (the highest in the EU).
@@ -389,6 +390,7 @@ fn hungary_native_invoice_data_multiline_aggregates_summary() {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
             DocumentLine {
                 id: "2".to_owned(),
@@ -400,6 +402,7 @@ fn hungary_native_invoice_data_multiline_aggregates_summary() {
                 tax_category: Some("R5".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
         ],
         tax_summary: vec![
@@ -558,6 +561,7 @@ fn hungarian_credit_note() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -661,6 +665,7 @@ fn hungary_multi_line_mixed_rate_invoice_reports_each_band() {
             tax_category: Some(cat.to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }
     };
     let band = |cat: &str, taxable_minor: i64, tax_minor: i64, rate_minor: i64| TaxCategorySummary {
@@ -781,6 +786,7 @@ fn hungary_domestic_reverse_charge_invoice_carries_no_vat() {
             tax_category: Some("AE".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "AE".to_owned(),
@@ -870,6 +876,7 @@ fn hungary_subjective_exemption_invoice_is_zero_rated() {
             tax_category: Some("E".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "E".to_owned(),

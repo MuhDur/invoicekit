@@ -99,6 +99,7 @@ fn saudi_invoice() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -327,6 +328,7 @@ fn saudi_credit_note() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -408,6 +410,7 @@ fn saudi_zero_rated_export_invoice() -> CommercialDocument {
                 tax_category: Some("Z".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
             DocumentLine {
                 id: "2".to_owned(),
@@ -419,6 +422,7 @@ fn saudi_zero_rated_export_invoice() -> CommercialDocument {
                 tax_category: Some("Z".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
         ],
         tax_summary: vec![TaxCategorySummary {
@@ -487,6 +491,7 @@ fn saudi_exempt_invoice() -> CommercialDocument {
             tax_category: Some("E".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "E".to_owned(),

@@ -99,6 +99,7 @@ fn nigerian_invoice() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             // Nigeria's standard VAT rate is 7.5%.

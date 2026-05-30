@@ -517,6 +517,7 @@ mod tests {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             }],
             tax_summary: vec![TaxCategorySummary {
                 category_code: "S".to_owned(),

@@ -428,6 +428,7 @@ fn lines(config: &FixtureConfig) -> (Vec<DocumentLine>, Decimal) {
             tax_category: Some(config.vat.code.to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         });
     }
 

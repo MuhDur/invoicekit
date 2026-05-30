@@ -95,6 +95,7 @@ fn kenyan_invoice() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -304,6 +305,7 @@ fn kenyan_invoice_with_tax(
             tax_category: Some(category_code.to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: category_code.to_owned(),
@@ -435,6 +437,7 @@ fn kenya_exempt_a_label_carries_ex_base_and_zero_tax() {
 /// `A-EX` bread line). Proves the bundled UBL carries BOTH per-line tax
 /// categories and a header tax-total that is the SUM of only the taxed lines.
 #[test]
+#[allow(clippy::too_many_lines)] // multi-line fixture; length is inherent to the scenario
 fn kenya_mixed_b_and_a_lines_sum_only_taxable_vat() {
     // Line 1: 120,000.00 @ 16% (B) -> 19,200.00 VAT.
     // Line 2: 30,000.00 exempt (A) -> 0.00 VAT.
@@ -469,6 +472,7 @@ fn kenya_mixed_b_and_a_lines_sum_only_taxable_vat() {
                 tax_category: Some("B".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
             DocumentLine {
                 id: "2".to_owned(),
@@ -480,6 +484,7 @@ fn kenya_mixed_b_and_a_lines_sum_only_taxable_vat() {
                 tax_category: Some("A".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
         ],
         tax_summary: vec![
@@ -593,6 +598,7 @@ fn kenya_credit_note_references_original_cu_invoice_and_clears() {
             tax_category: Some("B".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "B".to_owned(),

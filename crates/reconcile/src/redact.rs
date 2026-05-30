@@ -75,6 +75,7 @@
 //! #       tax_category: Some("S".to_owned()),
 //! #       classifications: vec![],
 //! #       extensions: vec![],
+//! #       allowance_charges: Vec::new(),
 //! #     }],
 //! #     tax_summary: vec![],
 //! #     monetary_total: MonetaryTotal {
@@ -401,6 +402,7 @@ mod tests {
                 tax_category: Some("S".to_owned()),
                 classifications: vec![],
                 extensions: vec![],
+                allowance_charges: Vec::new(),
             }],
             tax_summary: vec![],
             monetary_total: MonetaryTotal {

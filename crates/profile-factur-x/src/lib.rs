@@ -469,6 +469,7 @@ mod tests {
                     json!({"reason": "loyalty"}),
                 )
                 .unwrap()],
+                allowance_charges: Vec::new(),
             }],
             tax_summary: vec![TaxCategorySummary {
                 category_code: "S".to_owned(),

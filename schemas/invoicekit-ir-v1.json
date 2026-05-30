@@ -502,6 +502,13 @@
           "items": {
             "$ref": "#/$defs/JurisdictionExtension"
           }
+        },
+        "allowance_charges": {
+          "description": "Line-level allowances (EN 16931 BG-27) and charges (BG-28). Reuses the\n document-level [`DocumentAllowanceCharge`] shape; the VAT category fields\n are normally unused at line level (a line allowance/charge inherits the\n line's tax category), but are accepted when a producer supplies them.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DocumentAllowanceCharge"
+          }
         }
       },
       "required": [
@@ -552,6 +559,66 @@
       "required": [
         "urn",
         "payload"
+      ]
+    },
+    "DocumentAllowanceCharge": {
+      "description": "Document-level allowance (EN 16931 BG-20) or charge (BG-21).\n\n Both groups share an identical structure distinguished by `is_charge`; only\n the business-term numbers differ (allowance BT-92..98 / charge BT-99..105).\n The detail is carried verbatim from the producer — InvoiceKit serializes the\n supplied amounts/codes faithfully and does not recompute or reconcile them\n against the document totals (that is the reference validator's responsibility).",
+      "type": "object",
+      "properties": {
+        "is_charge": {
+          "description": "`true` = charge (BG-21), `false` = allowance (BG-20).",
+          "type": "boolean"
+        },
+        "amount": {
+          "description": "Allowance/charge amount (BT-92 / BT-99).",
+          "type": "string"
+        },
+        "base_amount": {
+          "description": "Optional base amount the percentage applies to (BT-93 / BT-100).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "percentage": {
+          "description": "Optional percentage of the base amount (BT-94 / BT-101).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tax_category": {
+          "description": "Optional VAT category code for the allowance/charge (BT-95 / BT-102).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tax_rate": {
+          "description": "Optional VAT rate (BT-96 / BT-103).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "description": "Optional reason text (BT-97 / BT-104).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason_code": {
+          "description": "Optional reason code (BT-98 / BT-105), from UNCL 5189 (allowances) or\n UNCL 7161 (charges); carried verbatim.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "is_charge",
+        "amount"
       ]
     },
     "TaxCategorySummary": {
@@ -711,66 +778,6 @@
       "required": [
         "language",
         "text"
-      ]
-    },
-    "DocumentAllowanceCharge": {
-      "description": "Document-level allowance (EN 16931 BG-20) or charge (BG-21).\n\n Both groups share an identical structure distinguished by `is_charge`; only\n the business-term numbers differ (allowance BT-92..98 / charge BT-99..105).\n The detail is carried verbatim from the producer — InvoiceKit serializes the\n supplied amounts/codes faithfully and does not recompute or reconcile them\n against the document totals (that is the reference validator's responsibility).",
-      "type": "object",
-      "properties": {
-        "is_charge": {
-          "description": "`true` = charge (BG-21), `false` = allowance (BG-20).",
-          "type": "boolean"
-        },
-        "amount": {
-          "description": "Allowance/charge amount (BT-92 / BT-99).",
-          "type": "string"
-        },
-        "base_amount": {
-          "description": "Optional base amount the percentage applies to (BT-93 / BT-100).",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "percentage": {
-          "description": "Optional percentage of the base amount (BT-94 / BT-101).",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "tax_category": {
-          "description": "Optional VAT category code for the allowance/charge (BT-95 / BT-102).",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "tax_rate": {
-          "description": "Optional VAT rate (BT-96 / BT-103).",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reason": {
-          "description": "Optional reason text (BT-97 / BT-104).",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reason_code": {
-          "description": "Optional reason code (BT-98 / BT-105), from UNCL 5189 (allowances) or\n UNCL 7161 (charges); carried verbatim.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "is_charge",
-        "amount"
       ]
     },
     "DeliverToParty": {

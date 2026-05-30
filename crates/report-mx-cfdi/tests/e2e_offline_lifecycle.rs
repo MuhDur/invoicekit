@@ -94,6 +94,7 @@ fn mexican_invoice() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -290,6 +291,7 @@ fn mexican_credit_note() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -363,6 +365,7 @@ fn mexican_border_region_invoice() -> CommercialDocument {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
             // Line 2: border-region 8% IVA. tax_category "AA" (reduced rate).
             DocumentLine {
@@ -375,6 +378,7 @@ fn mexican_border_region_invoice() -> CommercialDocument {
                 tax_category: Some("AA".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
         ],
         tax_summary: vec![
@@ -457,6 +461,7 @@ fn mexican_zero_rate_publico_general() -> CommercialDocument {
             tax_category: Some("Z".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "Z".to_owned(),

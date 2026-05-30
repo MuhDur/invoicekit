@@ -166,6 +166,7 @@ fn nigerian_credit_note() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             // Nigeria's standard VAT rate is 7.5%.
@@ -295,6 +296,7 @@ fn nigerian_mixed_rate_invoice() -> CommercialDocument {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
             // Exported service: zero-rated under Nigerian VAT.
             DocumentLine {
@@ -307,6 +309,7 @@ fn nigerian_mixed_rate_invoice() -> CommercialDocument {
                 tax_category: Some("Z".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
         ],
         tax_summary: vec![
@@ -429,6 +432,7 @@ fn nigerian_no_tax_invoice(category: &str, number: &str, description: &str) -> C
             tax_category: Some(category.to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: category.to_owned(),

@@ -723,6 +723,7 @@ fn line_from_gobl(value: &Value, idx: usize) -> Result<DocumentLine, GoblError> 
         tax_category,
         classifications: Vec::new(),
         extensions,
+        allowance_charges: Vec::new(),
     })
 }
 
@@ -1002,6 +1003,7 @@ mod tests {
                 tax_category: Some("standard".into()),
                 classifications: Vec::new(),
                 extensions: vec![],
+                allowance_charges: Vec::new(),
             }],
             tax_summary: vec![TaxCategorySummary {
                 category_code: "VAT".into(),

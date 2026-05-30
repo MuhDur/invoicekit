@@ -160,6 +160,7 @@ fn zero_rated_sale() -> CommercialDocument {
             tax_category: Some("Z".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "Z".to_owned(),
@@ -274,6 +275,7 @@ fn vat_exempt_sale() -> CommercialDocument {
             tax_category: Some("E".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "E".to_owned(),
@@ -377,6 +379,7 @@ fn credit_memo() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         // Standard 12% Philippine VAT on the credited amount.
         tax_summary: vec![TaxCategorySummary {
@@ -497,6 +500,7 @@ fn official_receipt_multiline() -> CommercialDocument {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
             DocumentLine {
                 id: "2".to_owned(),
@@ -508,6 +512,7 @@ fn official_receipt_multiline() -> CommercialDocument {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
         ],
         // 150,000.00 base @ 12% = 18,000.00 output VAT.

@@ -715,6 +715,7 @@ mod tests {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             }],
             tax_summary: vec![TaxCategorySummary {
                 // Hungary's 27% standard VAT rate.
@@ -940,6 +941,7 @@ mod tests {
                 tax_category: None,
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
             DocumentLine {
                 id: "2".to_owned(),
@@ -951,6 +953,7 @@ mod tests {
                 tax_category: None,
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
         ];
         doc.tax_summary = Vec::new();
@@ -976,6 +979,7 @@ mod tests {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }];
         // tax_rate of 27 means net * 27 = MAX * 27 overflows before the
         // division by 100 can bring it back into range.

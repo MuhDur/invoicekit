@@ -95,6 +95,7 @@ fn indian_invoice() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             // 18% GST (9% CGST + 9% SGST collapses to one EN16931 summary line).
@@ -380,6 +381,7 @@ fn india_native_inv01_intra_state_splits_cgst_sgst() {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -479,6 +481,7 @@ fn igst_line(id: &str, description: &str, minor_each: i64, qty: i64) -> Document
         tax_category: Some("S".to_owned()),
         classifications: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
     }
 }
 
@@ -524,6 +527,7 @@ fn indian_credit_note() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             // 18% GST on the credited amount.
@@ -677,6 +681,7 @@ fn indian_export_lut_invoice() -> CommercialDocument {
             tax_category: Some("Z".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             // Zero-rated export under LUT: 0% IGST, zero tax.
@@ -879,6 +884,7 @@ fn india_intra_state_reverse_charge_invoice_registers() {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),

@@ -138,6 +138,7 @@ fn build_document(config: &DocConfig) -> CommercialDocument {
                 },
             }],
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         });
     }
     let tax_amount = (line_total * Decimal::new(19, 2)).round_dp(2);

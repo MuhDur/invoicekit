@@ -536,6 +536,7 @@ mod tests {
                 tax_category: Some("standard".into()),
                 classifications: Vec::new(),
                 extensions: vec![],
+                allowance_charges: Vec::new(),
             }],
             tax_summary: vec![TaxCategorySummary {
                 category_code: "VAT".into(),

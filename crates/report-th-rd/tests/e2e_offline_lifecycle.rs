@@ -97,6 +97,7 @@ fn thai_invoice() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         // Thai standard VAT is 7%.
         tax_summary: vec![TaxCategorySummary {
@@ -287,6 +288,7 @@ fn thai_credit_note() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         // Same 7 % standard band as the original invoice, on the reduced base.
         tax_summary: vec![TaxCategorySummary {
@@ -355,6 +357,7 @@ fn thai_mixed_standard_and_zero_rated_invoice() -> CommercialDocument {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
             DocumentLine {
                 id: "2".to_owned(),
@@ -367,6 +370,7 @@ fn thai_mixed_standard_and_zero_rated_invoice() -> CommercialDocument {
                 tax_category: Some("Z".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
         ],
         tax_summary: vec![
@@ -447,6 +451,7 @@ fn thai_exempt_invoice() -> CommercialDocument {
             tax_category: Some("E".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "E".to_owned(),

@@ -100,6 +100,7 @@ fn taiwanese_invoice() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         // Taiwan's standard business tax (營業稅) is 5%.
         tax_summary: vec![TaxCategorySummary {
@@ -275,6 +276,7 @@ fn taiwanese_allowance() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         // 5% business tax credited back on the allowed base.
         tax_summary: vec![TaxCategorySummary {
@@ -342,6 +344,7 @@ fn taiwanese_mixed_standard_and_zero_rated_invoice() -> CommercialDocument {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
             DocumentLine {
                 id: "2".to_owned(),
@@ -353,6 +356,7 @@ fn taiwanese_mixed_standard_and_zero_rated_invoice() -> CommercialDocument {
                 tax_category: Some("Z".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
         ],
         tax_summary: vec![

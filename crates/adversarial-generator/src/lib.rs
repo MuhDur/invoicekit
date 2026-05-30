@@ -337,6 +337,7 @@ fn one_line(
         tax_category: tax_category.map(str::to_owned),
         classifications: Vec::new(),
         extensions: Vec::new(),
+        allowance_charges: Vec::new(),
     }
 }
 

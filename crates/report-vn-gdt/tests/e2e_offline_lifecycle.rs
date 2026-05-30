@@ -114,6 +114,7 @@ fn vietnamese_invoice() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         // Vietnam standard VAT is 10%.
         tax_summary: vec![TaxCategorySummary {
@@ -317,6 +318,7 @@ fn vietnamese_credit_note() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         // Same 10% standard band as the original, on the reversed base.
         tax_summary: vec![TaxCategorySummary {
@@ -381,6 +383,7 @@ fn vietnamese_multiline_mixed_rate_invoice() -> CommercialDocument {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
             DocumentLine {
                 id: "2".to_owned(),
@@ -392,6 +395,7 @@ fn vietnamese_multiline_mixed_rate_invoice() -> CommercialDocument {
                 tax_category: Some("AA".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
         ],
         tax_summary: vec![
@@ -467,6 +471,7 @@ fn vietnamese_export_zero_rated_invoice() -> CommercialDocument {
             tax_category: Some("Z".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "Z".to_owned(),

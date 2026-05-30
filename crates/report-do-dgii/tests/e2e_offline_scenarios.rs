@@ -165,6 +165,7 @@ fn dominican_credit_note() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -266,6 +267,7 @@ fn nota_credito_type_34_corrective_submits_and_bundles() {
 /// Authority ref: ITBIS standard rate 18% (Norma General; manifest validator
 /// note "18% standard, 16% reduced for selected goods"). Catálogo type 32.
 #[test]
+#[allow(clippy::too_many_lines)] // multi-line fixture; length is inherent to the scenario
 fn factura_consumo_type_32_multiline_18pct_itbis() {
     let lines = vec![
         DocumentLine {
@@ -278,6 +280,7 @@ fn factura_consumo_type_32_multiline_18pct_itbis() {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         },
         DocumentLine {
             id: "2".to_owned(),
@@ -289,6 +292,7 @@ fn factura_consumo_type_32_multiline_18pct_itbis() {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         },
         DocumentLine {
             id: "3".to_owned(),
@@ -300,6 +304,7 @@ fn factura_consumo_type_32_multiline_18pct_itbis() {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         },
     ];
     // Base = 60 + 30 + 10 = 100.00; ITBIS 18% = 18.00; total = 118.00.
@@ -424,6 +429,7 @@ fn exportacion_type_46_is_itbis_exempt_zero_rated() {
             tax_category: Some("E".to_owned()), // exempt / zero-rated
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "E".to_owned(),

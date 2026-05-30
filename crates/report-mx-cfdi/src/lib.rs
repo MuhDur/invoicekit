@@ -837,6 +837,7 @@ mod tests {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             }],
             tax_summary: vec![TaxCategorySummary {
                 category_code: "S".to_owned(),
@@ -992,6 +993,7 @@ mod tests {
                 scheme_version: None,
             }],
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }];
         // Touch the issue date so the helper is exercised on a fresh document.
         doc.issue_date = DateOnly::new("2026-05-27").unwrap();

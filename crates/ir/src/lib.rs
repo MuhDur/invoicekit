@@ -659,6 +659,12 @@ pub struct DocumentLine {
     /// Line-level jurisdiction extensions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extensions: Vec<JurisdictionExtension>,
+    /// Line-level allowances (EN 16931 BG-27) and charges (BG-28). Reuses the
+    /// document-level [`DocumentAllowanceCharge`] shape; the VAT category fields
+    /// are normally unused at line level (a line allowance/charge inherits the
+    /// line's tax category), but are accepted when a producer supplies them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowance_charges: Vec<DocumentAllowanceCharge>,
 }
 
 impl DocumentLine {
@@ -670,6 +676,9 @@ impl DocumentLine {
         }
         for extension in &self.extensions {
             extension.validate()?;
+        }
+        for allowance_charge in &self.allowance_charges {
+            allowance_charge.validate()?;
         }
         Ok(())
     }
@@ -1965,6 +1974,32 @@ mod tests {
             err,
             IrError::MissingRequiredField("allowance_charges.reason")
         ));
+    }
+
+    #[test]
+    fn line_allowance_charges_round_trip_and_default_to_empty() {
+        // Absent line allowance_charges deserializes to an empty vec.
+        let baseline = CommercialDocument::try_from_value(synthetic_document_json()).unwrap();
+        assert!(baseline.lines[0].allowance_charges.is_empty());
+
+        // A present BG-27 line allowance round-trips through from_value -> to_value.
+        let mut input = synthetic_document_json();
+        input["lines"][0]["allowance_charges"] = json!([{
+            "is_charge": false,
+            "amount": "5.00",
+            "reason": "Line discount",
+            "reason_code": "95"
+        }]);
+        let doc = CommercialDocument::try_from_value(input).unwrap();
+        assert_eq!(doc.lines[0].allowance_charges.len(), 1);
+        assert!(!doc.lines[0].allowance_charges[0].is_charge);
+        assert_eq!(
+            doc.lines[0].allowance_charges[0].reason.as_deref(),
+            Some("Line discount")
+        );
+
+        let out = doc.to_value().unwrap();
+        assert_eq!(out["lines"][0]["allowance_charges"][0]["amount"], json!("5.00"));
     }
 
     #[test]

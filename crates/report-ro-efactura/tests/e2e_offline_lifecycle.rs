@@ -98,6 +98,7 @@ fn romanian_invoice() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "S".to_owned(),
@@ -178,6 +179,7 @@ fn romanian_credit_note() -> CommercialDocument {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         // Romanian standard VAT rate is 19% (Codul fiscal, Legea 227/2015, art. 291).
         tax_summary: vec![TaxCategorySummary {
@@ -248,6 +250,7 @@ fn romanian_multiline_mixed_rate_invoice() -> CommercialDocument {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
             DocumentLine {
                 id: "2".to_owned(),
@@ -259,6 +262,7 @@ fn romanian_multiline_mixed_rate_invoice() -> CommercialDocument {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
         ],
         // Two EN 16931 category-`S` subtotals at distinct rates: 19% and 9%.
@@ -339,6 +343,7 @@ fn romanian_reverse_charge_invoice() -> CommercialDocument {
             tax_category: Some("AE".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
             category_code: "AE".to_owned(),

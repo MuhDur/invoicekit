@@ -793,6 +793,7 @@ mod tests {
                 tax_category: Some("S".to_owned()),
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             }],
             // Greek standard VAT rate is 24% -> myDATA vatCategory 1.
             tax_summary: vec![TaxCategorySummary {
@@ -1317,6 +1318,7 @@ mod tests {
                 tax_category: None,
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
             DocumentLine {
                 id: "2".to_owned(),
@@ -1328,6 +1330,7 @@ mod tests {
                 tax_category: None,
                 classifications: Vec::new(),
                 extensions: Vec::new(),
+                allowance_charges: Vec::new(),
             },
         ];
         doc.tax_summary = Vec::new();
@@ -1353,6 +1356,7 @@ mod tests {
             tax_category: Some("S".to_owned()),
             classifications: Vec::new(),
             extensions: Vec::new(),
+            allowance_charges: Vec::new(),
         }];
         // band_base non-zero so the pro-rate branch runs; tax_amount * line_net
         // = MAX * MAX overflows well before the division by band_base.
