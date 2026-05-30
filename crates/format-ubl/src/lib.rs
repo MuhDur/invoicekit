@@ -1344,6 +1344,7 @@ fn write_document_parties(xml: &mut String, document: &CommercialDocument) -> Re
     write_preserved_top_level(xml, document, "cac:SellerSupplierParty")?;
     write_preserved_top_level(xml, document, "cac:TaxRepresentativeParty")?;
     write_preserved_top_level(xml, document, "cac:Delivery")?;
+    write_native_delivery(xml, document);
     write_preserved_top_level(xml, document, "cac:DeliveryTerms")?;
     Ok(())
 }
@@ -1409,6 +1410,7 @@ fn write_invoice_preserved_before_supplier(
         "cac:Signature",
     ] {
         write_preserved_top_level(xml, document, element)?;
+        write_native_invoice_period(xml, document, element);
         write_native_document_references(xml, document, element);
     }
     Ok(())
@@ -1432,6 +1434,7 @@ fn write_credit_note_preserved_before_supplier(
         "cac:Signature",
     ] {
         write_preserved_top_level(xml, document, element)?;
+        write_native_invoice_period(xml, document, element);
         write_native_document_references(xml, document, element);
     }
     Ok(())
@@ -1489,6 +1492,47 @@ fn write_native_document_references(
             }
         }
         _ => {}
+    }
+}
+
+/// Emit the EN 16931 BG-14 invoice period (BT-73 start / BT-74 end) from the
+/// native IR at the `cac:InvoicePeriod` document slot.
+///
+/// Bracketed into the document-header preserved-replay loop alongside
+/// [`write_native_document_references`], so it shares the same preserve-vs-native
+/// invariant: the parser preserves any input `cac:InvoicePeriod` as raw XML and
+/// never populates [`CommercialDocument::invoice_period`], so a parsed document
+/// replays the preserved fragment (IR field `None`, no native emit) and a fresh
+/// IR document emits here only. No double-emit.
+fn write_native_invoice_period(xml: &mut String, document: &CommercialDocument, slot_element: &str) {
+    if slot_element != "cac:InvoicePeriod" {
+        return;
+    }
+    if let Some(period) = &document.invoice_period {
+        xml.push_str("<cac:InvoicePeriod>");
+        if let Some(start) = &period.start_date {
+            write_text_element(xml, "cbc:StartDate", start.as_str());
+        }
+        if let Some(end) = &period.end_date {
+            write_text_element(xml, "cbc:EndDate", end.as_str());
+        }
+        xml.push_str("</cac:InvoicePeriod>");
+    }
+}
+
+/// Emit the EN 16931 BT-72 actual delivery date from the native IR at the
+/// `cac:Delivery` document slot.
+///
+/// Same preserve-vs-native split as [`write_native_invoice_period`]: the parser
+/// preserves any input `cac:Delivery` as raw XML and never populates
+/// [`CommercialDocument::delivery_date`], so a parsed document replays the
+/// preserved fragment and a fresh IR document emits a minimal `cac:Delivery`
+/// carrying only the delivery date. No double-emit.
+fn write_native_delivery(xml: &mut String, document: &CommercialDocument) {
+    if let Some(date) = &document.delivery_date {
+        xml.push_str("<cac:Delivery>");
+        write_text_element(xml, "cbc:ActualDeliveryDate", date.as_str());
+        xml.push_str("</cac:Delivery>");
     }
 }
 
@@ -2738,6 +2782,175 @@ mod tests {
         assert!(
             schema_report.is_valid(),
             "expected preserved-reference replay to be schema valid, findings: {:?}",
+            schema_report.findings
+        );
+    }
+
+    /// Gating test: a fresh `CommercialDocument` carrying a BG-14 invoice period
+    /// (BT-73 start / BT-74 end) and a BT-72 delivery date emits
+    /// `cac:InvoicePeriod` (before the supplier party) and `cac:Delivery`
+    /// (after the parties, before the monetary total) in UBL Invoice child
+    /// order, with canonical/idempotent, schema-valid output.
+    #[test]
+    fn fresh_document_emits_invoice_period_and_delivery_date() {
+        use invoicekit_ir::InvoicePeriod;
+
+        let mut document = fixture(DocumentType::Invoice, 52);
+        document.invoice_period = Some(InvoicePeriod {
+            start_date: Some(DateOnly::new("2026-05-01").unwrap()),
+            end_date: Some(DateOnly::new("2026-05-31").unwrap()),
+        });
+        document.delivery_date = Some(DateOnly::new("2026-05-28").unwrap());
+
+        let xml = to_xml(&document).unwrap();
+
+        // BG-14: one cac:InvoicePeriod carrying start (BT-73) and end (BT-74).
+        assert!(
+            xml.contains(">2026-05-01</cbc:StartDate>"),
+            "expected the BG-14 period start in cbc:StartDate:\n{xml}"
+        );
+        assert!(
+            xml.contains(">2026-05-31</cbc:EndDate>"),
+            "expected the BG-14 period end in cbc:EndDate:\n{xml}"
+        );
+        assert_eq!(
+            xml.matches("<cac:InvoicePeriod").count(),
+            1,
+            "exactly one cac:InvoicePeriod:\n{xml}"
+        );
+
+        // BT-72: cac:Delivery/cbc:ActualDeliveryDate.
+        assert!(
+            xml.contains(">2026-05-28</cbc:ActualDeliveryDate>"),
+            "expected the BT-72 delivery date in cbc:ActualDeliveryDate:\n{xml}"
+        );
+        // The canonicalizer pins an inline xmlns:cac on each top-level cac
+        // element, so the open tag is `<cac:Delivery ` (trailing space also
+        // excludes `<cac:DeliveryTerms`).
+        assert_eq!(
+            xml.matches("<cac:Delivery ").count(),
+            1,
+            "exactly one cac:Delivery:\n{xml}"
+        );
+
+        // Placement in UBL Invoice child order: currency header < InvoicePeriod
+        // < supplier party < Delivery < LegalMonetaryTotal.
+        let currency_pos = xml
+            .find("<cbc:DocumentCurrencyCode")
+            .expect("currency present");
+        let period_pos = xml.find("<cac:InvoicePeriod").expect("InvoicePeriod present");
+        let supplier_pos = xml
+            .find("<cac:AccountingSupplierParty")
+            .expect("supplier present");
+        let delivery_pos = xml.find("<cac:Delivery ").expect("Delivery present");
+        let total_pos = xml
+            .find("<cac:LegalMonetaryTotal")
+            .expect("monetary total present");
+        assert!(
+            currency_pos < period_pos
+                && period_pos < supplier_pos
+                && supplier_pos < delivery_pos
+                && delivery_pos < total_pos,
+            "BG-14 period and BT-72 delivery must sit in UBL Invoice child order:\n{xml}"
+        );
+
+        // Canonical idempotence + schema validity.
+        assert_eq!(canonicalize_xml(&xml).unwrap(), xml);
+        let schema_report = validate_oasis_ubl_2_1_schema(&xml).unwrap();
+        assert!(
+            schema_report.is_valid(),
+            "expected period/delivery output to be schema valid, findings: {:?}",
+            schema_report.findings
+        );
+    }
+
+    /// Behavior preservation: a fixture with no BG-14 period and no BT-72
+    /// delivery date (every existing fixture/golden) emits neither
+    /// `cac:InvoicePeriod` nor a native `cac:Delivery`, so the bytes match the
+    /// prior serializer output.
+    #[test]
+    fn absent_invoice_period_and_delivery_emit_nothing() {
+        let document = fixture(DocumentType::Invoice, 62);
+        assert!(document.invoice_period.is_none());
+        assert!(document.delivery_date.is_none());
+        let xml = to_xml(&document).unwrap();
+        assert!(
+            !xml.contains("<cac:InvoicePeriod"),
+            "a None invoice_period must emit no cac:InvoicePeriod:\n{xml}"
+        );
+        assert!(
+            !xml.contains("<cac:Delivery"),
+            "a None delivery_date must emit no cac:Delivery:\n{xml}"
+        );
+    }
+
+    /// Gating test: a document that carried `cac:InvoicePeriod` and
+    /// `cac:Delivery` through parse keeps them as preserved raw XML with
+    /// `invoice_period` / `delivery_date` still `None`, so re-emitting replays
+    /// each EXACTLY ONCE — the native-emit path stays inert for parsed
+    /// documents. No double-emit.
+    #[test]
+    fn parsed_invoice_period_and_delivery_replay_exactly_once_no_double_emit() {
+        let document = fixture(DocumentType::Invoice, 53);
+
+        let invoice_period = format!(
+            r#"<cac:InvoicePeriod xmlns:cac="{UBL_CAC_NAMESPACE_URI}" xmlns:cbc="{UBL_CBC_NAMESPACE_URI}"><cbc:StartDate>2026-01-01</cbc:StartDate><cbc:EndDate>2026-01-31</cbc:EndDate></cac:InvoicePeriod>"#
+        );
+        let delivery = format!(
+            r#"<cac:Delivery xmlns:cac="{UBL_CAC_NAMESPACE_URI}" xmlns:cbc="{UBL_CBC_NAMESPACE_URI}"><cbc:ActualDeliveryDate>2026-01-15</cbc:ActualDeliveryDate></cac:Delivery>"#
+        );
+        // InvoicePeriod sits before the supplier party; Delivery sits after the
+        // customer party. Inject each near its UBL slot; the preserve replay
+        // re-orders to canonical child order on re-emit.
+        let xml = to_xml(&document)
+            .unwrap()
+            .replacen(
+                "<cac:AccountingSupplierParty",
+                &format!("{invoice_period}<cac:AccountingSupplierParty"),
+                1,
+            )
+            .replacen(
+                "</cac:AccountingCustomerParty>",
+                &format!("</cac:AccountingCustomerParty>{delivery}"),
+                1,
+            );
+
+        let parsed = parse_document(&xml);
+
+        // The parser does NOT populate invoice_period / delivery_date from the
+        // preserved elements; they live only as preserved raw XML.
+        assert!(
+            parsed.invoice_period.is_none(),
+            "parser must not populate invoice_period from a preserved cac:InvoicePeriod"
+        );
+        assert!(
+            parsed.delivery_date.is_none(),
+            "parser must not populate delivery_date from a preserved cac:Delivery"
+        );
+
+        // Re-serialize: each element appears EXACTLY ONCE (preserved replay,
+        // not native + preserved double-emit).
+        let serialized = to_xml(&parsed).unwrap();
+        assert_eq!(
+            serialized.matches("<cac:InvoicePeriod").count(),
+            1,
+            "preserved cac:InvoicePeriod must re-emit exactly once:\n{serialized}"
+        );
+        assert_eq!(
+            serialized.matches("<cac:Delivery ").count(),
+            1,
+            "preserved cac:Delivery must re-emit exactly once:\n{serialized}"
+        );
+        assert!(serialized.contains(">2026-01-01</cbc:StartDate>"));
+        assert!(serialized.contains(">2026-01-15</cbc:ActualDeliveryDate>"));
+
+        // Full round-trip stability + canonical output.
+        assert_eq!(parse_document(&serialized), parsed);
+        assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
+        let schema_report = validate_oasis_ubl_2_1_schema(&serialized).unwrap();
+        assert!(
+            schema_report.is_valid(),
+            "expected preserved period/delivery replay to be schema valid, findings: {:?}",
             schema_report.findings
         );
     }
