@@ -158,13 +158,13 @@ Roughly sixty jurisdictions are covered in two ways. The ~35 countries that use 
 
 ## FAQ
 
-**Is this production-ready?** Not yet. It is pre-release and unversioned. The engine works and is tested, but treat it as a moving target until the first tag.
+**Is this production-ready?** It is `v0.1.1` — the first complete tagged release, with a green test suite, CI, a veraPDF-cleared PDF/A-3 gate, and EN 16931 findings checked against the live KoSIT and Peppol reference validators. APIs may still move before `1.0`, and maturity varies by capability: the deterministic engine, format serialization, validation, and PDF/A-3 rendering are solid, while cryptographic signing, real RFC 3161 timestamping, and package-registry distribution are still maturing. Run `invoicekit capabilities` for the per-capability answer.
 
 **Do I have to use Java?** Not for the engine, the bindings, or the WebAssembly build. The reference validators run as an isolated JVM worker you call over JSON-RPC, so Java stays out of your application process.
 
 **How is money handled?** As fixed-scale decimals through the `invoicekit-money` crate. There is no floating-point arithmetic for monetary values anywhere in the stack.
 
-**Why a signed evidence bundle for everything?** Because the value of an invoicing toolkit in a mandatory-e-invoicing world is proof. Every operation emits a `.ikb` bundle with the canonical data, the generated artifacts, the validation trace, signatures, and an RFC 3161 timestamp, and `invoicekit verify` checks it without running any shell scripts.
+**Why a signed evidence bundle for everything?** Because the value of an invoicing toolkit in a mandatory-e-invoicing world is proof. Every operation emits a `.ikb` bundle with the canonical data, the generated artifacts, the validation trace, a BLAKE3 integrity ledger over every artefact, a manifest signature, and an RFC 3161 timestamp, and `invoicekit verify` checks it without running any shell scripts. The artefact-integrity hashing is production-grade today; signing and timestamping sit behind stable, pluggable traits, but the default software signer emits a keyed-MAC placeholder and the default timestamp is a mock — real RSA/ECDSA/HSM signing and a real RFC 3161 TSA are a planned track for regulated deployments, not the current default.
 
 **Does it interoperate with `invopop/gobl`?** Yes. We read and write its JSON schema rather than reinventing it.
 
