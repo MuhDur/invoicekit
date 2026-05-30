@@ -1718,6 +1718,12 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
     if !billing_period_preserved {
         write_billing_specified_period(&mut xml, document)?;
     }
+    // BG-20/21: native document-level allowances/charges at their schema slot
+    // (SpecifiedTradeAllowanceCharge, after BillingSpecifiedPeriod and before
+    // SpecifiedTradePaymentTerms). 0..n + lossiness-ledger-preserved on parse,
+    // so a preserved fragment (flushed by the SpecifiedTradePaymentTerms replay
+    // below) and native entries legitimately coexist — emitted unconditionally.
+    write_cii_allowance_charges(&mut xml, document);
     write_preserved_xml_before(
         &mut xml,
         document,
@@ -2724,6 +2730,54 @@ fn write_billing_specified_period(
     Ok(())
 }
 
+/// Emit EN 16931 document-level allowances (BG-20) and charges (BG-21) from the
+/// native IR as `ram:SpecifiedTradeAllowanceCharge` elements, in CII
+/// `TradeAllowanceChargeType` child order (`ChargeIndicator`,
+/// `CalculationPercent`, `BasisAmount`, `ActualAmount`, `ReasonCode`, `Reason`,
+/// `CategoryTradeTax`). Element names verified against the vendored CII D16B
+/// element catalog.
+///
+/// `ram:SpecifiedTradeAllowanceCharge` is `0..n` and `lossiness_ledger_preserved`
+/// on parse, so a preserved fragment (flushed by the `SpecifiedTradePaymentTerms`
+/// replay) and native entries legitimately coexist — emitted unconditionally,
+/// not gated (the repeatable analogue of UBL `cac:AllowanceCharge`).
+fn write_cii_allowance_charges(xml: &mut String, document: &CommercialDocument) {
+    for allowance_charge in &document.allowance_charges {
+        xml.push_str("<ram:SpecifiedTradeAllowanceCharge><ram:ChargeIndicator><udt:Indicator>");
+        xml.push_str(if allowance_charge.is_charge {
+            "true"
+        } else {
+            "false"
+        });
+        xml.push_str("</udt:Indicator></ram:ChargeIndicator>");
+        if let Some(percentage) = &allowance_charge.percentage {
+            write_text_element(xml, "ram:CalculationPercent", &percentage.inner().to_string());
+        }
+        if let Some(base) = &allowance_charge.base_amount {
+            write_amount_text_element(xml, "ram:BasisAmount", base.inner());
+        }
+        write_amount_text_element(xml, "ram:ActualAmount", allowance_charge.amount.inner());
+        if let Some(code) = &allowance_charge.reason_code {
+            write_text_element(xml, "ram:ReasonCode", code);
+        }
+        if let Some(reason) = &allowance_charge.reason {
+            write_text_element(xml, "ram:Reason", reason);
+        }
+        // CategoryTradeTax (a TradeTaxType): TypeCode, CategoryCode,
+        // RateApplicablePercent. Emitted only when a category code is present.
+        if let Some(category) = &allowance_charge.tax_category {
+            xml.push_str("<ram:CategoryTradeTax>");
+            write_text_element(xml, "ram:TypeCode", "VAT");
+            write_text_element(xml, "ram:CategoryCode", category);
+            if let Some(rate) = &allowance_charge.tax_rate {
+                write_text_element(xml, "ram:RateApplicablePercent", &rate.inner().to_string());
+            }
+            xml.push_str("</ram:CategoryTradeTax>");
+        }
+        xml.push_str("</ram:SpecifiedTradeAllowanceCharge>");
+    }
+}
+
 fn write_note(
     xml: &mut String,
     note: &LocalizedString,
@@ -3037,6 +3091,12 @@ fn expected_cii_namespace(parent_stack: &[String], name: &str) -> &'static str {
         } else {
             CII_UDT_NAMESPACE_URI
         }
+    } else if name == "Indicator" {
+        // `udt:Indicator` is the content of a `udt:IndicatorType` element such as
+        // `ram:ChargeIndicator` (the allowance-vs-charge flag on a
+        // `ram:SpecifiedTradeAllowanceCharge`). Without this the parser rejects
+        // its own valid allowance/charge output.
+        CII_UDT_NAMESPACE_URI
     } else {
         CII_RAM_NAMESPACE_URI
     }
@@ -5148,6 +5208,96 @@ mod tests {
         assert!(out.contains("format=\"102\">20260501</udt:DateTimeString>"));
         assert!(!out.contains("20990909"), "native override must not appear:\n{out}");
         assert_eq!(canonicalize_xml(&out).unwrap(), out);
+    }
+
+    #[test]
+    fn allowance_charges_emit_specified_trade_allowance_charge_in_schema_order() {
+        use invoicekit_ir::DocumentAllowanceCharge;
+
+        let mut document = fixture(DocumentType::Invoice, 74);
+        document.allowance_charges = vec![
+            DocumentAllowanceCharge {
+                is_charge: false,
+                amount: DecimalValue::new(Decimal::new(1000, 2)),
+                base_amount: Some(DecimalValue::new(Decimal::new(10000, 2))),
+                percentage: Some(DecimalValue::new(Decimal::new(1000, 2))),
+                tax_category: Some("S".to_owned()),
+                tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+                reason: Some("Loyalty & volume discount".to_owned()),
+                reason_code: Some("95".to_owned()),
+            },
+            DocumentAllowanceCharge {
+                is_charge: true,
+                amount: DecimalValue::new(Decimal::new(500, 2)),
+                base_amount: None,
+                percentage: None,
+                tax_category: None,
+                tax_rate: None,
+                reason: Some("Freight".to_owned()),
+                reason_code: None,
+            },
+        ];
+
+        let serialized = to_xml(&document).unwrap();
+
+        // GATING: canonical idempotence.
+        assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
+
+        // Two SpecifiedTradeAllowanceCharge, allowance (false) then charge (true).
+        assert_eq!(
+            serialized
+                .matches("<ram:SpecifiedTradeAllowanceCharge>")
+                .count(),
+            2,
+            "expected two ram:SpecifiedTradeAllowanceCharge:\n{serialized}"
+        );
+        // ChargeIndicator carries a udt:Indicator (canonicalizer pins xmlns:udt
+        // on it, so match the content + close).
+        assert!(serialized.contains(">false</udt:Indicator></ram:ChargeIndicator>"));
+        assert!(serialized.contains(">true</udt:Indicator></ram:ChargeIndicator>"));
+        // BT-92 amount, BT-93 base, BT-94 percentage, BT-97 reason (escaped), BT-98 code.
+        assert!(serialized.contains("<ram:ActualAmount>10.00</ram:ActualAmount>"));
+        assert!(serialized.contains("<ram:ActualAmount>5.00</ram:ActualAmount>"));
+        assert!(serialized.contains("<ram:BasisAmount>100.00</ram:BasisAmount>"));
+        assert!(serialized.contains("<ram:CalculationPercent>10.00</ram:CalculationPercent>"));
+        assert!(
+            serialized.contains("<ram:Reason>Loyalty &amp; volume discount</ram:Reason>"),
+            "BT-97 reason must be XML-escaped:\n{serialized}"
+        );
+        assert!(serialized.contains("<ram:ReasonCode>95</ram:ReasonCode>"));
+        assert!(serialized.contains("<ram:CategoryTradeTax>"));
+
+        // Placement: ApplicableTradeTax < SpecifiedTradeAllowanceCharge <
+        // SpecifiedTradePaymentTerms.
+        let tax = serialized.find("<ram:ApplicableTradeTax>").unwrap();
+        let allowance = serialized
+            .find("<ram:SpecifiedTradeAllowanceCharge>")
+            .unwrap();
+        let terms = serialized
+            .find("<ram:SpecifiedTradePaymentTerms>")
+            .unwrap();
+        assert!(
+            tax < allowance && allowance < terms,
+            "SpecifiedTradeAllowanceCharge must sit after ApplicableTradeTax and before payment terms:\n{serialized}"
+        );
+
+        // serialize -> PARSE -> serialize byte-stable: the parser preserves the
+        // elements as raw XML (allowance_charges stays empty) and the preserved
+        // replay re-emits them exactly.
+        let parsed = parse_document(&serialized);
+        assert!(parsed.allowance_charges.is_empty());
+        assert_eq!(to_xml(&parsed).unwrap(), serialized);
+    }
+
+    #[test]
+    fn absent_allowance_charges_emit_no_specified_trade_allowance_charge() {
+        let document = fixture(DocumentType::Invoice, 75);
+        assert!(document.allowance_charges.is_empty());
+        let serialized = to_xml(&document).unwrap();
+        assert!(
+            !serialized.contains("<ram:SpecifiedTradeAllowanceCharge>"),
+            "an empty allowance_charges must emit no ram:SpecifiedTradeAllowanceCharge:\n{serialized}"
+        );
     }
 
     #[test]
