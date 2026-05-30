@@ -461,6 +461,7 @@ mod tests {
                 unit_price: DecimalValue::new(unit),
                 line_extension_amount: DecimalValue::new(unit),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: vec![JurisdictionExtension::new(
                     "urn:invoicekit:ext:factur-x:line-allowance",
                     json!({"reason": "loyalty"}),

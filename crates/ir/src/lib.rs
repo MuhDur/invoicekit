@@ -573,6 +573,35 @@ impl JurisdictionExtension {
     }
 }
 
+/// Commodity or service classification of a line item.
+///
+/// Models EN 16931 BT-158 *Item classification identifier* together with its
+/// scheme identifier (BT-158-1) and optional scheme version (BT-158-2). The
+/// `scheme_id` is an open list (e.g. UNTDID 7143 codes such as `HS`/`SRV`, or a
+/// national scheme name like `HSN`, `SAC`, `NCM`, `ClaveProdServ`, `UNSPSC`),
+/// mirroring the open `scheme` on [`PartyTaxId`]. A line may carry several
+/// classifications, so consumers select the scheme they need (a UBL/CII
+/// serializer emits all of them; a national report picks its own scheme).
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct ItemClassification {
+    /// Classification code value (EN 16931 BT-158).
+    pub code: String,
+    /// Scheme/list identifier the code belongs to (EN 16931 BT-158-1 `listID`).
+    pub scheme_id: String,
+    /// Optional scheme version (EN 16931 BT-158-2 `listVersionID`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheme_version: Option<String>,
+}
+
+impl ItemClassification {
+    fn validate(&self) -> Result<(), IrError> {
+        validate_non_empty(&self.code, "lines.classifications.code")?;
+        // EN 16931 BR-65: when a classification code is present its scheme
+        // identifier is mandatory.
+        validate_non_empty(&self.scheme_id, "lines.classifications.scheme_id")
+    }
+}
+
 /// Document line.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct DocumentLine {
@@ -592,6 +621,10 @@ pub struct DocumentLine {
     /// Optional tax category code.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tax_category: Option<String>,
+    /// Commodity/service classifications (EN 16931 BG-? / BT-158; national
+    /// schemes such as HSN/SAC, NCM, `ClaveProdServ`). Empty when unclassified.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub classifications: Vec<ItemClassification>,
     /// Line-level jurisdiction extensions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extensions: Vec<JurisdictionExtension>,
@@ -601,6 +634,9 @@ impl DocumentLine {
     fn validate(&self) -> Result<(), IrError> {
         validate_non_empty(&self.id, "lines.id")?;
         validate_non_empty(&self.description, "lines.description")?;
+        for classification in &self.classifications {
+            classification.validate()?;
+        }
         for extension in &self.extensions {
             extension.validate()?;
         }
@@ -1553,6 +1589,35 @@ mod tests {
         input["lines"] = json!([]);
         let err = CommercialDocument::try_from_value(input).unwrap_err();
         assert!(matches!(err, IrError::EmptyCollection("lines")));
+    }
+
+    #[test]
+    fn classification_round_trips_and_defaults_to_empty() {
+        // Absent `classifications` deserializes to an empty vec (additive,
+        // backward-compatible); a present one round-trips fully.
+        let baseline = CommercialDocument::try_from_value(synthetic_document_json()).unwrap();
+        assert!(baseline.lines[0].classifications.is_empty());
+
+        let mut input = synthetic_document_json();
+        input["lines"][0]["classifications"] =
+            json!([{ "code": "0901", "scheme_id": "HSN", "scheme_version": "2017" }]);
+        let doc = CommercialDocument::try_from_value(input).unwrap();
+        let classification = &doc.lines[0].classifications[0];
+        assert_eq!(classification.code, "0901");
+        assert_eq!(classification.scheme_id, "HSN");
+        assert_eq!(classification.scheme_version.as_deref(), Some("2017"));
+    }
+
+    #[test]
+    fn classification_without_scheme_id_is_rejected() {
+        // EN 16931 BR-65: a classification code requires a scheme identifier.
+        let mut input = synthetic_document_json();
+        input["lines"][0]["classifications"] = json!([{ "code": "9983", "scheme_id": "" }]);
+        let err = CommercialDocument::try_from_value(input).unwrap_err();
+        assert!(matches!(
+            err,
+            IrError::MissingRequiredField("lines.classifications.scheme_id")
+        ));
     }
 
     #[test]

@@ -95,6 +95,7 @@ fn za_invoice() -> CommercialDocument {
             unit_price: amt(50000),
             line_extension_amount: amt(100_000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // South African standard-rated VAT is 15%.
@@ -278,6 +279,7 @@ fn za_credit_note() -> CommercialDocument {
             unit_price: amt(50000),
             line_extension_amount: amt(50000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // Same 15% standard band as the original invoice, on the credited base.
@@ -338,6 +340,7 @@ fn za_multiline_mixed_rate_invoice() -> CommercialDocument {
                 unit_price: amt(50000),
                 line_extension_amount: amt(100_000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -348,6 +351,7 @@ fn za_multiline_mixed_rate_invoice() -> CommercialDocument {
                 unit_price: amt(40000),
                 line_extension_amount: amt(40000),
                 tax_category: Some("Z".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],
@@ -417,6 +421,7 @@ fn za_zero_rated_export_invoice() -> CommercialDocument {
             unit_price: amt(200_000),
             line_extension_amount: amt(200_000),
             tax_category: Some("Z".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -474,6 +479,7 @@ fn za_exempt_supply_invoice() -> CommercialDocument {
             unit_price: amt(300_000),
             line_extension_amount: amt(300_000),
             tax_category: Some("E".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {

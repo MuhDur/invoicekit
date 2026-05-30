@@ -110,6 +110,7 @@ fn vietnamese_invoice() -> CommercialDocument {
             unit_price: dong(5_000_000),
             line_extension_amount: dong(10_000_000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // Vietnam standard VAT is 10%.
@@ -306,6 +307,7 @@ fn vietnamese_credit_note() -> CommercialDocument {
             unit_price: dong(5_000_000),
             line_extension_amount: dong(5_000_000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // Same 10% standard band as the original, on the reversed base.
@@ -363,6 +365,7 @@ fn vietnamese_multiline_mixed_rate_invoice() -> CommercialDocument {
                 unit_price: dong(5_000_000),
                 line_extension_amount: dong(10_000_000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -373,6 +376,7 @@ fn vietnamese_multiline_mixed_rate_invoice() -> CommercialDocument {
                 unit_price: dong(20_000_000),
                 line_extension_amount: dong(20_000_000),
                 tax_category: Some("AA".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],
@@ -439,6 +443,7 @@ fn vietnamese_export_zero_rated_invoice() -> CommercialDocument {
             // "Z" is the local zero-rated tax category here; the serializer
             // resolves the 0.00 Percent from the matching summary entry.
             tax_category: Some("Z".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {

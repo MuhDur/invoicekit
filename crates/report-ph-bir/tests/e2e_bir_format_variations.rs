@@ -156,6 +156,7 @@ fn zero_rated_sale() -> CommercialDocument {
             unit_price: amt(25_000),
             line_extension_amount: amt(250_000),
             tax_category: Some("Z".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -263,6 +264,7 @@ fn vat_exempt_sale() -> CommercialDocument {
             unit_price: amt(37_500),
             line_extension_amount: amt(150_000),
             tax_category: Some("E".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -359,6 +361,7 @@ fn credit_memo() -> CommercialDocument {
             unit_price: amt(50_000),
             line_extension_amount: amt(50_000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // Standard 12% Philippine VAT on the credited amount.
@@ -472,6 +475,7 @@ fn official_receipt_multiline() -> CommercialDocument {
                 unit_price: amt(80_000),
                 line_extension_amount: amt(80_000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -482,6 +486,7 @@ fn official_receipt_multiline() -> CommercialDocument {
                 unit_price: amt(35_000),
                 line_extension_amount: amt(70_000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],

@@ -669,6 +669,7 @@ mod tests {
                 unit_price: amt(5000),
                 line_extension_amount: amt(10000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             }],
             tax_summary: vec![TaxCategorySummary {
@@ -889,6 +890,7 @@ mod tests {
                 // No tax_category -> line_tax_rate is zero, so the per-line VAT
                 // product stays zero and the overflow lands on the net total.
                 tax_category: None,
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -899,6 +901,7 @@ mod tests {
                 unit_price: huge.clone(),
                 line_extension_amount: huge,
                 tax_category: None,
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ];
@@ -923,6 +926,7 @@ mod tests {
             unit_price: huge.clone(),
             line_extension_amount: huge,
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }];
         // tax_rate of 27 means net * 27 = MAX * 27 overflows before the

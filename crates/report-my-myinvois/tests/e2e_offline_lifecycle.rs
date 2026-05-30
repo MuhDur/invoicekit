@@ -91,6 +91,7 @@ fn malaysian_invoice() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(10000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // Malaysia's standard SST rate is 6%.
@@ -319,6 +320,7 @@ fn malaysian_credit_note() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(5000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // Malaysia's standard service-tax rate is 6%.
@@ -412,6 +414,7 @@ fn malaysian_multiline_invoice() -> CommercialDocument {
         unit_price: amt(unit_minor),
         line_extension_amount: amt(unit_minor * qty),
         tax_category: Some("S".to_owned()),
+        classifications: Vec::new(),
         extensions: Vec::new(),
     };
     CommercialDocument::new(CommercialDocumentParts {
@@ -528,6 +531,7 @@ fn malaysia_tax_exempt_invoice_carries_zero_tax_and_exempt_category() {
             unit_price: amt(20000),
             line_extension_amount: amt(20000),
             tax_category: Some("E".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {

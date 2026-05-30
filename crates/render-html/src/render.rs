@@ -530,6 +530,7 @@ mod tests {
                 unit_price: dv("100.00"),
                 line_extension_amount: dv("200.00"),
                 tax_category: Some("standard".into()),
+                classifications: Vec::new(),
                 extensions: vec![],
             }],
             tax_summary: vec![TaxCategorySummary {

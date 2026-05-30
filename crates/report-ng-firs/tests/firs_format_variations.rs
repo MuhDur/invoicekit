@@ -162,6 +162,7 @@ fn nigerian_credit_note() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(5000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -284,6 +285,7 @@ fn nigerian_mixed_rate_invoice() -> CommercialDocument {
                 unit_price: amt(5000),
                 line_extension_amount: amt(10000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             // Exported service: zero-rated under Nigerian VAT.
@@ -295,6 +297,7 @@ fn nigerian_mixed_rate_invoice() -> CommercialDocument {
                 unit_price: amt(20000),
                 line_extension_amount: amt(20000),
                 tax_category: Some("Z".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],
@@ -408,6 +411,7 @@ fn nigerian_no_tax_invoice(category: &str, number: &str, description: &str) -> C
             unit_price: amt(40000),
             line_extension_amount: amt(40000),
             tax_category: Some(category.to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {

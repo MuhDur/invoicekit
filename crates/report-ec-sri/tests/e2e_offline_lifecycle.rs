@@ -99,6 +99,7 @@ fn ecuadorian_invoice() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(10000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // Ecuadorian standard IVA is 15% (since 2024).
@@ -394,6 +395,7 @@ fn ecuadorian_credit_note() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(5000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -462,6 +464,7 @@ fn ecuadorian_multiline_invoice() -> CommercialDocument {
                 unit_price: amt(5000),
                 line_extension_amount: amt(10000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -472,6 +475,7 @@ fn ecuadorian_multiline_invoice() -> CommercialDocument {
                 unit_price: amt(2500),
                 line_extension_amount: amt(10000),
                 tax_category: Some("Z".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],

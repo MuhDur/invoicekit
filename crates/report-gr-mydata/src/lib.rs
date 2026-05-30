@@ -770,6 +770,7 @@ mod tests {
                 unit_price: amt(5000),
                 line_extension_amount: amt(10000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             }],
             // Greek standard VAT rate is 24% -> myDATA vatCategory 1.
@@ -1110,6 +1111,7 @@ mod tests {
                 // No tax_category -> line_vat short-circuits to zero VAT, so
                 // the overflow lands squarely on the net accumulator.
                 tax_category: None,
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -1120,6 +1122,7 @@ mod tests {
                 unit_price: huge.clone(),
                 line_extension_amount: huge,
                 tax_category: None,
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ];
@@ -1144,6 +1147,7 @@ mod tests {
             unit_price: huge.clone(),
             line_extension_amount: huge.clone(),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }];
         // band_base non-zero so the pro-rate branch runs; tax_amount * line_net

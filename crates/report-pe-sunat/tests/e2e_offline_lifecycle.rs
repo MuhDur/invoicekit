@@ -101,6 +101,7 @@ fn peruvian_invoice() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(10000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // IGV (Impuesto General a las Ventas) at 18%.
@@ -182,6 +183,7 @@ fn pe_single_line(
             unit_price: amt(net_minor),
             line_extension_amount: amt(net_minor),
             tax_category: Some(afectacion.to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -545,6 +547,7 @@ fn pe_multi_line_mixed() -> CommercialDocument {
                 unit_price: amt(10_000),
                 line_extension_amount: amt(10_000),
                 tax_category: Some("10".to_owned()), // Gravado
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -555,6 +558,7 @@ fn pe_multi_line_mixed() -> CommercialDocument {
                 unit_price: amt(5_000),
                 line_extension_amount: amt(5_000),
                 tax_category: Some("20".to_owned()), // Exonerado
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],

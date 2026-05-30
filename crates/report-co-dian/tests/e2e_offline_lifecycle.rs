@@ -96,6 +96,7 @@ fn colombian_invoice() -> CommercialDocument {
             unit_price: amt(10000),
             line_extension_amount: amt(10000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -287,6 +288,7 @@ fn colombian_credit_note() -> CommercialDocument {
             unit_price: amt(10000),
             line_extension_amount: amt(10000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -351,6 +353,7 @@ fn colombian_mixed_tax_invoice() -> CommercialDocument {
                 unit_price: amt(20000),
                 line_extension_amount: amt(20000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             // Exempt line: 50.00 @ 0% (exenta).
@@ -362,6 +365,7 @@ fn colombian_mixed_tax_invoice() -> CommercialDocument {
                 unit_price: amt(5000),
                 line_extension_amount: amt(5000),
                 tax_category: Some("E".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],
@@ -445,6 +449,7 @@ fn colombian_export_invoice() -> CommercialDocument {
             unit_price: amt(50000),
             line_extension_amount: amt(50000),
             tax_category: Some("E".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {

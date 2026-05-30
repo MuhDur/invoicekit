@@ -102,6 +102,7 @@ fn hungarian_invoice() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(10000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -378,6 +379,7 @@ fn hungary_native_invoice_data_multiline_aggregates_summary() {
                 unit_price: amt(5000),
                 line_extension_amount: amt(10000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -388,6 +390,7 @@ fn hungary_native_invoice_data_multiline_aggregates_summary() {
                 unit_price: amt(1000),
                 line_extension_amount: amt(3000),
                 tax_category: Some("R5".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],
@@ -537,6 +540,7 @@ fn hungarian_credit_note() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(10000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -635,6 +639,7 @@ fn hungary_multi_line_mixed_rate_invoice_reports_each_band() {
             unit_price: amt(unit_minor),
             line_extension_amount: amt(ext_minor),
             tax_category: Some(cat.to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }
     };
@@ -746,6 +751,7 @@ fn hungary_domestic_reverse_charge_invoice_carries_no_vat() {
             unit_price: amt(500_000),
             line_extension_amount: amt(500_000),
             tax_category: Some("AE".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -828,6 +834,7 @@ fn hungary_subjective_exemption_invoice_is_zero_rated() {
             unit_price: amt(80000),
             line_extension_amount: amt(80000),
             tax_category: Some("E".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {

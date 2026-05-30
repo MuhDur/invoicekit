@@ -962,6 +962,7 @@ mod inv01_tests {
                 unit_price: amt(500_000),
                 line_extension_amount: amt(1_000_000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             }],
             tax_summary: vec![TaxCategorySummary {
@@ -1245,6 +1246,7 @@ mod inv01_tests {
             unit_price: raw(Decimal::MAX),
             line_extension_amount: raw(Decimal::MAX),
             tax_category: None,
+            classifications: Vec::new(),
             extensions: Vec::new(),
         };
         doc.lines = vec![line.clone(), line];

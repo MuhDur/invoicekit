@@ -94,6 +94,7 @@ fn chinese_invoice() -> CommercialDocument {
             unit_price: amt(50_000),
             line_extension_amount: amt(100_000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // China VAT at 6% on modern services.

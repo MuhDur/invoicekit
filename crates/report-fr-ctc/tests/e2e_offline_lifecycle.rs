@@ -99,6 +99,7 @@ fn french_invoice() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(10000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -311,6 +312,7 @@ fn french_credit_note() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(5000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -370,6 +372,7 @@ fn french_multiline_invoice() -> CommercialDocument {
                 unit_price: amt(5000),
                 line_extension_amount: amt(10000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -380,6 +383,7 @@ fn french_multiline_invoice() -> CommercialDocument {
                 unit_price: amt(2500),
                 line_extension_amount: amt(10000),
                 tax_category: Some("AA".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],
@@ -448,6 +452,7 @@ fn french_reverse_charge_invoice() -> CommercialDocument {
             unit_price: amt(10000),
             line_extension_amount: amt(10000),
             tax_category: Some("AE".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {

@@ -208,6 +208,7 @@ mod tests {
                 unit_price: DecimalValue::new(unit),
                 line_extension_amount: DecimalValue::new(unit),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             }],
             tax_summary: vec![TaxCategorySummary {

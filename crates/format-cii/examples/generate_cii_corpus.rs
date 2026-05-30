@@ -422,6 +422,7 @@ fn lines(config: &FixtureConfig) -> (Vec<DocumentLine>, Decimal) {
             unit_price: DecimalValue::new(amount),
             line_extension_amount: DecimalValue::new(amount),
             tax_category: Some(config.vat.code.to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         });
     }

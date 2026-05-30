@@ -89,6 +89,7 @@ fn line(id: &str, desc: &str, qty: i64, unit_price: i64, ext: i64, cat: &str) ->
         unit_price: amt(unit_price),
         line_extension_amount: amt(ext),
         tax_category: Some(cat.to_owned()),
+        classifications: Vec::new(),
         extensions: Vec::new(),
     }
 }

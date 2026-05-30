@@ -100,6 +100,7 @@ fn korean_invoice() -> CommercialDocument {
             unit_price: won(500_000),
             line_extension_amount: won(1_000_000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -211,6 +212,7 @@ fn korean_exempt_invoice() -> CommercialDocument {
             line_extension_amount: won(800_000),
             // E = exempt from output VAT.
             tax_category: Some("E".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -272,6 +274,7 @@ fn korean_correction_note() -> CommercialDocument {
             unit_price: won(500_000),
             line_extension_amount: won(500_000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -329,6 +332,7 @@ fn korean_multiline_invoice() -> CommercialDocument {
                 unit_price: won(500_000),
                 line_extension_amount: won(1_000_000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -339,6 +343,7 @@ fn korean_multiline_invoice() -> CommercialDocument {
                 unit_price: won(2_000_000),
                 line_extension_amount: won(2_000_000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],

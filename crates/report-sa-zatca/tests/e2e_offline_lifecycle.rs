@@ -95,6 +95,7 @@ fn saudi_invoice() -> CommercialDocument {
             unit_price: amt(50000),
             line_extension_amount: amt(100_000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -316,6 +317,7 @@ fn saudi_credit_note() -> CommercialDocument {
             unit_price: amt(50000),
             line_extension_amount: amt(50000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -390,6 +392,7 @@ fn saudi_zero_rated_export_invoice() -> CommercialDocument {
                 unit_price: amt(2500),
                 line_extension_amount: amt(100_000),
                 tax_category: Some("Z".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -400,6 +403,7 @@ fn saudi_zero_rated_export_invoice() -> CommercialDocument {
                 unit_price: amt(20000),
                 line_extension_amount: amt(20000),
                 tax_category: Some("Z".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],
@@ -461,6 +465,7 @@ fn saudi_exempt_invoice() -> CommercialDocument {
             unit_price: amt(80000),
             line_extension_amount: amt(80000),
             tax_category: Some("E".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {

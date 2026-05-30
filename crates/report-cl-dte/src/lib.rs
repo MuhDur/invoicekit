@@ -824,6 +824,7 @@ mod tests {
                 unit_price: peso(5000),
                 line_extension_amount: peso(10000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             }],
             // IVA (Chilean VAT) is a flat 19%.
@@ -944,6 +945,7 @@ mod tests {
             unit_price: peso(25000),
             line_extension_amount: peso(25000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         });
         let xml = to_dte_xml(&doc, &sample_ctx()).unwrap();

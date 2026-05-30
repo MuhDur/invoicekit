@@ -94,6 +94,7 @@ fn indonesian_invoice() -> CommercialDocument {
             unit_price: amt(5_000_000),
             line_extension_amount: amt(10_000_000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // PPN (VAT) at 11%.
@@ -292,6 +293,7 @@ fn indonesian_multiline_invoice() -> CommercialDocument {
                 unit_price: amt(5_000_000),
                 line_extension_amount: amt(10_000_000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             // Exempt line (e.g. educational/health JKP dibebaskan).
@@ -303,6 +305,7 @@ fn indonesian_multiline_invoice() -> CommercialDocument {
                 unit_price: amt(3_000_000),
                 line_extension_amount: amt(3_000_000),
                 tax_category: Some("E".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],
@@ -377,6 +380,7 @@ fn indonesian_credit_note() -> CommercialDocument {
             unit_price: amt(5_000_000),
             line_extension_amount: amt(5_000_000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {

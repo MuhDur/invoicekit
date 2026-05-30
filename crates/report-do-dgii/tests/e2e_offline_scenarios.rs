@@ -161,6 +161,7 @@ fn dominican_credit_note() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(5000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -269,6 +270,7 @@ fn factura_consumo_type_32_multiline_18pct_itbis() {
             unit_price: amt(2000), // 20.00
             line_extension_amount: amt(6000), // 60.00
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         },
         DocumentLine {
@@ -279,6 +281,7 @@ fn factura_consumo_type_32_multiline_18pct_itbis() {
             unit_price: amt(1500), // 15.00
             line_extension_amount: amt(3000), // 30.00
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         },
         DocumentLine {
@@ -289,6 +292,7 @@ fn factura_consumo_type_32_multiline_18pct_itbis() {
             unit_price: amt(1000), // 10.00
             line_extension_amount: amt(1000), // 10.00
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         },
     ];
@@ -404,6 +408,7 @@ fn exportacion_type_46_is_itbis_exempt_zero_rated() {
             unit_price: amt(500),               // 5.00/kg
             line_extension_amount: amt(50000),  // 500.00
             tax_category: Some("E".to_owned()), // exempt / zero-rated
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {

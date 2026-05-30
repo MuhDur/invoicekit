@@ -89,6 +89,7 @@ fn turkish_invoice() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(10000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -285,6 +286,7 @@ fn tr_doc(
             unit_price: amt(base_minor),
             line_extension_amount: amt(base_minor),
             tax_category: Some(category_code.to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {

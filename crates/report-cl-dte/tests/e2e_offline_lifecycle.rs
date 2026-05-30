@@ -119,6 +119,7 @@ fn chilean_invoice() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(10000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // IVA (Chilean VAT) is 19%.
@@ -321,6 +322,7 @@ fn chilean_credit_note() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(5000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // Half the original IVA line is reversed (CLP 50.00 net, 19% IVA).
@@ -386,6 +388,7 @@ fn chilean_exempt_invoice() -> CommercialDocument {
             line_extension_amount: amt(10000),
             // Exempt category, not the standard-rated `S`.
             tax_category: Some("E".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -443,6 +446,7 @@ fn chilean_multiline_invoice() -> CommercialDocument {
                 unit_price: amt(10000),
                 line_extension_amount: amt(10000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -453,6 +457,7 @@ fn chilean_multiline_invoice() -> CommercialDocument {
                 unit_price: amt(25000),
                 line_extension_amount: amt(25000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],

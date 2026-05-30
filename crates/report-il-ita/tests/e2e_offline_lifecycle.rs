@@ -96,6 +96,7 @@ fn israeli_invoice() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(10000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // Israel's standard VAT rate is 17%.
@@ -290,6 +291,7 @@ fn israeli_credit_note() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(5000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // Standard 18% Israeli VAT on the reversed base.
@@ -348,6 +350,7 @@ fn israeli_multiline_invoice() -> CommercialDocument {
                 unit_price: amt(5000),
                 line_extension_amount: amt(20000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -358,6 +361,7 @@ fn israeli_multiline_invoice() -> CommercialDocument {
                 unit_price: amt(5000),
                 line_extension_amount: amt(5000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],
@@ -419,6 +423,7 @@ fn israeli_zero_rated_export() -> CommercialDocument {
             unit_price: amt(80000),
             line_extension_amount: amt(80000),
             tax_category: Some("Z".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {

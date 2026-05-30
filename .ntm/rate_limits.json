@@ -1,0 +1,66 @@
+{
+  "state": {
+    "anthropic": {
+      "current_delay": 600000000000,
+      "consecutive_success": 1,
+      "last_rate_limit": "2026-05-27T09:49:49.456861171Z",
+      "cooldown_until": "2026-05-27T09:59:49.456861171Z",
+      "total_rate_limits": 10,
+      "total_successes": 10
+    }
+  },
+  "history": {
+    "anthropic": [
+      {
+        "time": "2026-05-26T13:06:49.473897188Z",
+        "provider": "anthropic",
+        "action": "send"
+      },
+      {
+        "time": "2026-05-26T13:13:09.4642398Z",
+        "provider": "anthropic",
+        "action": "send"
+      },
+      {
+        "time": "2026-05-26T14:29:49.456750271Z",
+        "provider": "anthropic",
+        "action": "send"
+      },
+      {
+        "time": "2026-05-27T06:20:19.479231631Z",
+        "provider": "anthropic",
+        "action": "send"
+      },
+      {
+        "time": "2026-05-27T09:23:49.475019128Z",
+        "provider": "anthropic",
+        "action": "send"
+      },
+      {
+        "time": "2026-05-27T09:26:49.465707221Z",
+        "provider": "anthropic",
+        "action": "send"
+      },
+      {
+        "time": "2026-05-27T09:28:49.465824796Z",
+        "provider": "anthropic",
+        "action": "send"
+      },
+      {
+        "time": "2026-05-27T09:29:49.459320447Z",
+        "provider": "anthropic",
+        "action": "send"
+      },
+      {
+        "time": "2026-05-27T09:31:49.469087954Z",
+        "provider": "anthropic",
+        "action": "send"
+      },
+      {
+        "time": "2026-05-27T09:49:49.456861171Z",
+        "provider": "anthropic",
+        "action": "send"
+      }
+    ]
+  }
+}

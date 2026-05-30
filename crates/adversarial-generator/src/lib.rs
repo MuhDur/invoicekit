@@ -331,6 +331,7 @@ fn one_line(
         unit_price: DecimalValue::new(unit_price),
         line_extension_amount: DecimalValue::new(line_amount),
         tax_category: tax_category.map(str::to_owned),
+        classifications: Vec::new(),
         extensions: Vec::new(),
     }
 }

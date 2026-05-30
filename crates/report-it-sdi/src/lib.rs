@@ -622,6 +622,7 @@ mod tests {
                 unit_price: amt(5000),
                 line_extension_amount: amt(10000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             }],
             tax_summary: vec![TaxCategorySummary {

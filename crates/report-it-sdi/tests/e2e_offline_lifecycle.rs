@@ -93,6 +93,7 @@ fn italian_invoice() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(10000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -151,6 +152,7 @@ fn italian_credit_note() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(5000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -210,6 +212,7 @@ fn italian_multiline_mixed_rate_invoice() -> CommercialDocument {
                 unit_price: amt(5000),
                 line_extension_amount: amt(10000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -220,6 +223,7 @@ fn italian_multiline_mixed_rate_invoice() -> CommercialDocument {
                 unit_price: amt(20000),
                 line_extension_amount: amt(20000),
                 tax_category: Some("R".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],
@@ -289,6 +293,7 @@ fn italian_reverse_charge_invoice() -> CommercialDocument {
             // "AC" stands for the local reverse-charge tax category here; the
             // serializer resolves AliquotaIVA from the matching summary entry.
             tax_category: Some("AC".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {

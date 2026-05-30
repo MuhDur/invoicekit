@@ -90,6 +90,7 @@ fn mexican_invoice() -> CommercialDocument {
             unit_price: amt(50000),
             line_extension_amount: amt(100_000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -279,6 +280,7 @@ fn mexican_credit_note() -> CommercialDocument {
             unit_price: amt(20000),
             line_extension_amount: amt(20000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -345,6 +347,7 @@ fn mexican_border_region_invoice() -> CommercialDocument {
                 unit_price: amt(100_000),
                 line_extension_amount: amt(100_000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             // Line 2: border-region 8% IVA. tax_category "AA" (reduced rate).
@@ -356,6 +359,7 @@ fn mexican_border_region_invoice() -> CommercialDocument {
                 unit_price: amt(50000),
                 line_extension_amount: amt(50000),
                 tax_category: Some("AA".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],
@@ -429,6 +433,7 @@ fn mexican_zero_rate_publico_general() -> CommercialDocument {
             unit_price: amt(10000),
             line_extension_amount: amt(100_000),
             tax_category: Some("Z".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {

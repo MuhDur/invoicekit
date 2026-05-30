@@ -91,6 +91,7 @@ fn indian_invoice() -> CommercialDocument {
             unit_price: amt(500_000),            // 5000.00
             line_extension_amount: amt(1_000_000), // 10000.00
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -369,6 +370,7 @@ fn india_native_inv01_intra_state_splits_cgst_sgst() {
             unit_price: amt(1_000_000),
             line_extension_amount: amt(1_000_000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -463,6 +465,7 @@ fn igst_line(id: &str, description: &str, minor_each: i64, qty: i64) -> Document
         unit_price: amt(minor_each),
         line_extension_amount: amt(total),
         tax_category: Some("S".to_owned()),
+        classifications: Vec::new(),
         extensions: Vec::new(),
     }
 }
@@ -505,6 +508,7 @@ fn indian_credit_note() -> CommercialDocument {
             unit_price: amt(200_000),            // 2000.00
             line_extension_amount: amt(200_000), // 2000.00
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -645,6 +649,7 @@ fn indian_export_lut_invoice() -> CommercialDocument {
             line_extension_amount: amt(5_000_000), // 50000.00
             // Zero-rated: tax category Z.
             tax_category: Some("Z".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -840,6 +845,7 @@ fn india_intra_state_reverse_charge_invoice_registers() {
             unit_price: amt(1_000_000),            // 10000.00
             line_extension_amount: amt(1_000_000), // 10000.00
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {

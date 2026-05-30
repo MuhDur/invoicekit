@@ -179,6 +179,7 @@ pub enum CiiError {
 /// #             unit_price: amount.clone(),
 /// #             line_extension_amount: amount.clone(),
 /// #             tax_category: Some("S".to_owned()),
+/// #             classifications: Vec::new(),
 /// #             extensions: Vec::new(),
 /// #         }],
 /// #         tax_summary: vec![TaxCategorySummary {
@@ -1187,6 +1188,7 @@ impl LineBuilder {
                 "ram:SpecifiedTradeSettlementLineMonetarySummation/ram:LineTotalAmount",
             ))?,
             tax_category: self.tax_category,
+            classifications: Vec::new(),
             extensions: Vec::new(),
         })
     }
@@ -4723,6 +4725,7 @@ mod tests {
                 unit_price: amount.clone(),
                 line_extension_amount: amount.clone(),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             }],
             tax_summary: vec![TaxCategorySummary {

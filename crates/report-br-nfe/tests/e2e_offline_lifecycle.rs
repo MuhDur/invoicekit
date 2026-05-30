@@ -91,6 +91,7 @@ fn brazil_invoice() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(10000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -332,6 +333,7 @@ fn line(id: &str, description: &str, qty: i64, unit_minor: i64, total_minor: i64
         unit_price: amt(unit_minor),
         line_extension_amount: amt(total_minor),
         tax_category: Some("S".to_owned()),
+        classifications: Vec::new(),
         extensions: Vec::new(),
     }
 }

@@ -98,6 +98,7 @@ fn spanish_invoice() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(10000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -361,6 +362,7 @@ fn corrective_credit_note(original_number: &str) -> CommercialDocument {
             unit_price: amt(2000),
             line_extension_amount: amt(2000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -465,6 +467,7 @@ fn multi_rate_invoice() -> CommercialDocument {
         unit_price: amt(base),
         line_extension_amount: amt(base),
         tax_category: Some(cat.to_owned()),
+        classifications: Vec::new(),
         extensions: Vec::new(),
     };
     CommercialDocument::new(CommercialDocumentParts {

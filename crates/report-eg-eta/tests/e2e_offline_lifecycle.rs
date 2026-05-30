@@ -137,6 +137,7 @@ fn egyptian_invoice() -> CommercialDocument {
             unit_price: amt(50_000),
             line_extension_amount: amt(100_000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -333,6 +334,7 @@ fn egyptian_multiline_invoice() -> CommercialDocument {
                 unit_price: amt(20_000),
                 line_extension_amount: amt(200_000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -343,6 +345,7 @@ fn egyptian_multiline_invoice() -> CommercialDocument {
                 unit_price: amt(60_000),
                 line_extension_amount: amt(300_000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],
@@ -401,6 +404,7 @@ fn egyptian_credit_note(original_uuid: &str) -> CommercialDocument {
             unit_price: amt(50_000),
             line_extension_amount: amt(50_000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -460,6 +464,7 @@ fn egyptian_exempt_invoice() -> CommercialDocument {
             unit_price: amt(25_000),
             line_extension_amount: amt(100_000),
             tax_category: Some("E".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -529,6 +534,7 @@ fn egyptian_export_invoice() -> CommercialDocument {
             unit_price: amt(1_000),
             line_extension_amount: amt(100_000),
             tax_category: Some("Z".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // Zero-rated export: tax base recorded, output tax zero.

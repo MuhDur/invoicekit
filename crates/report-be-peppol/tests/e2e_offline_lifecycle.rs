@@ -92,6 +92,7 @@ fn belgian_invoice() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(10000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -328,6 +329,7 @@ fn belgian_credit_note() -> CommercialDocument {
             unit_price: amt(10000),
             line_extension_amount: amt(10000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -390,6 +392,7 @@ fn belgian_multi_rate_invoice() -> CommercialDocument {
                 unit_price: amt(5000),
                 line_extension_amount: amt(10000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -402,6 +405,7 @@ fn belgian_multi_rate_invoice() -> CommercialDocument {
                 // Reduced-rate lines map to UNCL5305 category "S" with a 6% rate;
                 // the typed BePeppolVatCategory::Reduced6 carries the Belgian verdict.
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],

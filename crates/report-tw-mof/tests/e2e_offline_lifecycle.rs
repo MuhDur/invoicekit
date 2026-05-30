@@ -96,6 +96,7 @@ fn taiwanese_invoice() -> CommercialDocument {
             unit_price: amt(50_000),
             line_extension_amount: amt(100_000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // Taiwan's standard business tax (營業稅) is 5%.
@@ -264,6 +265,7 @@ fn taiwanese_allowance() -> CommercialDocument {
             unit_price: amt(50_000),
             line_extension_amount: amt(50_000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // 5% business tax credited back on the allowed base.
@@ -324,6 +326,7 @@ fn taiwanese_mixed_standard_and_zero_rated_invoice() -> CommercialDocument {
                 unit_price: amt(50_000),
                 line_extension_amount: amt(100_000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -334,6 +337,7 @@ fn taiwanese_mixed_standard_and_zero_rated_invoice() -> CommercialDocument {
                 unit_price: amt(200_000),
                 line_extension_amount: amt(200_000),
                 tax_category: Some("Z".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],

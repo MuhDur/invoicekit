@@ -91,6 +91,7 @@ fn kenyan_invoice() -> CommercialDocument {
             unit_price: amt(500_000),
             line_extension_amount: amt(1_000_000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -293,6 +294,7 @@ fn kenyan_invoice_with_tax(
             unit_price: amt(net_minor),
             line_extension_amount: amt(net_minor),
             tax_category: Some(category_code.to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -451,6 +453,7 @@ fn kenya_mixed_b_and_a_lines_sum_only_taxable_vat() {
                 unit_price: amt(net_b),
                 line_extension_amount: amt(net_b),
                 tax_category: Some("B".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             DocumentLine {
@@ -461,6 +464,7 @@ fn kenya_mixed_b_and_a_lines_sum_only_taxable_vat() {
                 unit_price: amt(net_a),
                 line_extension_amount: amt(net_a),
                 tax_category: Some("A".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],
@@ -565,6 +569,7 @@ fn kenya_credit_note_references_original_cu_invoice_and_clears() {
             unit_price: amt(9_000_000),
             line_extension_amount: amt(9_000_000),
             tax_category: Some("B".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {

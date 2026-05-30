@@ -113,6 +113,7 @@ fn greek_invoice() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(10000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         // Greek standard VAT rate is 24%.
@@ -333,6 +334,7 @@ fn greek_credit_note() -> CommercialDocument {
             unit_price: amt(5000),
             line_extension_amount: amt(5000),
             tax_category: Some("S".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
@@ -456,6 +458,7 @@ fn greek_multiline_invoice() -> CommercialDocument {
                 unit_price: amt(10000),
                 line_extension_amount: amt(10000),
                 tax_category: Some("S".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
             // Line 2: reduced-rate item, 13% (e.g. certain foodstuffs/services).
@@ -467,6 +470,7 @@ fn greek_multiline_invoice() -> CommercialDocument {
                 unit_price: amt(2500),
                 line_extension_amount: amt(5000),
                 tax_category: Some("AA".to_owned()),
+                classifications: Vec::new(),
                 extensions: Vec::new(),
             },
         ],
@@ -587,6 +591,7 @@ fn greek_exempt_invoice() -> CommercialDocument {
             unit_price: amt(20000),
             line_extension_amount: amt(20000),
             tax_category: Some("E".to_owned()),
+            classifications: Vec::new(),
             extensions: Vec::new(),
         }],
         tax_summary: vec![TaxCategorySummary {
