@@ -135,6 +135,7 @@ const CFDI_VERSION: &str = "4.0";
 /// with no `TipoDeComprobante` mapping, [`CfdiSerializeError::MissingEmisorRfc`]
 /// when the supplier has no RFC, and [`CfdiSerializeError::BadContext`] when the
 /// context is malformed.
+#[allow(clippy::too_many_lines)] // cohesive CFDI serializer; length is inherent to the format
 pub fn to_cfdi_xml(
     document: &CommercialDocument,
     context: &CfdiContext,

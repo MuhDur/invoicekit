@@ -95,6 +95,7 @@ pub enum InvoiceDataError {
 /// Returns [`InvoiceDataError::UnsupportedDocumentType`] for document types with
 /// no `invoiceCategory` mapping, and [`InvoiceDataError::MissingSupplierTaxId`]
 /// when the supplier has no Hungarian tax id.
+#[allow(clippy::too_many_lines)] // cohesive NAV InvoiceData serializer; length is inherent to the format
 pub fn to_invoice_data_xml(document: &CommercialDocument) -> Result<String, InvoiceDataError> {
     let invoice_category = invoice_category(document.document_type)?;
     let supplier_tax =

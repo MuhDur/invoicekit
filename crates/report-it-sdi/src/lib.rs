@@ -101,6 +101,7 @@ pub enum FatturaPaError {
 /// no `TipoDocumento` mapping, [`FatturaPaError::MissingSupplierTaxId`] when the
 /// supplier has no fiscal identifier, and [`FatturaPaError::BadContext`] when
 /// the transmission context is malformed.
+#[allow(clippy::too_many_lines)] // cohesive FatturaPA serializer; length is inherent to the format
 pub fn to_fattura_pa_xml(
     document: &CommercialDocument,
     context: &FatturaPaContext,

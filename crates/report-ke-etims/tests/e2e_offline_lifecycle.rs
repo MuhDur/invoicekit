@@ -606,6 +606,7 @@ fn kenya_mixed_b_and_a_lines_sum_only_taxable_vat() {
 /// UBL constraint exercised: a UBL `CreditNote` MUST NOT carry a top-level
 /// `DueDate`, so `due_date` is `None` (else the serializer rejects it).
 #[test]
+#[allow(clippy::too_many_lines)] // multi-line fixture; length is inherent to the scenario
 fn kenya_credit_note_references_original_cu_invoice_and_clears() {
     // First, the original sale clears and yields a CU Invoice Number.
     let provider = MockEtimsProvider::default();

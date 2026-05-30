@@ -404,6 +404,7 @@ fn factura_consumo_type_32_multiline_18pct_itbis() {
 /// Authority ref: Norma General 06-2018 catálogo type 46 (Exportaciones);
 /// ITBIS exemption for exports under the Código Tributario / Ley 32-23 regime.
 #[test]
+#[allow(clippy::too_many_lines)] // multi-line fixture; length is inherent to the scenario
 fn exportacion_type_46_is_itbis_exempt_zero_rated() {
     let doc = CommercialDocument::new(CommercialDocumentParts {
         schema_version: SchemaVersion::default(),
