@@ -1372,10 +1372,12 @@ fn write_document_settlement(
     if document.document_type == DocumentType::Invoice {
         write_preserved_top_level(xml, document, "cac:PrepaidPayment")?;
         write_preserved_top_level(xml, document, "cac:AllowanceCharge")?;
+        write_native_allowance_charges(xml, document, currency);
         write_preserved_exchange_rates(xml, document)?;
     } else {
         write_preserved_exchange_rates(xml, document)?;
         write_preserved_top_level(xml, document, "cac:AllowanceCharge")?;
+        write_native_allowance_charges(xml, document, currency);
     }
     if !document.tax_summary.is_empty() {
         write_tax_total(xml, &document.tax_summary, currency)?;
@@ -1383,6 +1385,66 @@ fn write_document_settlement(
     write_preserved_top_level(xml, document, "cac:WithholdingTaxTotal")?;
     write_monetary_total(xml, &document.monetary_total, currency);
     Ok(())
+}
+
+/// Emit EN 16931 document-level allowances (BG-20) and charges (BG-21) from the
+/// native IR as `cac:AllowanceCharge` elements, in UBL `AllowanceChargeType`
+/// child order (`cbc:ChargeIndicator`, `cbc:AllowanceChargeReasonCode`,
+/// `cbc:AllowanceChargeReason`, `cbc:MultiplierFactorNumeric`, `cbc:Amount`,
+/// `cbc:BaseAmount`, `cac:TaxCategory`).
+///
+/// `cac:AllowanceCharge` is `0..n` and lossiness-ledger-preserved on parse, so
+/// the parser keeps any input fragments as raw XML (the IR `allowance_charges`
+/// stays empty) while a fresh IR document emits natively here. Because the
+/// element is repeatable, a preserved fragment and native entries legitimately
+/// coexist — so (unlike the 0..1 InvoicePeriod/Delivery/OrderReference) this is
+/// emitted unconditionally after the preserved replay, not gated.
+fn write_native_allowance_charges(
+    xml: &mut String,
+    document: &CommercialDocument,
+    currency: &str,
+) {
+    for allowance_charge in &document.allowance_charges {
+        xml.push_str("<cac:AllowanceCharge>");
+        write_text_element(
+            xml,
+            "cbc:ChargeIndicator",
+            if allowance_charge.is_charge {
+                "true"
+            } else {
+                "false"
+            },
+        );
+        if let Some(code) = &allowance_charge.reason_code {
+            write_text_element(xml, "cbc:AllowanceChargeReasonCode", code);
+        }
+        if let Some(reason) = &allowance_charge.reason {
+            write_text_element(xml, "cbc:AllowanceChargeReason", reason);
+        }
+        if let Some(percentage) = &allowance_charge.percentage {
+            write_text_element(
+                xml,
+                "cbc:MultiplierFactorNumeric",
+                &percentage.inner().to_string(),
+            );
+        }
+        write_amount_element(xml, "cbc:Amount", allowance_charge.amount.inner(), currency);
+        if let Some(base) = &allowance_charge.base_amount {
+            write_amount_element(xml, "cbc:BaseAmount", base.inner(), currency);
+        }
+        // cac:TaxCategory requires a cbc:ID, so emit it only when the category
+        // code is present (a bare rate without a category is not schema-valid).
+        if let Some(category) = &allowance_charge.tax_category {
+            xml.push_str("<cac:TaxCategory>");
+            write_text_element(xml, "cbc:ID", category);
+            if let Some(rate) = &allowance_charge.tax_rate {
+                write_text_element(xml, "cbc:Percent", &rate.inner().to_string());
+            }
+            write_tax_scheme(xml);
+            xml.push_str("</cac:TaxCategory>");
+        }
+        xml.push_str("</cac:AllowanceCharge>");
+    }
 }
 
 fn write_invoicekit_metadata_extension(xml: &mut String, meta: &DocumentMeta) {
@@ -3093,6 +3155,141 @@ mod tests {
         assert!(out.contains(">2026-01-01</cbc:StartDate>"));
         assert!(out.contains(">2026-01-15</cbc:ActualDeliveryDate>"));
         assert!(!out.contains("2099-09-09"), "native override must not appear:\n{out}");
+        assert_eq!(canonicalize_xml(&out).unwrap(), out);
+    }
+
+    /// Gating test: a fresh `CommercialDocument` carrying a BG-20 allowance and
+    /// a BG-21 charge emits `cac:AllowanceCharge` elements in UBL child order,
+    /// after the parties and before the monetary total, with canonical/
+    /// idempotent, schema-valid output. Reason text carries an XML entity to
+    /// exercise escaping.
+    #[test]
+    fn fresh_document_emits_allowance_charges() {
+        use invoicekit_ir::DocumentAllowanceCharge;
+
+        let mut document = fixture(DocumentType::Invoice, 56);
+        document.allowance_charges = vec![
+            DocumentAllowanceCharge {
+                is_charge: false,
+                amount: DecimalValue::new(Decimal::new(1000, 2)),
+                base_amount: Some(DecimalValue::new(Decimal::new(10000, 2))),
+                percentage: Some(DecimalValue::new(Decimal::new(1000, 2))),
+                tax_category: Some("S".to_owned()),
+                tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+                reason: Some("Loyalty & volume discount".to_owned()),
+                reason_code: Some("95".to_owned()),
+            },
+            DocumentAllowanceCharge {
+                is_charge: true,
+                amount: DecimalValue::new(Decimal::new(500, 2)),
+                base_amount: None,
+                percentage: None,
+                tax_category: Some("S".to_owned()),
+                tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+                reason: Some("Freight".to_owned()),
+                reason_code: None,
+            },
+        ];
+
+        let xml = to_xml(&document).unwrap();
+
+        // Two cac:AllowanceCharge elements, allowance (false) then charge (true).
+        // The canonicalizer pins an inline xmlns:cac on each top-level
+        // cac:AllowanceCharge, so match the open-tag prefix with a trailing space.
+        assert_eq!(
+            xml.matches("<cac:AllowanceCharge ").count(),
+            2,
+            "expected two cac:AllowanceCharge elements:\n{xml}"
+        );
+        assert!(xml.contains(">false</cbc:ChargeIndicator>"));
+        assert!(xml.contains(">true</cbc:ChargeIndicator>"));
+        // BT-92 amount, BT-93 base, BT-94 percentage, BT-97 reason (escaped), BT-98 code.
+        assert!(xml.contains(">10.00</cbc:Amount>"));
+        assert!(xml.contains(">5.00</cbc:Amount>"));
+        assert!(xml.contains(">100.00</cbc:BaseAmount>"));
+        assert!(xml.contains(">10.00</cbc:MultiplierFactorNumeric>"));
+        assert!(
+            xml.contains(">Loyalty &amp; volume discount</cbc:AllowanceChargeReason>"),
+            "BT-97 reason must be XML-escaped:\n{xml}"
+        );
+        assert!(xml.contains(">95</cbc:AllowanceChargeReasonCode>"));
+        // BT-95 category in cac:TaxCategory.
+        assert!(xml.contains("<cac:TaxCategory>"));
+
+        // Placement: after the parties, before the monetary total.
+        let supplier_pos = xml
+            .find("<cac:AccountingSupplierParty")
+            .expect("supplier present");
+        let ac_pos = xml.find("<cac:AllowanceCharge ").expect("allowance present");
+        let total_pos = xml
+            .find("<cac:LegalMonetaryTotal")
+            .expect("monetary total present");
+        assert!(
+            supplier_pos < ac_pos && ac_pos < total_pos,
+            "cac:AllowanceCharge must sit after the parties and before the total:\n{xml}"
+        );
+
+        assert_eq!(canonicalize_xml(&xml).unwrap(), xml);
+        let schema_report = validate_oasis_ubl_2_1_schema(&xml).unwrap();
+        assert!(
+            schema_report.is_valid(),
+            "expected allowance/charge output to be schema valid, findings: {:?}",
+            schema_report.findings
+        );
+    }
+
+    #[test]
+    fn absent_allowance_charges_emit_nothing() {
+        let document = fixture(DocumentType::Invoice, 63);
+        assert!(document.allowance_charges.is_empty());
+        let xml = to_xml(&document).unwrap();
+        assert!(
+            !xml.contains("<cac:AllowanceCharge"),
+            "an empty allowance_charges must emit no cac:AllowanceCharge:\n{xml}"
+        );
+    }
+
+    /// Gating test: BG-20/21 is 0..n, so a parse-then-enrich document carrying
+    /// BOTH a preserved cac:AllowanceCharge AND caller-set native ones emits all
+    /// of them (preserved + native coexist) — NOT suppressed (unlike the 0..1
+    /// elements). Schema-valid because the element is repeatable.
+    #[test]
+    fn preserved_and_native_allowance_charges_coexist() {
+        use invoicekit_ir::DocumentAllowanceCharge;
+
+        let base = fixture(DocumentType::Invoice, 57);
+        let preserved = format!(
+            r#"<cac:AllowanceCharge xmlns:cac="{UBL_CAC_NAMESPACE_URI}" xmlns:cbc="{UBL_CBC_NAMESPACE_URI}"><cbc:ChargeIndicator>true</cbc:ChargeIndicator><cbc:Amount currencyID="EUR">7.00</cbc:Amount></cac:AllowanceCharge>"#
+        );
+        // Document-level cac:AllowanceCharge sits before cac:TaxTotal/LegalMonetaryTotal.
+        let seeded = to_xml(&base).unwrap().replacen(
+            "<cac:LegalMonetaryTotal",
+            &format!("{preserved}<cac:LegalMonetaryTotal"),
+            1,
+        );
+        let mut parsed = parse_document(&seeded);
+        assert!(parsed.allowance_charges.is_empty());
+
+        parsed.allowance_charges = vec![DocumentAllowanceCharge {
+            is_charge: false,
+            amount: DecimalValue::new(Decimal::new(300, 2)),
+            base_amount: None,
+            percentage: None,
+            tax_category: None,
+            tax_rate: None,
+            reason: Some("Native discount".to_owned()),
+            reason_code: None,
+        }];
+
+        let out = to_xml(&parsed).unwrap();
+        // Both the preserved (7.00) and the native (3.00) survive — 0..n.
+        assert_eq!(
+            out.matches("<cac:AllowanceCharge ").count(),
+            2,
+            "preserved + native allowance charges must coexist (0..n):\n{out}"
+        );
+        assert!(out.contains(">7.00</cbc:Amount>"));
+        assert!(out.contains(">3.00</cbc:Amount>"));
         assert_eq!(canonicalize_xml(&out).unwrap(), out);
     }
 
