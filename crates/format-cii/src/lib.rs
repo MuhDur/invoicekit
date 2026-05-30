@@ -15,7 +15,8 @@ use std::str::FromStr as _;
 use invoicekit_canonical::{canonicalize_xml, XmlCanonicalizeError};
 use invoicekit_ir::{
     Attachment, CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly,
-    DecimalValue, DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference,
+    DecimalValue, DocumentAllowanceCharge, DocumentId, DocumentLine, DocumentMeta, DocumentNumber,
+    DocumentReference,
     DocumentType, IrError, Iso4217Code, ItemClassification, JurisdictionExtension, LocalizedString,
     LossinessLedger, MonetaryTotal, MoneyAmount, Party, PartyTaxId, PaymentInstruction,
     PaymentInstructionKind, PaymentTerms, PostalAddress, Quantity, ReferenceKindClass,
@@ -2496,6 +2497,7 @@ fn write_monetary_total(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)] // cohesive line serializer; length is inherent
 fn write_line(
     xml: &mut String,
     line: &DocumentLine,
@@ -2576,6 +2578,25 @@ fn write_line(
         write_text_element(xml, "ram:CategoryCode", category);
         xml.push_str("</ram:ApplicableTradeTax>");
     }
+    // EN 16931 BG-27/BG-28 line allowances/charges: ram:SpecifiedTradeAllowanceCharge
+    // sits after ram:ApplicableTradeTax and before the line monetary summation in
+    // CII LineTradeSettlementType child order. 0..n; empty when the line carries
+    // none (behavior-preserving).
+    for allowance_charge in &line.allowance_charges {
+        write_cii_allowance_charge(xml, allowance_charge);
+    }
+    // Flush any PRESERVED line-settlement children ordered before the monetary
+    // summation (notably a preserved SpecifiedTradeAllowanceCharge, which is
+    // mid-order and would otherwise be dropped by the trailing after_all). The
+    // window (ApplicableTradeTax, MonetarySummation) is disjoint from the
+    // after_all window (> MonetarySummation), so no double-flush.
+    write_preserved_xml_before(
+        xml,
+        document,
+        &format!("{line_path}/SpecifiedLineTradeSettlement"),
+        Some(&line.id),
+        "SpecifiedTradeSettlementLineMonetarySummation",
+    )?;
     xml.push_str("<ram:SpecifiedTradeSettlementLineMonetarySummation>");
     write_amount_text_element(
         xml,
@@ -2764,39 +2785,46 @@ fn write_billing_specified_period(
 /// not gated (the repeatable analogue of UBL `cac:AllowanceCharge`).
 fn write_cii_allowance_charges(xml: &mut String, document: &CommercialDocument) {
     for allowance_charge in &document.allowance_charges {
-        xml.push_str("<ram:SpecifiedTradeAllowanceCharge><ram:ChargeIndicator><udt:Indicator>");
-        xml.push_str(if allowance_charge.is_charge {
-            "true"
-        } else {
-            "false"
-        });
-        xml.push_str("</udt:Indicator></ram:ChargeIndicator>");
-        if let Some(percentage) = &allowance_charge.percentage {
-            write_text_element(xml, "ram:CalculationPercent", &percentage.inner().to_string());
-        }
-        if let Some(base) = &allowance_charge.base_amount {
-            write_amount_text_element(xml, "ram:BasisAmount", base.inner());
-        }
-        write_amount_text_element(xml, "ram:ActualAmount", allowance_charge.amount.inner());
-        if let Some(code) = &allowance_charge.reason_code {
-            write_text_element(xml, "ram:ReasonCode", code);
-        }
-        if let Some(reason) = &allowance_charge.reason {
-            write_text_element(xml, "ram:Reason", reason);
-        }
-        // CategoryTradeTax (a TradeTaxType): TypeCode, CategoryCode,
-        // RateApplicablePercent. Emitted only when a category code is present.
-        if let Some(category) = &allowance_charge.tax_category {
-            xml.push_str("<ram:CategoryTradeTax>");
-            write_text_element(xml, "ram:TypeCode", "VAT");
-            write_text_element(xml, "ram:CategoryCode", category);
-            if let Some(rate) = &allowance_charge.tax_rate {
-                write_text_element(xml, "ram:RateApplicablePercent", &rate.inner().to_string());
-            }
-            xml.push_str("</ram:CategoryTradeTax>");
-        }
-        xml.push_str("</ram:SpecifiedTradeAllowanceCharge>");
+        write_cii_allowance_charge(xml, allowance_charge);
     }
+}
+
+/// Emit a single `ram:SpecifiedTradeAllowanceCharge` in CII
+/// `TradeAllowanceChargeType` child order. Shared by the document-level group
+/// (BG-20/21) and the line-level group (BG-27/28) — identical structure.
+fn write_cii_allowance_charge(xml: &mut String, allowance_charge: &DocumentAllowanceCharge) {
+    xml.push_str("<ram:SpecifiedTradeAllowanceCharge><ram:ChargeIndicator><udt:Indicator>");
+    xml.push_str(if allowance_charge.is_charge {
+        "true"
+    } else {
+        "false"
+    });
+    xml.push_str("</udt:Indicator></ram:ChargeIndicator>");
+    if let Some(percentage) = &allowance_charge.percentage {
+        write_text_element(xml, "ram:CalculationPercent", &percentage.inner().to_string());
+    }
+    if let Some(base) = &allowance_charge.base_amount {
+        write_amount_text_element(xml, "ram:BasisAmount", base.inner());
+    }
+    write_amount_text_element(xml, "ram:ActualAmount", allowance_charge.amount.inner());
+    if let Some(code) = &allowance_charge.reason_code {
+        write_text_element(xml, "ram:ReasonCode", code);
+    }
+    if let Some(reason) = &allowance_charge.reason {
+        write_text_element(xml, "ram:Reason", reason);
+    }
+    // CategoryTradeTax (a TradeTaxType): TypeCode, CategoryCode,
+    // RateApplicablePercent. Emitted only when a category code is present.
+    if let Some(category) = &allowance_charge.tax_category {
+        xml.push_str("<ram:CategoryTradeTax>");
+        write_text_element(xml, "ram:TypeCode", "VAT");
+        write_text_element(xml, "ram:CategoryCode", category);
+        if let Some(rate) = &allowance_charge.tax_rate {
+            write_text_element(xml, "ram:RateApplicablePercent", &rate.inner().to_string());
+        }
+        xml.push_str("</ram:CategoryTradeTax>");
+    }
+    xml.push_str("</ram:SpecifiedTradeAllowanceCharge>");
 }
 
 fn write_note(
@@ -5369,6 +5397,60 @@ mod tests {
         // Output is canonical, and round-trips byte-stably.
         assert_eq!(canonicalize_xml(&out).unwrap(), out);
         assert_eq!(to_xml(&parse_document(&out)).unwrap(), out);
+    }
+
+    /// Gating test: a BG-27/BG-28 line allowance/charge emits a
+    /// `ram:SpecifiedTradeAllowanceCharge` inside `ram:SpecifiedLineTradeSettlement`,
+    /// after `ram:ApplicableTradeTax` and before the line monetary summation, with
+    /// canonical/idempotent output.
+    #[test]
+    fn line_allowance_charges_emit_in_line_settlement() {
+        use invoicekit_ir::DocumentAllowanceCharge;
+
+        let mut document = fixture(DocumentType::Invoice, 77);
+        document.lines[0].allowance_charges = vec![DocumentAllowanceCharge {
+            is_charge: false,
+            amount: DecimalValue::new(Decimal::new(250, 2)),
+            base_amount: None,
+            percentage: None,
+            tax_category: None,
+            tax_rate: None,
+            reason: Some("Line discount".to_owned()),
+            reason_code: Some("95".to_owned()),
+        }];
+
+        let serialized = to_xml(&document).unwrap();
+        assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
+
+        // Exactly one line allowance, carrying the amount + reason.
+        assert_eq!(
+            serialized
+                .matches("<ram:SpecifiedTradeAllowanceCharge>")
+                .count(),
+            1
+        );
+        assert!(serialized.contains("<ram:ActualAmount>2.50</ram:ActualAmount>"));
+        assert!(serialized.contains("<ram:Reason>Line discount</ram:Reason>"));
+
+        // Placement inside the line settlement: ApplicableTradeTax (line) <
+        // SpecifiedTradeAllowanceCharge < SpecifiedTradeSettlementLineMonetarySummation.
+        let settlement = serialized
+            .find("<ram:SpecifiedLineTradeSettlement>")
+            .expect("line settlement present");
+        let block = &serialized[settlement..];
+        let tax = block.find("<ram:ApplicableTradeTax>").unwrap();
+        let allowance = block.find("<ram:SpecifiedTradeAllowanceCharge>").unwrap();
+        let summation = block
+            .find("<ram:SpecifiedTradeSettlementLineMonetarySummation>")
+            .unwrap();
+        assert!(
+            tax < allowance && allowance < summation,
+            "line allowance must sit after ApplicableTradeTax and before the line summation:\n{serialized}"
+        );
+
+        // serialize -> parse -> serialize byte-stable (parser preserves; line
+        // allowance_charges resets to empty, replayed via preserved raw XML).
+        assert_eq!(to_xml(&parse_document(&serialized)).unwrap(), serialized);
     }
 
     #[test]
