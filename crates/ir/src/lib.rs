@@ -707,6 +707,35 @@ impl Attachment {
     }
 }
 
+/// Semantic class of a [`DocumentReference`].
+///
+/// Maps the open-vocabulary `kind` string onto the EN 16931 reference business
+/// terms so a serializer can route each reference to the right element without
+/// re-deriving the mapping.
+///
+/// The `kind` field is deliberately open (national producers use diverse
+/// strings); [`DocumentReference::kind_class`] folds it onto this closed set,
+/// and an unrecognized kind classifies as [`ReferenceKindClass::Other`] — a
+/// serializer should not emit a typed reference element for those.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReferenceKindClass {
+    /// Purchase/sales order reference (EN 16931 BT-13 / BT-14;
+    /// UBL `cac:OrderReference`, CII `BuyerOrderReferencedDocument`).
+    Order,
+    /// Preceding-invoice reference (EN 16931 BG-3 / BT-25; the original invoice
+    /// a credit note, debit note, or correction refers to;
+    /// UBL `cac:BillingReference`, CII `InvoiceReferencedDocument`).
+    PrecedingInvoice,
+    /// Contract reference (EN 16931 BT-12; UBL `cac:ContractDocumentReference`).
+    Contract,
+    /// Despatch-advice reference (EN 16931 BT-16; UBL `cac:DespatchDocumentReference`).
+    DespatchAdvice,
+    /// Receiving-advice reference (EN 16931 BT-15; UBL `cac:ReceiptDocumentReference`).
+    ReceivingAdvice,
+    /// A reference whose `kind` does not map to a known EN 16931 reference term.
+    Other,
+}
+
 /// Reference to another commercial document.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct DocumentReference {
@@ -727,6 +756,47 @@ impl DocumentReference {
             date.validate()?;
         }
         Ok(())
+    }
+
+    /// Classify the open-vocabulary [`Self::kind`] onto an EN 16931 reference
+    /// business term. Matching is case-insensitive and tolerant of `-`/`_`/space
+    /// punctuation variants seen across national producers. An unrecognized kind
+    /// returns [`ReferenceKindClass::Other`] (do not emit a typed element for it).
+    #[must_use]
+    pub fn kind_class(&self) -> ReferenceKindClass {
+        let normalized = self
+            .kind
+            .to_ascii_lowercase()
+            .replace(['_', ' '], "-");
+        let k = normalized.as_str();
+        // Preceding invoice: the original document a credit/debit note or
+        // correction points back to. Covers the diverse national vocabulary
+        // (e.g. "original-invoice", "credit-note-original-invoice",
+        // "rectified-invoice", "corrected-ecf", "cfdi-relacion-01", "factura").
+        if k.contains("preceding")
+            || k.contains("original")
+            || k.contains("rectified")
+            || k.contains("corrected")
+            || k.contains("credit-note")
+            || k.contains("relacion")
+            || k == "invoice"
+            || k == "factura"
+        {
+            return ReferenceKindClass::PrecedingInvoice;
+        }
+        if k.contains("order") || k == "po" {
+            return ReferenceKindClass::Order;
+        }
+        if k.contains("contract") {
+            return ReferenceKindClass::Contract;
+        }
+        if k.contains("despatch") || k.contains("dispatch") {
+            return ReferenceKindClass::DespatchAdvice;
+        }
+        if k.contains("receipt") || k.contains("receiv") {
+            return ReferenceKindClass::ReceivingAdvice;
+        }
+        ReferenceKindClass::Other
     }
 }
 
@@ -1502,8 +1572,9 @@ fn is_leap_year(year: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        crate_name, CommercialDocument, CommercialDocumentParts, DateOnly, DocumentId, IrError,
-        JurisdictionExtension, LossinessEntry, LossinessLedger, ProfileIdentifier, ProfileView,
+        crate_name, CommercialDocument, CommercialDocumentParts, DateOnly, DocumentId,
+        DocumentReference, IrError, JurisdictionExtension, LossinessEntry, LossinessLedger,
+        ProfileIdentifier, ProfileView, ReferenceKindClass,
     };
     use serde_json::{json, Value};
 
@@ -1606,6 +1677,44 @@ mod tests {
         assert_eq!(classification.code, "0901");
         assert_eq!(classification.scheme_id, "HSN");
         assert_eq!(classification.scheme_version.as_deref(), Some("2017"));
+    }
+
+    #[test]
+    fn reference_kind_class_maps_the_national_vocabulary() {
+        let preceding = |k: &str| DocumentReference {
+            kind: k.to_owned(),
+            id: "X".to_owned(),
+            issue_date: None,
+        }
+        .kind_class();
+        // Every kind string currently produced across the report crates is a
+        // preceding-invoice / correction reference.
+        for k in [
+            "rectified-invoice",
+            "original-invoice",
+            "original-cu-invoice",
+            "invoice",
+            "factura",
+            "eta-original-uuid",
+            "credit-note-original-invoice",
+            "credit-note-original",
+            "credit-note-of",
+            "corrected-ecf",
+            "cfdi-relacion-01",
+        ] {
+            assert_eq!(
+                preceding(k),
+                ReferenceKindClass::PrecedingInvoice,
+                "kind {k:?} should classify as PrecedingInvoice"
+            );
+        }
+        assert_eq!(preceding("purchase order"), ReferenceKindClass::Order);
+        assert_eq!(preceding("Order_Ref"), ReferenceKindClass::Order);
+        assert_eq!(preceding("contract"), ReferenceKindClass::Contract);
+        assert_eq!(preceding("despatch-advice"), ReferenceKindClass::DespatchAdvice);
+        assert_eq!(preceding("receipt-advice"), ReferenceKindClass::ReceivingAdvice);
+        // An unrecognized kind must not pretend to be a typed reference.
+        assert_eq!(preceding("something-bespoke"), ReferenceKindClass::Other);
     }
 
     #[test]
