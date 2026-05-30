@@ -1703,6 +1703,10 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
     for summary in &document.tax_summary {
         write_tax_summary(&mut xml, summary, document)?;
     }
+    // BG-14: native invoice period at its schema slot (after ApplicableTradeTax).
+    // A parsed document's preserved BillingSpecifiedPeriod is flushed instead by
+    // the SpecifiedTradePaymentTerms preserve replay below; mutually exclusive.
+    write_billing_specified_period(&mut xml, document)?;
     write_preserved_xml_before(
         &mut xml,
         document,
@@ -2669,6 +2673,42 @@ fn write_invoice_referenced_documents(
         emitted = true;
     }
     Ok(emitted)
+}
+
+/// Emit the EN 16931 BG-14 invoice period (BT-73 start / BT-74 end) as
+/// `ram:BillingSpecifiedPeriod/ram:StartDateTime|ram:EndDateTime` (each a
+/// `udt:DateTimeString format="102"`) under `ram:ApplicableHeaderTradeSettlement`,
+/// from the native IR.
+///
+/// `ram:BillingSpecifiedPeriod` (`ram:SpecifiedPeriodType`, verified against the
+/// vendored CII D16B element catalog) is `lossiness_ledger_preserved` on parse
+/// and never populates [`CommercialDocument::invoice_period`], so a parsed
+/// document replays its preserved fragment (`invoice_period` `None` -> no native
+/// emit) and a fresh IR document emits here only. Emitted textually right after
+/// the `ram:ApplicableTradeTax` loop — its schema slot — so a preserved fragment
+/// for a parsed document is flushed exactly once by the following
+/// `write_preserved_xml_before(.., "SpecifiedTradePaymentTerms")`. No
+/// double-emit: the two cases are mutually exclusive.
+fn write_billing_specified_period(
+    xml: &mut String,
+    document: &CommercialDocument,
+) -> Result<(), CiiError> {
+    let Some(period) = &document.invoice_period else {
+        return Ok(());
+    };
+    xml.push_str("<ram:BillingSpecifiedPeriod>");
+    if let Some(start) = &period.start_date {
+        xml.push_str("<ram:StartDateTime>");
+        write_date_time(xml, start)?;
+        xml.push_str("</ram:StartDateTime>");
+    }
+    if let Some(end) = &period.end_date {
+        xml.push_str("<ram:EndDateTime>");
+        write_date_time(xml, end)?;
+        xml.push_str("</ram:EndDateTime>");
+    }
+    xml.push_str("</ram:BillingSpecifiedPeriod>");
+    Ok(())
 }
 
 fn write_note(
@@ -4985,6 +5025,79 @@ mod tests {
             Some("VATEX-EU-AE")
         );
         assert_eq!(to_xml(&parsed).unwrap(), serialized);
+    }
+
+    #[test]
+    fn invoice_period_emits_billing_specified_period_in_schema_order() {
+        use invoicekit_ir::InvoicePeriod;
+
+        let mut document = fixture(DocumentType::Invoice, 71);
+        document.invoice_period = Some(InvoicePeriod {
+            start_date: Some(DateOnly::new("2026-05-01").unwrap()),
+            end_date: Some(DateOnly::new("2026-05-31").unwrap()),
+        });
+
+        let serialized = to_xml(&document).unwrap();
+
+        // GATING: canonical idempotence — schema order holds, output stable.
+        assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
+
+        // BG-14: ram:BillingSpecifiedPeriod with StartDateTime (BT-73) and
+        // EndDateTime (BT-74), each a udt:DateTimeString format="102". The
+        // canonicalizer pins an inline xmlns:udt on each DateTimeString, so
+        // assert structure + the format="102" date payloads rather than the
+        // raw open tags.
+        assert!(
+            serialized.contains("<ram:BillingSpecifiedPeriod><ram:StartDateTime>"),
+            "BG-14 period must open with StartDateTime:\n{serialized}"
+        );
+        assert!(
+            serialized.contains(
+                r#"format="102">20260501</udt:DateTimeString></ram:StartDateTime><ram:EndDateTime>"#
+            ),
+            "BT-73 start date must serialize as a format=102 DateTimeString:\n{serialized}"
+        );
+        assert!(
+            serialized.contains(
+                r#"format="102">20260531</udt:DateTimeString></ram:EndDateTime></ram:BillingSpecifiedPeriod>"#
+            ),
+            "BT-74 end date must close the BillingSpecifiedPeriod:\n{serialized}"
+        );
+
+        // CII child order within ApplicableHeaderTradeSettlement:
+        // ApplicableTradeTax < BillingSpecifiedPeriod < MonetarySummation.
+        let tax = serialized.find("<ram:ApplicableTradeTax>").unwrap();
+        let period = serialized.find("<ram:BillingSpecifiedPeriod>").unwrap();
+        let summation = serialized
+            .find("<ram:SpecifiedTradeSettlementHeaderMonetarySummation>")
+            .unwrap();
+        assert!(
+            tax < period && period < summation,
+            "BillingSpecifiedPeriod must sit between ApplicableTradeTax and the monetary summation:\n{serialized}"
+        );
+
+        // serialize -> PARSE -> serialize is byte-stable (not just to_xml
+        // idempotence). The parser preserves BillingSpecifiedPeriod as raw XML
+        // (invoice_period stays None), and the preserved replay re-emits it
+        // EXACTLY ONCE — proving no native + preserved double-emit.
+        let parsed = parse_document(&serialized);
+        assert!(
+            parsed.invoice_period.is_none(),
+            "parser preserves BillingSpecifiedPeriod as raw XML, does not populate invoice_period"
+        );
+        assert_eq!(to_xml(&parsed).unwrap(), serialized);
+        assert_eq!(serialized.matches("<ram:BillingSpecifiedPeriod>").count(), 1);
+    }
+
+    #[test]
+    fn absent_invoice_period_emits_no_billing_specified_period() {
+        let document = fixture(DocumentType::Invoice, 72);
+        assert!(document.invoice_period.is_none());
+        let serialized = to_xml(&document).unwrap();
+        assert!(
+            !serialized.contains("<ram:BillingSpecifiedPeriod>"),
+            "a None invoice_period must emit no ram:BillingSpecifiedPeriod:\n{serialized}"
+        );
     }
 
     #[test]
