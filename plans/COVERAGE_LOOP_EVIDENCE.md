@@ -982,3 +982,32 @@ performance** skills and closes the residuals.
 - **Skills used:** `feature-dev` design judgment (first-class vs extension), `testing-real-service-e2e-no-mocks`
   (classified-line assertions + sha256 golden-stability proof), `reality-check-for-project` / D18 (CII reviewer
   caught the real placement bug; reverted rather than shipped), `verification-before-completion`.
+
+### Turn 32 (2026-05-30) — BT-158 round-trip COMPLETE for both EN 16931 syntaxes (commit e2c9c68)
+- Finished the half-done BT-158 story rather than leave partial coverage:
+  - **format-ubl PARSE-side** — the parser now reads `cac:CommodityClassification` into `line.classifications`
+    (code/listID/listVersionID). Mapped-only (a depth-4 element can't be captured as preserved raw XML), so no
+    double-emit; round-trip test asserts the element appears exactly once. UBL BT-158 is now emit+parse complete.
+  - **format-cii — un-deferred and landed CORRECTLY.** The earlier placement bug was overturned by handing the
+    agent the precise interleave spec + the EXACT failing test as a gate: emit `ram:DesignatedProductClassification`
+    bracketed within the `SpecifiedTradeProduct` preserved-XML replay (`write_preserved_xml_before` on
+    `DesignatedProductClassification`), plus parse-side read-back. The gating test builds the mixed case (native
+    classification + preserved lower- AND higher-order siblings) and asserts
+    `canonicalize_xml(to_xml(doc)) == to_xml(doc)` — the canonical-output invariant the naive placement violated.
+    **It passes.** LESSON (reinforces the canonical proptest lesson): a recurring/placement bug becomes tractable
+    once you require the exact failing case as a gating test; the agent must then satisfy it to pass.
+- **Workflow scope artifact (not a defect):** the pipeline ran format-ubl + format-cii concurrently in one tree,
+  so each reviewer saw the other's file dirty (and caught CII mid-write) → both got `scope_ok=false` and the run
+  reported 0/2. The per-property verdicts were all green; central verification (post-run, final state) confirmed
+  everything. Takeaway: when two pipeline items edit sibling files that dev-depend on each other, the cross-tree
+  `scope_ok` check is noisy — trust central verification over the in-flight per-agent scope check.
+- **Verification:** `cargo build --workspace --all-targets` clean; `cargo test --workspace` = **2470 passed / 0
+  failed** (+4 round-trip/idempotence tests over 2466); clippy `-D warnings` clean. Dropped the now-superseded
+  format-cii defer stash.
+- **BT-158 status: COMPLETE** — IR field + validation + round-trip proptest; UBL emit+parse; CII emit+parse
+  (schema-order-correct, canonical-idempotent); IN GST `HsnCd`/`IsServc`, BR `NCM`, MX `ClaveProdServ`. The only
+  open BT-158 item is whether other national crates should surface their classification scheme (low value; most
+  already covered by the format-family UBL/CII path).
+- **Skills used:** `testing-real-service-e2e-no-mocks` (round-trip + canonical-idempotence gating tests),
+  `reality-check-for-project` (read the per-property verdicts past the misleading 0/2), `verification-before-
+  completion` (central verification as source of truth), `git-stash-janitor` (dropped the superseded stash).
