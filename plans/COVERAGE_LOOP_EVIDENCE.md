@@ -1350,3 +1350,15 @@ The ungated EN 16931 **document-level** surface is now comprehensively covered b
 - **PDF/A-3 track.** Honest finding: the `validator-verapdf` SIDECAR cannot build — `org.verapdf:verapdf-library:1.27.1` is not on Maven Central (veraPDF publishes to its own repo; the verapdf pom lacks that repository). The CANONICAL gate (`.github/workflows/pdfa3-verapdf.yml`) doesn't use the sidecar; it installs the veraPDF CLI from software.verapdf.org. Installed veraPDF CLI 1.30.1 locally; render(30 Factur-X PDFs)+validate(3b/3u) pending (CPU-gated behind the fuzz build).
 - **Fuzz** (cargo-fuzz + nightly, ASAN): running 5 targets (ubl_from_xml, ir_try_from_value, canonicalize_xml/json, render_typst_pdf), 60s each, seeded from conformance-corpus/fuzz/. Result pending.
 - Stopped the orphaned pre-compaction CII-disentanglement audit workflow (0-byte output, 46 min stale); the disentanglement remains verified by the full workspace suite + 113 release-check gates + clippy + the live-validator battle-test.
+
+### Turn 57 (2026-05-30) — Phase 4: fuzz CLEAN + PDF/A-3 CONFORMANT (real veraPDF)
+- **Fuzzing (cargo-fuzz 0.13.1, nightly, ASAN) — all 5 targets CLEAN, zero crashes/leaks/OOM/UB:**
+  - `ubl_from_xml` (the XML parser, highest bug-surface): **2,381,552 runs / 121s, no crash**.
+  - `ir_try_from_value`, `canonicalize_xml`, `canonicalize_json`, `render_typst_pdf`: 60s each, no crash.
+  - `fuzz/artifacts` empty; no crash-*/leak-*/oom-* anywhere. (First `ubl_from_xml` attempt hit my 200s wrapper during the one-time instrumented compile — re-ran on the cached build for the full budget. Not a crash: rc 124 = wrapper timeout, no artifact written.)
+- **PDF/A-3 conformance (real veraPDF 1.30.1 CLI) — 30/30 CONFORMANT at BOTH flavours:**
+  - Rendered 30 Factur-X PDFs (6 profiles × 5: minimum, basic-wl, basic, en16931, extended, comfort) via `invoicekit-render-factur-x-acceptance` (Typst render + `embed_factur_x` post-proc).
+  - `verapdf --flavour 3b`: 30/30 compliant, 0 non-compliant, 0 no-verdict (sample report: 1282 passed checks, 0 failed).
+  - `verapdf --flavour 3u`: 30/30 compliant, 0 non-compliant, 0 no-verdict.
+  - Every PDF produced a real verdict (re-validated with unique report names to rule out overwrite/empty-report false positives).
+- **Battle-test scorecard so far:** XML EN16931 parity 722/722 core 1.0 (KoSIT+phive) · fuzz 5/5 clean · PDF/A-3 30/30 (3b+3u) · FFI/unsafe review clean. Pending: Miri runtime UB check on the FFI crate; final `cargo test --workspace`; CII-path live-validator parity (harness is UBL-only — honest gap to close).
