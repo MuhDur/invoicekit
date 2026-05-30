@@ -23,6 +23,7 @@ const ZERO_LOSS_PRESERVED_PATHS: &[&str] = &[
     "/attachments",
     "/currency",
     "/customer",
+    "/deliver_to",
     "/delivery_date",
     "/document_number",
     "/document_type",

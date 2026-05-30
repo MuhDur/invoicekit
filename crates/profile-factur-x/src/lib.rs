@@ -495,6 +495,7 @@ mod tests {
             }],
             extensions: Vec::new(),
             allowance_charges: Vec::new(),
+            deliver_to: None,
             meta: DocumentMeta {
                 tenant_id: "tenant-factur-x".to_owned(),
                 trace_id: "trace-factur-x".to_owned(),

@@ -562,6 +562,7 @@ mod tests {
             }],
             extensions: vec![],
             allowance_charges: Vec::new(),
+            deliver_to: None,
             meta: DocumentMeta {
                 tenant_id: "tenant-x".into(),
                 trace_id: "trace-001".into(),

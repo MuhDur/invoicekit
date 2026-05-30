@@ -275,6 +275,7 @@ fn base_parts(id_suffix: &str) -> CommercialDocumentParts {
         notes: Vec::<LocalizedString>::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: "tenant-adversarial".to_owned(),
             trace_id: "trace-adversarial".to_owned(),

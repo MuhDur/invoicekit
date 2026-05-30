@@ -197,6 +197,7 @@ fn build_document(config: &DocConfig) -> CommercialDocument {
         }],
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: "tenant-proptest".to_owned(),
             trace_id: "trace-proptest".to_owned(),

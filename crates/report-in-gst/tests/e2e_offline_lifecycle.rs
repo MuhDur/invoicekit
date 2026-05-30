@@ -119,6 +119,7 @@ fn indian_invoice() -> CommercialDocument {
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -402,6 +403,7 @@ fn india_native_inv01_intra_state_splits_cgst_sgst() {
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -546,6 +548,7 @@ fn indian_credit_note() -> CommercialDocument {
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -611,6 +614,7 @@ fn indian_multiline_invoice() -> CommercialDocument {
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -698,6 +702,7 @@ fn indian_export_lut_invoice() -> CommercialDocument {
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -897,6 +902,7 @@ fn india_intra_state_reverse_charge_invoice_registers() {
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),

@@ -124,6 +124,7 @@ fn israeli_invoice() -> CommercialDocument {
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -324,6 +325,7 @@ fn israeli_credit_note() -> CommercialDocument {
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -399,6 +401,7 @@ fn israeli_multiline_invoice() -> CommercialDocument {
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -465,6 +468,7 @@ fn israeli_zero_rated_export() -> CommercialDocument {
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),

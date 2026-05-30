@@ -118,6 +118,7 @@ fn brazil_invoice() -> CommercialDocument {
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -323,6 +324,7 @@ fn doc_with(
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),

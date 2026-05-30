@@ -87,6 +87,7 @@
 //! #     attachments: vec![], references: vec![], notes: vec![],
 //! #     extensions: vec![],
 //! #     allowance_charges: Vec::new(),
+//! #     deliver_to: None,
 //! #     meta: DocumentMeta { tenant_id: "tenant".to_owned(), trace_id: "trace".to_owned(),
 //! #       source_system: None },
 //! #   }).unwrap()
@@ -213,6 +214,7 @@ pub fn redact_for_support(document: &CommercialDocument) -> Result<RedactedBundl
         notes: document.notes.clone(),
         extensions: document.extensions.clone(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: document.meta.clone(),
     })?;
 
@@ -415,6 +417,7 @@ mod tests {
             notes: vec![],
             extensions: vec![],
             allowance_charges: Vec::new(),
+            deliver_to: None,
             meta: DocumentMeta {
                 tenant_id: "tenant".to_owned(),
                 trace_id: "trace".to_owned(),

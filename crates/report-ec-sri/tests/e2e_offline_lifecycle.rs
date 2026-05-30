@@ -127,6 +127,7 @@ fn ecuadorian_invoice() -> CommercialDocument {
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -436,6 +437,7 @@ fn ecuadorian_credit_note() -> CommercialDocument {
         }],
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),
@@ -523,6 +525,7 @@ fn ecuadorian_multiline_invoice() -> CommercialDocument {
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: TENANT.to_owned(),
             trace_id: TRACE.to_owned(),

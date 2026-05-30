@@ -739,6 +739,7 @@ mod tests {
             notes: Vec::new(),
             extensions: Vec::new(),
             allowance_charges: Vec::new(),
+            deliver_to: None,
             meta: DocumentMeta {
                 tenant_id: "tenant_hu".to_owned(),
                 trace_id: "trace_hu".to_owned(),

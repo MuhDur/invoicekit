@@ -184,6 +184,7 @@ fn zero_rated_sale() -> CommercialDocument {
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: meta(),
     })
     .unwrap()
@@ -297,6 +298,7 @@ fn vat_exempt_sale() -> CommercialDocument {
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: meta(),
     })
     .unwrap()
@@ -399,6 +401,7 @@ fn credit_memo() -> CommercialDocument {
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: meta(),
     })
     .unwrap()
@@ -530,6 +533,7 @@ fn official_receipt_multiline() -> CommercialDocument {
         notes: Vec::new(),
         extensions: Vec::new(),
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: meta(),
     })
     .unwrap()

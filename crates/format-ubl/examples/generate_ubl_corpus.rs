@@ -424,6 +424,7 @@ fn document(config: &FixtureConfig) -> Result<CommercialDocument, Box<dyn Error>
         notes: notes(config),
         extensions: vec![ubl_document_fields(config)?],
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: format!("tenant-ubl-{:04}", config.number),
             trace_id: format!("trace-ubl-{:04}", config.number),

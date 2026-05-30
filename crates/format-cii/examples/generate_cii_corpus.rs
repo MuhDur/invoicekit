@@ -400,6 +400,7 @@ fn document(config: &FixtureConfig) -> Result<CommercialDocument, Box<dyn Error>
         notes: notes(config),
         extensions: extensions(config)?,
         allowance_charges: Vec::new(),
+        deliver_to: None,
         meta: DocumentMeta {
             tenant_id: format!("tenant-cii-{:04}", config.number),
             trace_id: format!("trace-cii-{:04}", config.number),

@@ -413,6 +413,37 @@ impl Party {
     }
 }
 
+/// Deliver-to information (EN 16931 BG-13): where the goods or services are
+/// delivered, when that differs from the buyer.
+///
+/// The actual delivery date (BT-72) is the separate top-level `delivery_date`
+/// field; this group carries the deliver-to party name (BT-70), location
+/// identifier (BT-71), and address (EN 16931 BG-15).
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct DeliverToParty {
+    /// Deliver-to party name (BT-70).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Deliver-to location identifier (BT-71).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location_id: Option<String>,
+    /// Deliver-to address (EN 16931 BG-15).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<PostalAddress>,
+}
+
+impl DeliverToParty {
+    fn validate(&self) -> Result<(), IrError> {
+        if let Some(address) = &self.address {
+            address.validate()?;
+        }
+        if self.name.is_none() && self.location_id.is_none() && self.address.is_none() {
+            return Err(IrError::MissingRequiredField("deliver_to"));
+        }
+        Ok(())
+    }
+}
+
 /// Payment terms attached to the document.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct PaymentTerms {
@@ -967,6 +998,9 @@ pub struct CommercialDocumentParts {
     /// Document-level allowances (EN 16931 BG-20) and charges (BG-21).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowance_charges: Vec<DocumentAllowanceCharge>,
+    /// Optional deliver-to information (EN 16931 BG-13 / BG-15).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deliver_to: Option<DeliverToParty>,
     /// Operational metadata.
     pub meta: DocumentMeta,
 }
@@ -1034,6 +1068,9 @@ pub struct CommercialDocument {
     /// Document-level allowances (EN 16931 BG-20) and charges (BG-21).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowance_charges: Vec<DocumentAllowanceCharge>,
+    /// Optional deliver-to information (EN 16931 BG-13 / BG-15).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deliver_to: Option<DeliverToParty>,
     /// Operational metadata.
     pub meta: DocumentMeta,
 }
@@ -1070,6 +1107,7 @@ impl CommercialDocument {
             notes: parts.notes,
             extensions: parts.extensions,
             allowance_charges: parts.allowance_charges,
+            deliver_to: parts.deliver_to,
             meta: parts.meta,
         };
         document.validate()?;
@@ -1163,6 +1201,9 @@ impl CommercialDocument {
         }
         for allowance_charge in &self.allowance_charges {
             allowance_charge.validate()?;
+        }
+        if let Some(deliver_to) = &self.deliver_to {
+            deliver_to.validate()?;
         }
         self.meta.validate()
     }
@@ -1519,6 +1560,13 @@ fn record_payload_lossiness(
         lost,
         "/allowance_charges",
         source.allowance_charges == reparsed.allowance_charges,
+        adapter,
+    );
+    record_field_lossiness(
+        preserved,
+        lost,
+        "/deliver_to",
+        source.deliver_to == reparsed.deliver_to,
         adapter,
     );
 }
@@ -1917,6 +1965,44 @@ mod tests {
             err,
             IrError::MissingRequiredField("allowance_charges.reason")
         ));
+    }
+
+    #[test]
+    fn deliver_to_round_trips_and_defaults_to_none() {
+        // Absent deliver_to deserializes to None (additive, backward-compatible).
+        let baseline = CommercialDocument::try_from_value(synthetic_document_json()).unwrap();
+        assert!(baseline.deliver_to.is_none());
+
+        // A present BG-13/BG-15 deliver-to round-trips through from_value -> to_value.
+        let mut input = synthetic_document_json();
+        input["deliver_to"] = json!({
+            "name": "Warehouse 7",
+            "location_id": "LOC-7",
+            "address": {
+                "lines": ["Dock 3"],
+                "city": "Hamburg",
+                "postal_code": "20095",
+                "country": "DE"
+            }
+        });
+        let doc = CommercialDocument::try_from_value(input).unwrap();
+        let deliver_to = doc.deliver_to.as_ref().unwrap();
+        assert_eq!(deliver_to.name.as_deref(), Some("Warehouse 7"));
+        assert_eq!(deliver_to.location_id.as_deref(), Some("LOC-7"));
+        assert_eq!(deliver_to.address.as_ref().unwrap().city, "Hamburg");
+
+        let out = doc.to_value().unwrap();
+        assert_eq!(out["deliver_to"]["name"], json!("Warehouse 7"));
+        assert_eq!(out["deliver_to"]["address"]["city"], json!("Hamburg"));
+    }
+
+    #[test]
+    fn deliver_to_rejects_an_empty_group() {
+        // A present BG-13 group must carry at least a name, location id, or address.
+        let mut input = synthetic_document_json();
+        input["deliver_to"] = json!({});
+        let err = CommercialDocument::try_from_value(input).unwrap_err();
+        assert!(matches!(err, IrError::MissingRequiredField("deliver_to")));
     }
 
     #[test]

@@ -1036,6 +1036,7 @@ mod inv01_tests {
             notes: Vec::new(),
             extensions: Vec::new(),
             allowance_charges: Vec::new(),
+            deliver_to: None,
             meta: DocumentMeta {
                 tenant_id: "tenant_123".to_owned(),
                 trace_id: "trace_abc".to_owned(),
@@ -1073,6 +1074,7 @@ mod inv01_tests {
             notes: Vec::new(),
             extensions: Vec::new(),
             allowance_charges: Vec::new(),
+            deliver_to: None,
             meta: DocumentMeta {
                 tenant_id: "tenant_123".to_owned(),
                 trace_id: "trace_abc".to_owned(),
@@ -1262,6 +1264,7 @@ mod inv01_tests {
             notes: Vec::new(),
             extensions: Vec::new(),
             allowance_charges: Vec::new(),
+            deliver_to: None,
             meta: DocumentMeta {
                 tenant_id: "tenant_123".to_owned(),
                 trace_id: "trace_abc".to_owned(),

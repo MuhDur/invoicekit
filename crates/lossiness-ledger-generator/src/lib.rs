@@ -151,9 +151,9 @@ mod tests {
 
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly, DecimalValue,
-        DocumentAllowanceCharge, DocumentId, DocumentLine, DocumentMeta, DocumentNumber,
-        DocumentType, InvoicePeriod, Iso4217Code, JurisdictionExtension, LocalizedString,
-        LossinessLedger, MonetaryTotal, Party, PartyTaxId, PaymentInstruction,
+        DeliverToParty, DocumentAllowanceCharge, DocumentId, DocumentLine, DocumentMeta,
+        DocumentNumber, DocumentType, InvoicePeriod, Iso4217Code, JurisdictionExtension,
+        LocalizedString, LossinessLedger, MonetaryTotal, Party, PartyTaxId, PaymentInstruction,
         PaymentInstructionKind, PaymentTerms, PostalAddress, SchemaVersion, TaxCategorySummary,
     };
     use invoicekit_profile_factur_x::FacturXProfile;
@@ -245,6 +245,7 @@ mod tests {
             }],
             extensions: Vec::new(),
             allowance_charges: Vec::new(),
+            deliver_to: None,
             meta: DocumentMeta {
                 tenant_id: "tenant-ledger".to_owned(),
                 trace_id: "trace-ledger".to_owned(),
@@ -344,6 +345,34 @@ mod tests {
             assert!(
                 ledger.lost.iter().any(|e| e.path == "/allowance_charges"),
                 "{format:?} ledger must report /allowance_charges as lost (relocated to preserved XML)"
+            );
+        }
+    }
+
+    /// Regression guard for EN 16931 BG-13/BG-15 deliver-to information. Same
+    /// pattern as the other emit-only fields: the serializers write it but the
+    /// parsers keep it as preserved raw XML (typed field resets to None), so the
+    /// ledger MUST surface `/deliver_to` on its own typed path (as lost).
+    #[test]
+    fn deliver_to_is_tracked_per_field_in_the_ledger() {
+        let mut source = fixture();
+        source.deliver_to = Some(DeliverToParty {
+            name: Some("Warehouse 7".to_owned()),
+            location_id: Some("LOC-7".to_owned()),
+            address: Some(PostalAddress {
+                lines: vec!["Dock 3".to_owned()],
+                city: "Hamburg".to_owned(),
+                subdivision: None,
+                postal_code: "20095".to_owned(),
+                country: CountryCode::new("DE").unwrap(),
+            }),
+        });
+
+        for format in [TargetFormat::Ubl, TargetFormat::Cii] {
+            let ledger = compute_ledger(&source, format).expect("ledger computes");
+            assert!(
+                ledger.lost.iter().any(|e| e.path == "/deliver_to"),
+                "{format:?} ledger must report /deliver_to as lost (relocated to preserved XML)"
             );
         }
     }
