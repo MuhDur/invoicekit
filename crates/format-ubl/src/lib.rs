@@ -14,7 +14,8 @@ use std::str::FromStr as _;
 use invoicekit_canonical::{canonicalize_xml, XmlCanonicalizeError};
 use invoicekit_ir::{
     Attachment, CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly,
-    DecimalValue, DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference,
+    DecimalValue, DocumentAllowanceCharge, DocumentId, DocumentLine, DocumentMeta, DocumentNumber,
+    DocumentReference,
     DocumentType, IrError, Iso4217Code, ItemClassification, JurisdictionExtension, LocalizedString,
     LossinessEntry,
     LossinessLedger, MonetaryTotal, MoneyAmount, Party, PartyTaxId, PaymentInstruction,
@@ -1409,46 +1410,57 @@ fn write_native_allowance_charges(
     currency: &str,
 ) {
     for allowance_charge in &document.allowance_charges {
-        xml.push_str("<cac:AllowanceCharge>");
+        write_allowance_charge(xml, allowance_charge, currency);
+    }
+}
+
+/// Emit a single `cac:AllowanceCharge` in UBL `AllowanceChargeType` child order.
+/// Shared by the document-level group (BG-20/21) and the line-level group
+/// (BG-27/28) — the element structure is identical at both levels.
+fn write_allowance_charge(
+    xml: &mut String,
+    allowance_charge: &DocumentAllowanceCharge,
+    currency: &str,
+) {
+    xml.push_str("<cac:AllowanceCharge>");
+    write_text_element(
+        xml,
+        "cbc:ChargeIndicator",
+        if allowance_charge.is_charge {
+            "true"
+        } else {
+            "false"
+        },
+    );
+    if let Some(code) = &allowance_charge.reason_code {
+        write_text_element(xml, "cbc:AllowanceChargeReasonCode", code);
+    }
+    if let Some(reason) = &allowance_charge.reason {
+        write_text_element(xml, "cbc:AllowanceChargeReason", reason);
+    }
+    if let Some(percentage) = &allowance_charge.percentage {
         write_text_element(
             xml,
-            "cbc:ChargeIndicator",
-            if allowance_charge.is_charge {
-                "true"
-            } else {
-                "false"
-            },
+            "cbc:MultiplierFactorNumeric",
+            &percentage.inner().to_string(),
         );
-        if let Some(code) = &allowance_charge.reason_code {
-            write_text_element(xml, "cbc:AllowanceChargeReasonCode", code);
-        }
-        if let Some(reason) = &allowance_charge.reason {
-            write_text_element(xml, "cbc:AllowanceChargeReason", reason);
-        }
-        if let Some(percentage) = &allowance_charge.percentage {
-            write_text_element(
-                xml,
-                "cbc:MultiplierFactorNumeric",
-                &percentage.inner().to_string(),
-            );
-        }
-        write_amount_element(xml, "cbc:Amount", allowance_charge.amount.inner(), currency);
-        if let Some(base) = &allowance_charge.base_amount {
-            write_amount_element(xml, "cbc:BaseAmount", base.inner(), currency);
-        }
-        // cac:TaxCategory requires a cbc:ID, so emit it only when the category
-        // code is present (a bare rate without a category is not schema-valid).
-        if let Some(category) = &allowance_charge.tax_category {
-            xml.push_str("<cac:TaxCategory>");
-            write_text_element(xml, "cbc:ID", category);
-            if let Some(rate) = &allowance_charge.tax_rate {
-                write_text_element(xml, "cbc:Percent", &rate.inner().to_string());
-            }
-            write_tax_scheme(xml);
-            xml.push_str("</cac:TaxCategory>");
-        }
-        xml.push_str("</cac:AllowanceCharge>");
     }
+    write_amount_element(xml, "cbc:Amount", allowance_charge.amount.inner(), currency);
+    if let Some(base) = &allowance_charge.base_amount {
+        write_amount_element(xml, "cbc:BaseAmount", base.inner(), currency);
+    }
+    // cac:TaxCategory requires a cbc:ID, so emit it only when the category code
+    // is present (a bare rate without a category is not schema-valid).
+    if let Some(category) = &allowance_charge.tax_category {
+        xml.push_str("<cac:TaxCategory>");
+        write_text_element(xml, "cbc:ID", category);
+        if let Some(rate) = &allowance_charge.tax_rate {
+            write_text_element(xml, "cbc:Percent", &rate.inner().to_string());
+        }
+        write_tax_scheme(xml);
+        xml.push_str("</cac:TaxCategory>");
+    }
+    xml.push_str("</cac:AllowanceCharge>");
 }
 
 fn write_invoicekit_metadata_extension(xml: &mut String, meta: &DocumentMeta) {
@@ -2188,6 +2200,13 @@ fn write_line(xml: &mut String, document_type: DocumentType, line: &DocumentLine
         line.line_extension_amount.inner(),
         currency,
     );
+    // EN 16931 BG-27/BG-28 line-level allowances/charges: cac:AllowanceCharge
+    // sits after cbc:LineExtensionAmount and before cac:Item in UBL
+    // InvoiceLineType / CreditNoteLineType child order. Empty when the line
+    // carries none, preserving prior byte-for-byte output.
+    for allowance_charge in &line.allowance_charges {
+        write_allowance_charge(xml, allowance_charge, currency);
+    }
     xml.push_str("<cac:Item>");
     write_text_element(xml, "cbc:Name", &line.description);
     // EN 16931 BT-158 (UBL syntax binding): one cac:CommodityClassification per
@@ -3420,6 +3439,58 @@ mod tests {
         assert!(out.contains(">7.00</cbc:Amount>"));
         assert!(out.contains(">3.00</cbc:Amount>"));
         assert_eq!(canonicalize_xml(&out).unwrap(), out);
+    }
+
+    /// Gating test: a BG-27/BG-28 line-level allowance/charge emits a
+    /// `cac:AllowanceCharge` INSIDE the line, after `cbc:LineExtensionAmount` and
+    /// before `cac:Item` (UBL `InvoiceLineType` child order), schema-valid and
+    /// canonical. The element is nested in cac:InvoiceLine so cac is in scope (no
+    /// inline xmlns — `<cac:AllowanceCharge>` matches).
+    #[test]
+    fn fresh_line_emits_allowance_charge() {
+        use invoicekit_ir::DocumentAllowanceCharge;
+
+        let mut document = fixture(DocumentType::Invoice, 59);
+        document.lines[0].allowance_charges = vec![DocumentAllowanceCharge {
+            is_charge: false,
+            amount: DecimalValue::new(Decimal::new(250, 2)),
+            base_amount: None,
+            percentage: None,
+            tax_category: None,
+            tax_rate: None,
+            reason: Some("Line discount".to_owned()),
+            reason_code: Some("95".to_owned()),
+        }];
+
+        let xml = to_xml(&document).unwrap();
+
+        // Exactly one cac:AllowanceCharge (the line one; no document-level set).
+        assert_eq!(
+            xml.matches("<cac:AllowanceCharge>").count(),
+            1,
+            "expected one line-level cac:AllowanceCharge:\n{xml}"
+        );
+        assert!(xml.contains(">2.50</cbc:Amount>"));
+        assert!(xml.contains(">Line discount</cbc:AllowanceChargeReason>"));
+
+        // Placement inside the InvoiceLine: LineExtensionAmount < AllowanceCharge < Item.
+        let line = xml.find("<cac:InvoiceLine").expect("invoice line present");
+        let block = &xml[line..];
+        let ext = block.find("</cbc:LineExtensionAmount>").unwrap();
+        let allowance = block.find("<cac:AllowanceCharge>").unwrap();
+        let item = block.find("<cac:Item>").unwrap();
+        assert!(
+            ext < allowance && allowance < item,
+            "line cac:AllowanceCharge must sit after LineExtensionAmount and before Item:\n{xml}"
+        );
+
+        assert_eq!(canonicalize_xml(&xml).unwrap(), xml);
+        let schema_report = validate_oasis_ubl_2_1_schema(&xml).unwrap();
+        assert!(
+            schema_report.is_valid(),
+            "expected line-allowance output to be schema valid, findings: {:?}",
+            schema_report.findings
+        );
     }
 
     #[test]
