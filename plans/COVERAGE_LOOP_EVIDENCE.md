@@ -1169,3 +1169,46 @@ performance** skills and closes the residuals.
   (faithful serialization of producer-supplied codes already works; inventing codes would violate the trust
   mission, D18). **Loop stopped** pending that decision or a new specified target.
 - **Skills used:** `multi-pass-bug-hunting` (new-code audit, loop-until-dry), `verification-before-completion`.
+
+### Turn 39 (2026-05-30) — IR foundation #4: invoice period (BG-14) + delivery date (BT-72)
+- **Decision:** after recording convergence, re-examined the EN 16931 tail and judged BG-14 invoice period (BT-73/74)
+  + BT-72 delivery date a genuinely HIGH-value, NON-gated, additive gap (periodic/subscription/utility invoices use
+  BG-14 heavily; both are pure dates → no code-list mapping, no D18 fabrication risk). Not theater — the highest-value
+  remaining ungated lever. Executed the proven 3-phase playbook.
+- **IR foundation (commit af76bae):** additive `InvoicePeriod { start_date, end_date }` + `invoice_period:
+  Option<InvoicePeriod>` and `delivery_date: Option<DateOnly>` on both `CommercialDocumentParts` and
+  `CommercialDocument`; mapped in `new()`; validated (a present BG-14 group requires ≥1 date — EN 16931 BR-CO-19);
+  from_value→to_value round-trip test + empty-group rejection test. **Behavior-preserving 158-site ripple** across
+  42 crates via a mechanical literal-repair workflow (one agent per crate, `invoice_period: None` +
+  `delivery_date: None`); the central `cargo build --workspace --all-targets` (not agent self-reports) was the
+  source of truth and came back clean — every literal complete + well-formed.
+- **format-ubl wiring (commit 535da25):** `cac:InvoicePeriod` (cbc:StartDate/EndDate) before the supplier party +
+  `cac:Delivery/cbc:ActualDeliveryDate` after the parties, both via the proven preserve-vs-native split (parser
+  keeps input fragments as raw XML — both `LossinessLedgerPreserved` — and never populates the IR fields; fresh IR
+  docs emit natively; mutually exclusive → no double-emit). 3 gating tests: fresh emit + UBL child-order placement,
+  absent = byte-preserving, parsed-replay-exactly-once — all assert canonical idempotence AND OASIS UBL 2.1 schema
+  validity.
+- **format-cii wiring (commit c259657):** `ram:BillingSpecifiedPeriod/ram:StartDateTime|EndDateTime` (BG-14) at its
+  settlement schema slot. Element names + type (`ram:SpecifiedPeriodType`; StartDateTime/EndDateTime are
+  `udt:DateTimeType`; `lossiness_ledger_preserved`) **verified against the vendored CII D16B element catalog —
+  not invented (D18 respected).** Studied the preserve mechanism precisely first: `write_preserved_xml` filters by an
+  EXCLUSIVE order window and does NOT consume fragments, so the `after_child` trailing-replay idiom (used for
+  references) only works for elements ABOVE all known children; BillingSpecifiedPeriod is mid-order, so the correct
+  wiring is a plain native emit at its textual slot, with the existing `write_preserved_xml_before(.., PaymentTerms)`
+  flushing a preserved fragment exactly once (mutually exclusive cases). 2 gating tests incl. serialize→parse→
+  serialize byte-stability with count == 1.
+- **BT-72 in CII: SURFACED, not silently done.** The natural CII delivery slot
+  (`ram:ActualDeliverySupplyChainEvent/ram:OccurrenceDateTime`) is occupied by a PRE-EXISTING conflation — the
+  serializer emits `tax_point_date` (BT-7) there and the parser reads it back from there. CII has NO document-level
+  tax-point slot (BT-7 in CII lives only under `ram:ApplicableTradeTax/ram:TaxPointDate`, which the in-repo
+  child-order table confirms). Disentangling — OccurrenceDateTime←delivery_date, tax_point_date→ApplicableTradeTax/
+  TaxPointDate — is a behavior-changing correction that rewrites the meaning of existing CII output across many
+  goldens and has an empty-tax_summary edge (degenerate, since EN 16931 BR-CO-18 requires ≥1 VAT breakdown). That is
+  a deliberate decision worth the principal's sign-off, not an autonomous silent edit. So UBL carries BT-72; CII
+  does not (yet). **This is the new top decision on the queue, alongside the D15 code-list vendoring.**
+- **Verification:** full workspace suite green (0 failed, 279 test binaries), clippy `-D warnings` clean; +7 new
+  gating tests; all changes additive/behavior-preserving (every existing fixture has the new fields `None` → byte-
+  identical output). One assertion bug found+fixed during dev in each of UBL (canonicalizer pins inline `xmlns:cac`
+  on top-level cac elements → match `<cac:Delivery ` with the space) and CII (pins `xmlns:udt` on each DateTimeString).
+- **Skills used:** `simplify-and-refactor-code-isomorphically` (dedicated `write_native_*` fns over an overloaded
+  match arm), `verification-before-completion`, `multi-pass-bug-hunting` (preserve-mechanism analysis before editing).
