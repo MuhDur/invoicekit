@@ -64,7 +64,7 @@ export interface AcceptedProfile {
  * Stable identifier of the accepted profile (e.g. 'xrechnung-3.0', 'peppol-bis-3.0', 'factur-x-1.0.06').
  */
 id: string
-format: ("UBL" | "CII" | "Factur-X" | "XRechnung" | "Peppol BIS" | "Peppol PINT" | "FatturaPA" | "Chorus Pro")
+format: ("UBL" | "CII" | "Factur-X" | "XRechnung" | "Peppol BIS" | "Peppol PINT" | "FatturaPA" | "Chorus Pro" | "CFDI" | "NF-e" | "KSeF")
 transport: ("peppol" | "email" | "portal" | "as4-direct" | "manual")
 capabilities: ProfileRuntimeCapabilities
 }

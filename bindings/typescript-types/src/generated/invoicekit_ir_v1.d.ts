@@ -57,6 +57,14 @@ tax_point_date?: (string | null)
  */
 due_date?: (string | null)
 /**
+ * Optional invoice billing period (EN 16931 BG-14).
+ */
+invoice_period?: (InvoicePeriod | null)
+/**
+ * Optional actual delivery date (EN 16931 BT-72).
+ */
+delivery_date?: (string | null)
+/**
  * Document number.
  */
 document_number: string
@@ -103,7 +111,35 @@ notes?: LocalizedString[]
  * Jurisdiction extension envelopes.
  */
 extensions?: JurisdictionExtension[]
+/**
+ * Document-level allowances (EN 16931 BG-20) and charges (BG-21).
+ */
+allowance_charges?: DocumentAllowanceCharge[]
+/**
+ * Optional deliver-to information (EN 16931 BG-13 / BG-15).
+ */
+deliver_to?: (DeliverToParty | null)
 meta: DocumentMeta
+}
+/**
+ * Invoice billing period (EN 16931 BG-14).
+ *
+ *  The date range the invoice covers (e.g. a periodic or summary invoice). At
+ *  least one of `start_date` (BT-73) or `end_date` (BT-74) must be present when
+ *  the group is used.
+ *
+ * This interface was referenced by `CommercialDocument`'s JSON-Schema
+ * via the `definition` "InvoicePeriod".
+ */
+export interface InvoicePeriod {
+/**
+ * Period start date (BT-73).
+ */
+start_date?: (string | null)
+/**
+ * Period end date (BT-74).
+ */
+end_date?: (string | null)
 }
 /**
  * Supplier party.
@@ -307,9 +343,49 @@ line_extension_amount: string
  */
 tax_category?: (string | null)
 /**
+ * Commodity/service classifications (EN 16931 BG-? / BT-158; national
+ *  schemes such as HSN/SAC, NCM, `ClaveProdServ`). Empty when unclassified.
+ */
+classifications?: ItemClassification[]
+/**
  * Line-level jurisdiction extensions.
  */
 extensions?: JurisdictionExtension[]
+/**
+ * Line-level allowances (EN 16931 BG-27) and charges (BG-28). Reuses the
+ *  document-level [`DocumentAllowanceCharge`] shape; the VAT category fields
+ *  are normally unused at line level (a line allowance/charge inherits the
+ *  line's tax category), but are accepted when a producer supplies them.
+ */
+allowance_charges?: DocumentAllowanceCharge[]
+}
+/**
+ * Commodity or service classification of a line item.
+ *
+ *  Models EN 16931 BT-158 *Item classification identifier* together with its
+ *  scheme identifier (BT-158-1) and optional scheme version (BT-158-2). The
+ *  `scheme_id` is an open list (e.g. UNTDID 7143 codes such as `HS`/`SRV`, or a
+ *  national scheme name like `HSN`, `SAC`, `NCM`, `ClaveProdServ`, `UNSPSC`),
+ *  mirroring the open `scheme` on [`PartyTaxId`]. A line may carry several
+ *  classifications, so consumers select the scheme they need (a UBL/CII
+ *  serializer emits all of them; a national report picks its own scheme).
+ *
+ * This interface was referenced by `CommercialDocument`'s JSON-Schema
+ * via the `definition` "ItemClassification".
+ */
+export interface ItemClassification {
+/**
+ * Classification code value (EN 16931 BT-158).
+ */
+code: string
+/**
+ * Scheme/list identifier the code belongs to (EN 16931 BT-158-1 `listID`).
+ */
+scheme_id: string
+/**
+ * Optional scheme version (EN 16931 BT-158-2 `listVersionID`).
+ */
+scheme_version?: (string | null)
 }
 /**
  * Polymorphic jurisdiction or profile extension payload.
@@ -344,6 +420,53 @@ payload: {
 }
 }
 /**
+ * Document-level allowance (EN 16931 BG-20) or charge (BG-21).
+ *
+ *  Both groups share an identical structure distinguished by `is_charge`; only
+ *  the business-term numbers differ (allowance BT-92..98 / charge BT-99..105).
+ *  The detail is carried verbatim from the producer — InvoiceKit serializes the
+ *  supplied amounts/codes faithfully and does not recompute or reconcile them
+ *  against the document totals (that is the reference validator's responsibility).
+ *
+ * This interface was referenced by `CommercialDocument`'s JSON-Schema
+ * via the `definition` "DocumentAllowanceCharge".
+ */
+export interface DocumentAllowanceCharge {
+/**
+ * `true` = charge (BG-21), `false` = allowance (BG-20).
+ */
+is_charge: boolean
+/**
+ * Allowance/charge amount (BT-92 / BT-99).
+ */
+amount: string
+/**
+ * Optional base amount the percentage applies to (BT-93 / BT-100).
+ */
+base_amount?: (string | null)
+/**
+ * Optional percentage of the base amount (BT-94 / BT-101).
+ */
+percentage?: (string | null)
+/**
+ * Optional VAT category code for the allowance/charge (BT-95 / BT-102).
+ */
+tax_category?: (string | null)
+/**
+ * Optional VAT rate (BT-96 / BT-103).
+ */
+tax_rate?: (string | null)
+/**
+ * Optional reason text (BT-97 / BT-104).
+ */
+reason?: (string | null)
+/**
+ * Optional reason code (BT-98 / BT-105), from UNCL 5189 (allowances) or
+ *  UNCL 7161 (charges); carried verbatim.
+ */
+reason_code?: (string | null)
+}
+/**
  * Tax category summary.
  *
  * This interface was referenced by `CommercialDocument`'s JSON-Schema
@@ -366,6 +489,18 @@ tax_amount: string
  * Optional tax rate.
  */
 tax_rate?: (string | null)
+/**
+ * Optional VAT exemption reason text (EN 16931 BT-120), for an exempt /
+ *  zero-rated / reverse-charge category. Carried verbatim from the producer.
+ */
+exemption_reason?: (string | null)
+/**
+ * Optional VAT exemption reason code (EN 16931 BT-121), from a controlled
+ *  list such as CEF `VATEX` or IT `Natura`. Carried verbatim from the
+ *  producer — InvoiceKit serializes whatever code is supplied and does not
+ *  invent one (the national code-list mapping is a separate concern).
+ */
+exemption_reason_code?: (string | null)
 }
 /**
  * Monetary total.
@@ -457,21 +592,29 @@ language: string
 text: string
 }
 /**
- * Operational metadata.
+ * Deliver-to information (EN 16931 BG-13): where the goods or services are
+ *  delivered, when that differs from the buyer.
+ *
+ *  The actual delivery date (BT-72) is the separate top-level `delivery_date`
+ *  field; this group carries the deliver-to party name (BT-70), location
+ *  identifier (BT-71), and address (EN 16931 BG-15).
+ *
+ * This interface was referenced by `CommercialDocument`'s JSON-Schema
+ * via the `definition` "DeliverToParty".
  */
-export interface DocumentMeta {
+export interface DeliverToParty {
 /**
- * Tenant identifier.
+ * Deliver-to party name (BT-70).
  */
-tenant_id: string
+name?: (string | null)
 /**
- * Trace identifier for audit correlation.
+ * Deliver-to location identifier (BT-71).
  */
-trace_id: string
+location_id?: (string | null)
 /**
- * Optional source system.
+ * Deliver-to address (EN 16931 BG-15).
  */
-source_system?: (string | null)
+address?: (PostalAddress1 | null)
 }
 /**
  * Postal address for a supplier, customer, payee, or other party.
@@ -500,6 +643,23 @@ postal_code: string
  * Country code.
  */
 country: string
+}
+/**
+ * Operational metadata.
+ */
+export interface DocumentMeta {
+/**
+ * Tenant identifier.
+ */
+tenant_id: string
+/**
+ * Trace identifier for audit correlation.
+ */
+trace_id: string
+/**
+ * Optional source system.
+ */
+source_system?: (string | null)
 }
 /**
  * Document monetary totals.
