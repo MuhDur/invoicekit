@@ -1065,3 +1065,30 @@ performance** skills and closes the residuals.
 - **Skills used:** `feature-dev` (additive-field design), `testing-real-service-e2e-no-mocks` (entity-bearing
   round-trip gating tests), `reality-check-for-project` (the round-trip gate caught the silent-loss bug in both
   crates), `verification-before-completion`.
+
+### Turn 35 (2026-05-30) — National crates wired to the new IR fields (faithful, D18-guarded)
+- A read-only census (34 crates) mapped 16 closeable-now opportunities; wired the 5 national crates with new work
+  (commit 4b7597b), serializing producer values VERBATIM (no code-list mapping/invention):
+  - `report-it-sdi` (FatturaPA): `DatiFattureCollegate` (preceding-invoice link), `CodiceArticolo` (commodity
+    code), `RiferimentoNormativo` (free-text exemption reason).
+  - `report-cl-dte` (SII DTE): `Detalle/CdgItem` (commodity code). `Referencia` skipped (mandatory `TpoDocRef` code).
+  - `report-hu-nav` (NAV): `invoiceReference/originalInvoiceNumber`.
+  - `report-gr-mydata` (myDATA): `correlatedInvoices`.
+  - `report-pl-ksef` (FA(3)): ALL candidates skipped under the D18 guard — no FA(3) schema is vendored in-repo to
+    confirm `DaneFaKorygowanej`/`P_19C`/`FaWiersz` element names; a guard test asserts the unconfirmable fields do
+    not leak. (Honest skip > guessing national element names.)
+- **Key boundary finding (FatturaPA `Natura`):** the it-sdi agent skipped emitting `Natura` from
+  `exemption_reason_code`, and the skip is genuinely CORRECT (not just conservative): a single
+  `exemption_reason_code` field cannot faithfully be both an EN 16931 VATEX code (emitted by UBL/CII) AND an IT
+  `Natura` code (expected by FatturaPA) — emitting it verbatim into `<Natura>` is format-ambiguous. So national
+  exemption CODES genuinely require the code-list MAPPING (category + VATEX → Natura), which is D15-gated. This
+  sharpens the residual line: faithful free-text/id/date emission is done; coded national values need vendored
+  code lists, full stop.
+- **Verification:** `cargo test --workspace` = **2512 passed / 0 failed** (+24); clippy `-D warnings` clean;
+  behavior-preserving (IR-field-absent docs byte-identical).
+- **State:** the 3 IR foundations are now consumed by the EN 16931 family (UBL/CII) AND the national crates where
+  faithful emission is possible. Remaining national coverage is code-list-gated (D15): vendor IT Natura, CEF VATEX,
+  PL FA(3) structure, BR NCM/IBGE chave, MX SAT catalogs, then derive/validate codes — do NOT invent (D18).
+- **Skills used:** `multi-pass-bug-hunting` (census), `testing-real-service-e2e-no-mocks` (verbatim-emission +
+  absent-field guard tests), `reality-check-for-project` (D18 — pl-ksef/cl-dte/Natura skips over guessing),
+  `verification-before-completion`.
