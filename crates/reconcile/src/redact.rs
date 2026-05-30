@@ -25,6 +25,8 @@
 //! #     issue_date: DateOnly::new("2026-05-26").unwrap(),
 //! #     tax_point_date: None,
 //! #     due_date: None,
+//! #     invoice_period: None,
+//! #     delivery_date: None,
 //! #     document_number: DocumentNumber::new("INV-1").unwrap(),
 //! #     currency: Iso4217Code::new("EUR").unwrap(),
 //! #     supplier: Party {
@@ -193,6 +195,8 @@ pub fn redact_for_support(document: &CommercialDocument) -> Result<RedactedBundl
         issue_date: document.issue_date.clone(),
         tax_point_date: document.tax_point_date.clone(),
         due_date: document.due_date.clone(),
+        invoice_period: None,
+        delivery_date: None,
         document_number: document.document_number.clone(),
         currency: document.currency.clone(),
         supplier,
@@ -339,6 +343,8 @@ mod tests {
             issue_date: DateOnly::new("2026-05-26").unwrap(),
             tax_point_date: None,
             due_date: None,
+            invoice_period: None,
+            delivery_date: None,
             document_number: DocumentNumber::new("INV-1").unwrap(),
             currency: Iso4217Code::new("EUR").unwrap(),
             supplier: Party {

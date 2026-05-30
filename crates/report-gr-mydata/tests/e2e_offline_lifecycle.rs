@@ -85,6 +85,8 @@ fn greek_invoice() -> CommercialDocument {
         issue_date: DateOnly::new("2026-05-26").unwrap(),
         tax_point_date: None,
         due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+        invoice_period: None,
+        delivery_date: None,
         document_number: DocumentNumber::new("INV-2026-GR-0001").unwrap(),
         currency: Iso4217Code::new("EUR").unwrap(),
         supplier: greek_party(
@@ -309,6 +311,8 @@ fn greek_credit_note() -> CommercialDocument {
         // myDATA credit notes carry a tax point; serializer emits cbc:TaxPointDate.
         tax_point_date: Some(DateOnly::new("2026-05-26").unwrap()),
         due_date: None,
+        invoice_period: None,
+        delivery_date: None,
         document_number: DocumentNumber::new("CN-2026-GR-0001").unwrap(),
         currency: Iso4217Code::new("EUR").unwrap(),
         supplier: greek_party(
@@ -439,6 +443,8 @@ fn greek_multiline_invoice() -> CommercialDocument {
         issue_date: DateOnly::new("2026-05-26").unwrap(),
         tax_point_date: None,
         due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+        invoice_period: None,
+        delivery_date: None,
         document_number: DocumentNumber::new("INV-2026-GR-0010").unwrap(),
         currency: Iso4217Code::new("EUR").unwrap(),
         supplier: greek_party(
@@ -576,6 +582,8 @@ fn greek_exempt_invoice() -> CommercialDocument {
         issue_date: DateOnly::new("2026-05-26").unwrap(),
         tax_point_date: None,
         due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+        invoice_period: None,
+        delivery_date: None,
         document_number: DocumentNumber::new("INV-2026-GR-0020").unwrap(),
         currency: Iso4217Code::new("EUR").unwrap(),
         supplier: greek_party(

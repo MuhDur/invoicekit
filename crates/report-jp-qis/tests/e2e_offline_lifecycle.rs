@@ -78,6 +78,8 @@ fn japanese_invoice() -> CommercialDocument {
         issue_date: DateOnly::new("2026-05-26").unwrap(),
         tax_point_date: None,
         due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+        invoice_period: None,
+        delivery_date: None,
         document_number: DocumentNumber::new("INV-2026-JP-0001").unwrap(),
         currency: Iso4217Code::new("JPY").unwrap(),
         // Supplier carries the NTA registration number (T + 13 digits) — the
@@ -290,6 +292,8 @@ fn dual_rate_invoice() -> CommercialDocument {
         issue_date: DateOnly::new("2026-05-26").unwrap(),
         tax_point_date: None,
         due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+        invoice_period: None,
+        delivery_date: None,
         document_number: DocumentNumber::new("INV-2026-JP-DUAL-1").unwrap(),
         currency: Iso4217Code::new("JPY").unwrap(),
         supplier: japanese_party("Konbini KK", REDUCED_RATE_RN, "Chiyoda"),
@@ -436,6 +440,8 @@ fn qualified_return_credit_note() -> CommercialDocument {
         tax_point_date: None,
         // UBL 2.1 CreditNote carries no top-level cbc:DueDate; must stay None.
         due_date: None,
+        invoice_period: None,
+        delivery_date: None,
         document_number: DocumentNumber::new("CN-2026-JP-0001").unwrap(),
         currency: Iso4217Code::new("JPY").unwrap(),
         supplier: japanese_party("Acme KK", REGISTRATION_NUMBER, "Chiyoda"),

@@ -439,6 +439,8 @@ mod tests {
             issue_date: DateOnly::new("2026-05-27").unwrap(),
             tax_point_date: None,
             due_date: Some(DateOnly::new("2026-06-26").unwrap()),
+            invoice_period: None,
+            delivery_date: None,
             document_number: DocumentNumber::new("FX-001").unwrap(),
             currency: Iso4217Code::new("EUR").unwrap(),
             supplier: party("supplier", "DE", Some("sup-1")),

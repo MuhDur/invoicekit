@@ -154,6 +154,8 @@ fn build_document(config: &DocConfig) -> CommercialDocument {
         issue_date: DateOnly::new("2026-05-27").unwrap(),
         tax_point_date: None,
         due_date: Some(DateOnly::new("2026-06-26").unwrap()),
+        invoice_period: None,
+        delivery_date: None,
         document_number: DocumentNumber::new(config.document_number.clone()).unwrap(),
         currency: Iso4217Code::new(config.currency.clone()).unwrap(),
         supplier: party("supplier", config.supplier_country, 1),

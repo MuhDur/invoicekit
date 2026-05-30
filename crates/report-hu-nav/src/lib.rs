@@ -695,6 +695,8 @@ mod tests {
             issue_date: DateOnly::new("2026-05-26").unwrap(),
             tax_point_date: None,
             due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+            invoice_period: None,
+            delivery_date: None,
             document_number: DocumentNumber::new("INV-2026-HU-0001").unwrap(),
             currency: Iso4217Code::new("HUF").unwrap(),
             // "HU12345678-2-41" -> taxpayerId 12345678, vatCode 2, countyCode 41.

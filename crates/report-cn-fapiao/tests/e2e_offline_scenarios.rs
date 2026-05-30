@@ -115,6 +115,8 @@ fn base_parts(
         issue_date: DateOnly::new("2026-05-26").unwrap(),
         tax_point_date: None,
         due_date,
+        invoice_period: None,
+        delivery_date: None,
         document_number: DocumentNumber::new(number).unwrap(),
         // CNY is the ISO 4217 code for the Chinese renminbi (yuan).
         currency: Iso4217Code::new("CNY").unwrap(),

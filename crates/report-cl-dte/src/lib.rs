@@ -830,6 +830,8 @@ mod tests {
             issue_date: DateOnly::new("2026-05-26").unwrap(),
             tax_point_date: None,
             due_date: Some(DateOnly::new("2026-06-25").unwrap()),
+            invoice_period: None,
+            delivery_date: None,
             document_number: DocumentNumber::new("DTE-33-0001").unwrap(),
             currency: Iso4217Code::new("CLP").unwrap(),
             supplier: chilean_party("Proveedor SpA", "76192083-9", "Santiago"),

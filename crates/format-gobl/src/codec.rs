@@ -447,6 +447,8 @@ pub fn from_gobl(payload: &Value) -> Result<GoblEnvelope, GoblError> {
             .get("due_date")
             .and_then(Value::as_str)
             .and_then(|d| DateOnly::new(d.to_owned()).ok()),
+        invoice_period: None,
+        delivery_date: None,
         document_number: DocumentNumber::new(document_number)?,
         currency: Iso4217Code::new(currency)?,
         supplier,
@@ -941,6 +943,8 @@ mod tests {
             issue_date: DateOnly::new("2026-05-27").unwrap(),
             tax_point_date: None,
             due_date: Some(DateOnly::new("2026-06-27").unwrap()),
+            invoice_period: None,
+            delivery_date: None,
             document_number: DocumentNumber::new("F-2026-001").unwrap(),
             currency: Iso4217Code::new("EUR").unwrap(),
             supplier: Party {

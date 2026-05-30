@@ -829,6 +829,36 @@ impl DocumentMeta {
     }
 }
 
+/// Invoice billing period (EN 16931 BG-14).
+///
+/// The date range the invoice covers (e.g. a periodic or summary invoice). At
+/// least one of `start_date` (BT-73) or `end_date` (BT-74) must be present when
+/// the group is used.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct InvoicePeriod {
+    /// Period start date (BT-73).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_date: Option<DateOnly>,
+    /// Period end date (BT-74).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_date: Option<DateOnly>,
+}
+
+impl InvoicePeriod {
+    fn validate(&self) -> Result<(), IrError> {
+        if let Some(date) = &self.start_date {
+            date.validate()?;
+        }
+        if let Some(date) = &self.end_date {
+            date.validate()?;
+        }
+        if self.start_date.is_none() && self.end_date.is_none() {
+            return Err(IrError::MissingRequiredField("invoice_period"));
+        }
+        Ok(())
+    }
+}
+
 /// Input parts for constructing a [`CommercialDocument`].
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct CommercialDocumentParts {
@@ -847,6 +877,12 @@ pub struct CommercialDocumentParts {
     /// Optional due date.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub due_date: Option<DateOnly>,
+    /// Optional invoice billing period (EN 16931 BG-14).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invoice_period: Option<InvoicePeriod>,
+    /// Optional actual delivery date (EN 16931 BT-72).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delivery_date: Option<DateOnly>,
     /// Document number.
     pub document_number: DocumentNumber,
     /// Document currency.
@@ -905,6 +941,12 @@ pub struct CommercialDocument {
     /// Optional due date.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub due_date: Option<DateOnly>,
+    /// Optional invoice billing period (EN 16931 BG-14).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invoice_period: Option<InvoicePeriod>,
+    /// Optional actual delivery date (EN 16931 BT-72).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delivery_date: Option<DateOnly>,
     /// Document number.
     pub document_number: DocumentNumber,
     /// Document currency.
@@ -960,6 +1002,8 @@ impl CommercialDocument {
             issue_date: parts.issue_date,
             tax_point_date: parts.tax_point_date,
             due_date: parts.due_date,
+            invoice_period: parts.invoice_period,
+            delivery_date: parts.delivery_date,
             document_number: parts.document_number,
             currency: parts.currency,
             supplier: parts.supplier,
@@ -1026,6 +1070,12 @@ impl CommercialDocument {
             date.validate()?;
         }
         if let Some(date) = &self.due_date {
+            date.validate()?;
+        }
+        if let Some(period) = &self.invoice_period {
+            period.validate()?;
+        }
+        if let Some(date) = &self.delivery_date {
             date.validate()?;
         }
         self.document_number.validate()?;
@@ -1709,6 +1759,39 @@ mod tests {
             doc.tax_summary[0].exemption_reason_code.as_deref(),
             Some("VATEX-EU-AE")
         );
+    }
+
+    #[test]
+    fn invoice_period_and_delivery_date_round_trip_and_default_to_none() {
+        // Absent BG-14 period + BT-72 delivery date deserialize to None
+        // (additive, backward-compatible).
+        let baseline = CommercialDocument::try_from_value(synthetic_document_json()).unwrap();
+        assert!(baseline.invoice_period.is_none());
+        assert!(baseline.delivery_date.is_none());
+
+        // A present period (BT-73/74) + delivery date (BT-72) survives a full
+        // from_value -> to_value round-trip verbatim.
+        let mut input = synthetic_document_json();
+        input["invoice_period"] = json!({ "start_date": "2026-05-01", "end_date": "2026-05-31" });
+        input["delivery_date"] = json!("2026-05-28");
+        let doc = CommercialDocument::try_from_value(input).unwrap();
+        let period = doc.invoice_period.as_ref().unwrap();
+        assert_eq!(period.start_date.as_ref().map(DateOnly::as_str), Some("2026-05-01"));
+        assert_eq!(period.end_date.as_ref().map(DateOnly::as_str), Some("2026-05-31"));
+        assert_eq!(doc.delivery_date.as_ref().map(DateOnly::as_str), Some("2026-05-28"));
+
+        let out = doc.to_value().unwrap();
+        assert_eq!(out["invoice_period"]["start_date"], json!("2026-05-01"));
+        assert_eq!(out["invoice_period"]["end_date"], json!("2026-05-31"));
+        assert_eq!(out["delivery_date"], json!("2026-05-28"));
+    }
+
+    #[test]
+    fn invoice_period_rejects_an_empty_group() {
+        // BG-14, when present, requires at least one of BT-73 / BT-74.
+        let mut input = synthetic_document_json();
+        input["invoice_period"] = json!({});
+        assert!(CommercialDocument::try_from_value(input).is_err());
     }
 
     #[test]

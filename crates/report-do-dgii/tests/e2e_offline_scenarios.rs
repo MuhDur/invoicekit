@@ -146,6 +146,8 @@ fn dominican_credit_note() -> CommercialDocument {
         tax_point_date: None,
         // UBL 2.1 CreditNote has no top-level cbc:DueDate; omit it.
         due_date: None,
+        invoice_period: None,
+        delivery_date: None,
         document_number: DocumentNumber::new("NC-2026-DO-0001").unwrap(),
         currency: Iso4217Code::new("DOP").unwrap(),
         supplier: dominican_party("Empresa Dominicana SRL", ISSUER_RNC, "Santo Domingo"),
@@ -306,6 +308,8 @@ fn factura_consumo_type_32_multiline_18pct_itbis() {
         issue_date: DateOnly::new("2026-05-27").unwrap(),
         tax_point_date: None,
         due_date: Some(DateOnly::new("2026-06-26").unwrap()),
+        invoice_period: None,
+        delivery_date: None,
         document_number: DocumentNumber::new("FC-2026-DO-0042").unwrap(),
         currency: Iso4217Code::new("DOP").unwrap(),
         supplier: dominican_party("Supermercado Nacional SRL", ISSUER_RNC, "Santo Domingo"),
@@ -384,6 +388,8 @@ fn exportacion_type_46_is_itbis_exempt_zero_rated() {
         issue_date: DateOnly::new("2026-05-27").unwrap(),
         tax_point_date: None,
         due_date: Some(DateOnly::new("2026-07-26").unwrap()),
+        invoice_period: None,
+        delivery_date: None,
         document_number: DocumentNumber::new("EXP-2026-DO-0007").unwrap(),
         // Exports are commonly invoiced in USD; DGII accepts foreign currency.
         currency: Iso4217Code::new("USD").unwrap(),

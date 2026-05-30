@@ -389,6 +389,8 @@ fn document(config: &FixtureConfig) -> Result<CommercialDocument, Box<dyn Error>
         issue_date: DateOnly::new("2026-05-27")?,
         tax_point_date: Some(DateOnly::new("2026-05-27")?),
         due_date,
+        invoice_period: None,
+        delivery_date: None,
         document_number: DocumentNumber::new(document_number)?,
         currency: Iso4217Code::new("EUR")?,
         supplier: party(
