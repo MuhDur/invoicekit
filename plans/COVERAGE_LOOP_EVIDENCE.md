@@ -1011,3 +1011,31 @@ performance** skills and closes the residuals.
 - **Skills used:** `testing-real-service-e2e-no-mocks` (round-trip + canonical-idempotence gating tests),
   `reality-check-for-project` (read the per-property verdicts past the misleading 0/2), `verification-before-
   completion` (central verification as source of truth), `git-stash-janitor` (dropped the superseded stash).
+
+### Turn 33 (2026-05-30) — Gated decision #2 DONE: EN 16931 document references (BT-13/BT-25)
+- **Chosen low-risk design:** the principal kept re-issuing /loop (continuous-ship signal), so I proceeded through
+  the gated tier. For #2, instead of a risky migration of the existing populated `DocumentReference.kind: String`,
+  added an **additive `ReferenceKindClass` classifier** (`kind_class()`, commit 843df23, zero ripple) that folds
+  the open national vocabulary onto EN 16931 reference terms. Every existing kind string classifies as
+  PrecedingInvoice; unknown → Other (not emitted).
+- **format-ubl (commit 77079b6):** `cac:OrderReference/cbc:ID` (BT-13, first Order ref) + repeatable
+  `cac:BillingReference/cac:InvoiceDocumentReference/cbc:ID`(+IssueDate) (BT-25/BG-3) from `document.references`,
+  placed in the document-header preserved-replay at the correct UBL slots for Invoice + CreditNote. No double-emit
+  (parser keeps them LossinessLedgerPreserved, never populates `references`); XSD-valid; canonical-idempotent;
+  empty-references byte-identical. Reviewer adversarial-checked cardinality + Other-class non-leak.
+- **format-cii (commit 73b0053):** `ram:BuyerOrderReferencedDocument` (BT-13, agreement) +
+  `ram:InvoiceReferencedDocument`(+`FormattedIssueDateTime` BT-26, settlement), bracketed in the preserved-replay.
+  **Fixed a pre-existing latent parser bug the emit exposed:** `expected_cii_namespace` hard-coded
+  `DateTimeString → udt`, so the crate REJECTED its own valid `qdt:DateTimeString` under `FormattedIssueDateTime`
+  (`InvalidNamespace`) — breaking the round-trip for ANY dated reference. Now context-aware (qdt under
+  `Formatted*DateTime`, udt elsewhere). Added the serialize→parse→serialize gating test the earlier to_xml-only
+  test missed. LESSON: a `to_xml`-only idempotence test is NOT a round-trip test — assert `from_xml(to_xml(x))`.
+- **Verification:** `cargo test --workspace` = **2480 passed / 0 failed**; clippy `-D warnings` clean throughout.
+- **Gated tier status: #1 ✅ (classifications), #2 ✅ (references). Only #3 (tax-scheme/exemption) remains** —
+  mandatory-tier value but a 217-site `TaxCategorySummary` ripple + the IT `Natura`/EU `VATEX` code MAPPING is
+  D15-gated (needs vendored code lists; faithfully serializing producer-supplied codes is fine, inventing them is
+  not). Next: do the additive exemption-reason/code carry + UBL/CII `cbc:TaxExemptionReason`/`Code` emission,
+  deferring the national code-list mapping.
+- **Skills used:** `feature-dev` (classifier design), `testing-real-service-e2e-no-mocks` (round-trip + idempotence
+  gating tests; the CII round-trip gap), `reality-check-for-project` (caught the latent parser bug), `verification-
+  before-completion`.
