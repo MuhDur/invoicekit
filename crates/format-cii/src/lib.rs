@@ -18,8 +18,8 @@ use invoicekit_ir::{
     DecimalValue, DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference,
     DocumentType, IrError, Iso4217Code, ItemClassification, JurisdictionExtension, LocalizedString,
     LossinessLedger, MonetaryTotal, MoneyAmount, Party, PartyTaxId, PaymentInstruction,
-    PaymentInstructionKind, PaymentTerms, PostalAddress, Quantity, SchemaVersion,
-    TaxCategorySummary,
+    PaymentInstructionKind, PaymentTerms, PostalAddress, Quantity, ReferenceKindClass,
+    SchemaVersion, TaxCategorySummary,
 };
 use quick_xml::events::{attributes::AttrError, BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
@@ -1564,11 +1564,21 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
         document,
         "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement/BuyerTradeParty",
     )?;
-    write_preserved_xml_after_all(
+    write_preserved_xml_before(
         &mut xml,
         document,
         "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement",
         None,
+        "BuyerOrderReferencedDocument",
+    )?;
+    let emitted_buyer_order = write_buyer_order_referenced_document(&mut xml, document);
+    write_preserved_xml_after_child(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeAgreement",
+        None,
+        "BuyerOrderReferencedDocument",
+        emitted_buyer_order,
     )?;
     xml.push_str("</ram:ApplicableHeaderTradeAgreement>");
 
@@ -1689,11 +1699,21 @@ fn serialize_document(document: &CommercialDocument) -> Result<String, CiiError>
         "SpecifiedTradeSettlementHeaderMonetarySummation",
     )?;
     write_monetary_total(&mut xml, &document.monetary_total, &currency, document)?;
-    write_preserved_xml_after_all(
+    write_preserved_xml_before(
         &mut xml,
         document,
         "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement",
         None,
+        "InvoiceReferencedDocument",
+    )?;
+    let emitted_invoice_ref = write_invoice_referenced_documents(&mut xml, document)?;
+    write_preserved_xml_after_child(
+        &mut xml,
+        document,
+        "CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement",
+        None,
+        "InvoiceReferencedDocument",
+        emitted_invoice_ref,
     )?;
     xml.push_str("</ram:ApplicableHeaderTradeSettlement>");
     write_preserved_xml_after_all(
@@ -1953,14 +1973,63 @@ fn write_preserved_xml_after_all(
         document,
         container,
         line_id,
-        known_cii_children(parent).and_then(|children| {
-            children
-                .iter()
-                .filter_map(|child| cii_child_order(parent, child))
-                .max()
-        }),
+        max_known_child_order(parent),
         None,
     )
+}
+
+/// Replay every remaining preserved sibling whose schema order is strictly
+/// greater than `child`'s order (and greater than the highest known anchor).
+///
+/// Used after emitting a native element that the *parser* deliberately keeps as
+/// preserved raw XML — `ram:BuyerOrderReferencedDocument` (BT-13) and
+/// `ram:InvoiceReferencedDocument` (BT-25). Those elements are intentionally
+/// absent from [`known_cii_children`] (so the parser preserves them rather than
+/// dropping them), which means [`write_preserved_xml_after_all`] alone would
+/// re-replay every sibling above the last *known* anchor and double-emit the
+/// fragments that the matching `write_preserved_xml_before` already wrote. Lower-
+/// bounding the trailing replay on `child`'s own order keeps each fragment to a
+/// single emission and preserves schema order across the native + preserved mix.
+///
+/// `emitted_native` selects whether the trailing replay *includes* a preserved
+/// fragment that shares `child`'s own schema order. When the native element was
+/// emitted from `document.references` (a fresh-IR doc), a preserved fragment at
+/// the same order is suppressed so the slot is not double-filled. When no native
+/// element was emitted (the common parsed-doc case, whose `references` are empty
+/// because the parser preserves the element as raw XML), the preserved fragment
+/// at `child`'s order is replayed so the round-trip stays lossless.
+fn write_preserved_xml_after_child(
+    xml: &mut String,
+    document: &CommercialDocument,
+    container: &str,
+    line_id: Option<&str>,
+    child: &str,
+    emitted_native: bool,
+) -> Result<(), CiiError> {
+    let parent = container_name(container);
+    let child_lower = cii_child_order(parent, child).map(|child_order| {
+        // EXCLUSIVE lower bound: `order > lower`. To *include* the child's own
+        // order, drop the bound by one; to *exclude* it, keep the child's order.
+        if emitted_native {
+            child_order
+        } else {
+            child_order.saturating_sub(1)
+        }
+    });
+    let lower_bound = match (max_known_child_order(parent), child_lower) {
+        (Some(anchor), Some(child_order)) => Some(anchor.max(child_order)),
+        (anchor, child_order) => anchor.or(child_order),
+    };
+    write_preserved_xml(xml, document, container, line_id, lower_bound, None)
+}
+
+fn max_known_child_order(parent: &str) -> Option<u16> {
+    known_cii_children(parent).and_then(|children| {
+        children
+            .iter()
+            .filter_map(|child| cii_child_order(parent, child))
+            .max()
+    })
 }
 
 fn cii_preserved_xml_values(
@@ -2490,6 +2559,67 @@ fn write_designated_product_classifications(
     }
 }
 
+/// Emit the EN 16931 BT-13 purchase order reference as
+/// `ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID` under
+/// `ram:ApplicableHeaderTradeAgreement`, sourced from the first
+/// [`ReferenceKindClass::Order`] entry in `document.references`.
+///
+/// BT-13 is `0..1`: only the first Order-class reference is emitted. The
+/// element is omitted entirely when no Order-class reference exists, so
+/// documents without one serialize byte-identically to before this binding.
+///
+/// Returns `true` when a native element was emitted, so the caller can suppress
+/// a same-order preserved fragment and avoid double-filling the BT-13 slot.
+fn write_buyer_order_referenced_document(xml: &mut String, document: &CommercialDocument) -> bool {
+    let Some(reference) = document
+        .references
+        .iter()
+        .find(|reference| reference.kind_class() == ReferenceKindClass::Order)
+    else {
+        return false;
+    };
+    xml.push_str("<ram:BuyerOrderReferencedDocument>");
+    write_text_element(xml, "ram:IssuerAssignedID", &reference.id);
+    xml.push_str("</ram:BuyerOrderReferencedDocument>");
+    true
+}
+
+/// Emit the EN 16931 BT-25 preceding-invoice references as
+/// `ram:InvoiceReferencedDocument/ram:IssuerAssignedID` (plus an optional
+/// `ram:FormattedIssueDateTime` carrying BT-26 when the reference issue date is
+/// present) under `ram:ApplicableHeaderTradeSettlement`, one element per
+/// [`ReferenceKindClass::PrecedingInvoice`] entry in `document.references`.
+///
+/// BG-3 is `0..n`: every preceding-invoice reference is emitted in IR order.
+/// Empty when the document carries no preceding-invoice reference, so such
+/// documents serialize byte-identically to before this binding existed.
+///
+/// Returns `true` when at least one native element was emitted, so the caller
+/// can suppress a same-order preserved fragment and avoid double-filling the
+/// BT-25 slot.
+fn write_invoice_referenced_documents(
+    xml: &mut String,
+    document: &CommercialDocument,
+) -> Result<bool, CiiError> {
+    let mut emitted = false;
+    for reference in document
+        .references
+        .iter()
+        .filter(|reference| reference.kind_class() == ReferenceKindClass::PrecedingInvoice)
+    {
+        xml.push_str("<ram:InvoiceReferencedDocument>");
+        write_text_element(xml, "ram:IssuerAssignedID", &reference.id);
+        if let Some(issue_date) = &reference.issue_date {
+            xml.push_str(r#"<ram:FormattedIssueDateTime><qdt:DateTimeString format="102">"#);
+            write_xml_text(&iso_date_to_cii(issue_date)?, xml);
+            xml.push_str("</qdt:DateTimeString></ram:FormattedIssueDateTime>");
+        }
+        xml.push_str("</ram:InvoiceReferencedDocument>");
+        emitted = true;
+    }
+    Ok(emitted)
+}
+
 fn write_note(
     xml: &mut String,
     note: &LocalizedString,
@@ -2789,7 +2919,20 @@ fn expected_cii_namespace(parent_stack: &[String], name: &str) -> &'static str {
     {
         CII_RSM_NAMESPACE_URI
     } else if name == "DateTimeString" {
-        CII_UDT_NAMESPACE_URI
+        // `DateTimeString` is `udt:` under a `udt:DateTimeType` parent
+        // (`IssueDateTime`, `TaxPointDate`, `DueDateDateTime`, …) but `qdt:`
+        // under a `qdt:FormattedDateTimeType` parent — the `Formatted*DateTime`
+        // elements such as `FormattedIssueDateTime` (BT-26 on a referenced
+        // document). Without this distinction the parser rejects its own valid
+        // output for a dated reference.
+        if parent_stack
+            .last()
+            .is_some_and(|parent| parent.starts_with("Formatted") && parent.ends_with("DateTime"))
+        {
+            CII_QDT_NAMESPACE_URI
+        } else {
+            CII_UDT_NAMESPACE_URI
+        }
     } else {
         CII_RAM_NAMESPACE_URI
     }
@@ -3954,15 +4097,15 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{
-        crate_name, from_xml, mapping, to_xml, CiiError, CII_RAM_NAMESPACE_URI,
-        CII_RSM_NAMESPACE_URI,
+        crate_name, from_xml, mapping, to_xml, CiiError, CII_QDT_NAMESPACE_URI,
+        CII_RAM_NAMESPACE_URI, CII_RSM_NAMESPACE_URI,
     };
     use invoicekit_canonical::canonicalize_xml;
     use invoicekit_ir::{
         CommercialDocument, CommercialDocumentParts, Contact, CountryCode, DateOnly, DecimalValue,
-        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentType, Iso4217Code,
-        ItemClassification, JurisdictionExtension, LocalizedString, MonetaryTotal, Party,
-        PartyTaxId, PaymentInstruction, PaymentInstructionKind, PaymentTerms, PostalAddress,
+        DocumentId, DocumentLine, DocumentMeta, DocumentNumber, DocumentReference, DocumentType,
+        Iso4217Code, ItemClassification, JurisdictionExtension, LocalizedString, MonetaryTotal,
+        Party, PartyTaxId, PaymentInstruction, PaymentInstructionKind, PaymentTerms, PostalAddress,
         SchemaVersion, TaxCategorySummary,
     };
     use rust_decimal::Decimal;
@@ -4724,6 +4867,273 @@ mod tests {
         let parsed = parse_document(&serialized);
         assert_eq!(parsed.lines[0].classifications, document.lines[0].classifications);
         assert_eq!(to_xml(&parsed).unwrap(), serialized);
+    }
+
+    /// GATING TEST (1): a fresh `CommercialDocument` carrying one Order-class
+    /// reference (BT-13) AND one `PrecedingInvoice`-class reference (BT-25, with an
+    /// issue date for BT-26) emits BOTH typed elements at their correct schema
+    /// slots, and the serialized output is canonical (idempotent).
+    #[test]
+    fn document_references_emit_order_and_preceding_invoice_in_schema_order() {
+        let mut document = fixture(DocumentType::CreditNote, 60);
+        document.references = vec![
+            DocumentReference {
+                kind: "purchase-order".to_owned(),
+                id: "PO-2026-991".to_owned(),
+                issue_date: None,
+            },
+            DocumentReference {
+                kind: "original-invoice".to_owned(),
+                id: "INV-2026-100".to_owned(),
+                issue_date: Some(DateOnly::new("2026-04-15").unwrap()),
+            },
+        ];
+
+        let serialized = to_xml(&document).unwrap();
+
+        // BT-13: BuyerOrderReferencedDocument under ApplicableHeaderTradeAgreement.
+        assert!(serialized.contains(
+            "<ram:BuyerOrderReferencedDocument><ram:IssuerAssignedID>PO-2026-991</ram:IssuerAssignedID></ram:BuyerOrderReferencedDocument>"
+        ));
+        // BT-25: InvoiceReferencedDocument carries the preceding-invoice id, and
+        // BT-26 emits as ram:FormattedIssueDateTime/qdt:DateTimeString format="102".
+        // (to_xml runs the canonicalizer, which scopes the qdt namespace decl onto
+        // the first element that uses the qdt prefix; assert on the stable pieces.)
+        assert!(serialized.contains(
+            "<ram:InvoiceReferencedDocument><ram:IssuerAssignedID>INV-2026-100</ram:IssuerAssignedID><ram:FormattedIssueDateTime><qdt:DateTimeString"
+        ));
+        assert!(serialized.contains(r#"format="102">20260415</qdt:DateTimeString></ram:FormattedIssueDateTime></ram:InvoiceReferencedDocument>"#));
+        // Each typed element emitted exactly once.
+        assert_eq!(serialized.matches("<ram:BuyerOrderReferencedDocument>").count(), 1);
+        assert_eq!(serialized.matches("<ram:InvoiceReferencedDocument>").count(), 1);
+
+        // Schema slots: BT-13 sits inside the agreement (after BuyerTradeParty);
+        // BT-25 sits inside the settlement (after the monetary summation). The
+        // canonicalizer may add an xmlns decl to the container open tag, so match
+        // the open tag without its closing bracket.
+        let agreement_open = serialized
+            .find("<ram:ApplicableHeaderTradeAgreement")
+            .expect("agreement present");
+        let agreement_close = serialized
+            .find("</ram:ApplicableHeaderTradeAgreement>")
+            .expect("agreement closes");
+        let buyer_order_pos = serialized
+            .find("<ram:BuyerOrderReferencedDocument>")
+            .expect("BT-13 present");
+        assert!(agreement_open < buyer_order_pos && buyer_order_pos < agreement_close);
+
+        let settlement_open = serialized
+            .find("<ram:ApplicableHeaderTradeSettlement")
+            .expect("settlement present");
+        let monetary_pos = serialized
+            .find("<ram:SpecifiedTradeSettlementHeaderMonetarySummation>")
+            .expect("monetary summation present");
+        let invoice_ref_pos = serialized
+            .find("<ram:InvoiceReferencedDocument>")
+            .expect("BT-25 present");
+        assert!(settlement_open < monetary_pos && monetary_pos < invoice_ref_pos);
+
+        // The qdt namespace used by FormattedIssueDateTime is declared at the root.
+        assert!(serialized.contains(CII_QDT_NAMESPACE_URI));
+
+        // Canonical idempotence: schema order holds.
+        assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
+    }
+
+    /// GATING TEST (round-trip): a dated `PrecedingInvoice` reference (BT-25 +
+    /// BT-26) must survive serialize -> parse -> serialize. Before the
+    /// `expected_cii_namespace` fix, `from_xml` rejected the serializer's own
+    /// `qdt:DateTimeString` under `FormattedIssueDateTime` with
+    /// `InvalidNamespace` (it hard-coded `DateTimeString -> udt`), so a dated
+    /// reference produced output the crate could not re-parse.
+    #[test]
+    fn dated_preceding_invoice_reference_round_trips_through_parse() {
+        let mut document = fixture(DocumentType::CreditNote, 63);
+        document.references = vec![DocumentReference {
+            kind: "original-invoice".to_owned(),
+            id: "INV-2026-100".to_owned(),
+            issue_date: Some(DateOnly::new("2026-04-15").unwrap()),
+        }];
+
+        let serialized = to_xml(&document).unwrap();
+        // The crate must accept its OWN dated-reference output.
+        let (reparsed, _ledger) =
+            from_xml(&serialized).expect("dated reference output must re-parse");
+        let reserialized = to_xml(&reparsed).unwrap();
+        assert_eq!(
+            reserialized, serialized,
+            "dated preceding-invoice reference round-trip is not byte-stable"
+        );
+        // BT-26 survives exactly once.
+        assert_eq!(
+            reserialized.matches("<ram:FormattedIssueDateTime>").count(),
+            1
+        );
+        assert!(reserialized.contains(">20260415</qdt:DateTimeString>"));
+    }
+
+    /// A document with no references serializes byte-identically to one whose
+    /// references vector is empty — proving the binding is behavior-preserving
+    /// (existing goldens/corpus unchanged for reference-free documents).
+    #[test]
+    fn empty_references_serialize_byte_identically() {
+        let document = fixture(DocumentType::Invoice, 61);
+        assert!(document.references.is_empty());
+        let serialized = to_xml(&document).unwrap();
+        assert!(!serialized.contains("BuyerOrderReferencedDocument"));
+        assert!(!serialized.contains("InvoiceReferencedDocument"));
+        // Canonical and stable just as before the binding existed.
+        assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
+    }
+
+    /// Multiple `PrecedingInvoice`-class references emit one
+    /// `InvoiceReferencedDocument` each (BG-3 is `0..n`); a reference without an
+    /// issue date omits the optional `FormattedIssueDateTime`. Idempotence holds.
+    #[test]
+    fn multiple_preceding_invoice_references_emit_one_element_each() {
+        let mut document = fixture(DocumentType::CreditNote, 62);
+        document.references = vec![
+            DocumentReference {
+                kind: "preceding-invoice".to_owned(),
+                id: "INV-A".to_owned(),
+                issue_date: Some(DateOnly::new("2026-03-01").unwrap()),
+            },
+            DocumentReference {
+                kind: "rectified-invoice".to_owned(),
+                id: "INV-B".to_owned(),
+                issue_date: None,
+            },
+        ];
+
+        let serialized = to_xml(&document).unwrap();
+        assert_eq!(serialized.matches("<ram:InvoiceReferencedDocument>").count(), 2);
+        assert!(serialized.contains("<ram:IssuerAssignedID>INV-A</ram:IssuerAssignedID>"));
+        assert!(serialized.contains("<ram:IssuerAssignedID>INV-B</ram:IssuerAssignedID>"));
+        // INV-A keeps order: its element appears before INV-B's.
+        let a_pos = serialized.find("INV-A").unwrap();
+        let b_pos = serialized.find("INV-B").unwrap();
+        assert!(a_pos < b_pos);
+        // Only the dated reference carries FormattedIssueDateTime.
+        assert_eq!(serialized.matches("<ram:FormattedIssueDateTime>").count(), 1);
+        assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
+    }
+
+    /// Other/Contract-class references are NOT emitted in this task: they neither
+    /// produce `BuyerOrderReferencedDocument` nor `InvoiceReferencedDocument` and
+    /// the document stays byte-stable/canonical.
+    #[test]
+    fn non_order_non_preceding_references_are_skipped() {
+        let mut document = fixture(DocumentType::Invoice, 63);
+        document.references = vec![
+            DocumentReference {
+                kind: "contract".to_owned(),
+                id: "C-1".to_owned(),
+                issue_date: None,
+            },
+            DocumentReference {
+                kind: "some-unrecognized-kind".to_owned(),
+                id: "X-1".to_owned(),
+                issue_date: None,
+            },
+            DocumentReference {
+                kind: "despatch-advice".to_owned(),
+                id: "D-1".to_owned(),
+                issue_date: None,
+            },
+        ];
+        let serialized = to_xml(&document).unwrap();
+        assert!(!serialized.contains("BuyerOrderReferencedDocument"));
+        assert!(!serialized.contains("InvoiceReferencedDocument"));
+        assert!(!serialized.contains("C-1"));
+        assert!(!serialized.contains("X-1"));
+        assert!(!serialized.contains("D-1"));
+        assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
+    }
+
+    /// GATING TEST (2): NO DOUBLE-EMIT through parse. The parser never populates
+    /// `document.references` (it preserves typed reference elements as raw
+    /// round-trip XML), so a document that carried a `BuyerOrderReferencedDocument`
+    /// and an `InvoiceReferencedDocument` through parse must re-emit each EXACTLY
+    /// ONCE — once from the preserved-XML replay, never also from the native
+    /// `references` path (which stays empty for parsed docs).
+    #[test]
+    fn parsed_reference_elements_re_emit_exactly_once_no_double() {
+        let document = fixture(DocumentType::CreditNote, 64);
+        let xml = to_xml(&document).unwrap();
+
+        // Inject a BT-13 element into the agreement and a BT-25 element into the
+        // settlement, mirroring a producer that carried these natively.
+        let buyer_order = "<ram:BuyerOrderReferencedDocument><ram:IssuerAssignedID>PO-CARRIED</ram:IssuerAssignedID></ram:BuyerOrderReferencedDocument>";
+        let with_order = xml.replacen(
+            "</ram:ApplicableHeaderTradeAgreement>",
+            &format!("{buyer_order}</ram:ApplicableHeaderTradeAgreement>"),
+            1,
+        );
+        let invoice_ref = "<ram:InvoiceReferencedDocument><ram:IssuerAssignedID>INV-CARRIED</ram:IssuerAssignedID></ram:InvoiceReferencedDocument>";
+        let carried = with_order.replacen(
+            "</ram:ApplicableHeaderTradeSettlement>",
+            &format!("{invoice_ref}</ram:ApplicableHeaderTradeSettlement>"),
+            1,
+        );
+
+        let parsed = parse_document(&carried);
+        // Parser keeps these as preserved raw XML; native references stay empty.
+        assert!(
+            parsed.references.is_empty(),
+            "parser must not populate references (preserve-only path)"
+        );
+
+        let reserialized = to_xml(&parsed).unwrap();
+        // Each carried element re-emits EXACTLY once — no double from a second path.
+        assert_eq!(
+            reserialized.matches("<ram:BuyerOrderReferencedDocument>").count(),
+            1,
+            "BT-13 must re-emit exactly once (preserved replay, not also native)"
+        );
+        assert_eq!(
+            reserialized.matches("<ram:InvoiceReferencedDocument>").count(),
+            1,
+            "BT-25 must re-emit exactly once (preserved replay, not also native)"
+        );
+        assert!(reserialized.contains("PO-CARRIED"));
+        assert!(reserialized.contains("INV-CARRIED"));
+
+        // Stable, canonical, and re-parses identically (no regression / no drift).
+        assert_eq!(canonicalize_xml(&reserialized).unwrap(), reserialized);
+        assert_eq!(parse_document(&reserialized), parsed);
+    }
+
+    /// MIXED case: a parsed doc carrying a preserved BT-25 sibling, then re-emitted
+    /// with a NATIVE Order-class reference added to the IR. Both must land in
+    /// schema order (BT-13 in the agreement, preserved BT-25 in the settlement),
+    /// each exactly once, and the result stays canonical.
+    #[test]
+    fn native_order_reference_coexists_with_preserved_preceding_invoice() {
+        let document = fixture(DocumentType::CreditNote, 65);
+        let xml = to_xml(&document).unwrap();
+        let invoice_ref = "<ram:InvoiceReferencedDocument><ram:IssuerAssignedID>INV-PRESERVED</ram:IssuerAssignedID></ram:InvoiceReferencedDocument>";
+        let carried = xml.replacen(
+            "</ram:ApplicableHeaderTradeSettlement>",
+            &format!("{invoice_ref}</ram:ApplicableHeaderTradeSettlement>"),
+            1,
+        );
+
+        let mut parsed = parse_document(&carried);
+        // Add a NATIVE order reference to the IR (fresh BT-13).
+        parsed.references.push(DocumentReference {
+            kind: "order".to_owned(),
+            id: "PO-NATIVE".to_owned(),
+            issue_date: None,
+        });
+
+        let serialized = to_xml(&parsed).unwrap();
+        // Native BT-13 emitted once; preserved BT-25 replayed once.
+        assert_eq!(serialized.matches("<ram:BuyerOrderReferencedDocument>").count(), 1);
+        assert_eq!(serialized.matches("<ram:InvoiceReferencedDocument>").count(), 1);
+        assert!(serialized.contains("PO-NATIVE"));
+        assert!(serialized.contains("INV-PRESERVED"));
+        // Schema order holds across native + preserved mix.
+        assert_eq!(canonicalize_xml(&serialized).unwrap(), serialized);
     }
 
     #[test]
