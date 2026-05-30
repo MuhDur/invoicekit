@@ -792,6 +792,8 @@ fn tax_summary_from_gobl(value: &Value) -> Vec<TaxCategorySummary> {
                 taxable_amount: t,
                 tax_amount: a,
                 tax_rate: percent,
+                exemption_reason: None,
+                exemption_reason_code: None,
             });
         }
     }
@@ -1000,6 +1002,8 @@ mod tests {
                 taxable_amount: dv("200.00"),
                 tax_amount: dv("42.00"),
                 tax_rate: Some(dv("21.00")),
+                exemption_reason: None,
+                exemption_reason_code: None,
             }],
             monetary_total: MonetaryTotal {
                 line_extension_amount: dv("200.00"),
@@ -1181,12 +1185,16 @@ mod tests {
                 taxable_amount: dv("0"),
                 tax_amount: near_max.clone(),
                 tax_rate: None,
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "VAT2".into(),
                 taxable_amount: dv("0"),
                 tax_amount: near_max,
                 tax_rate: None,
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ];
         let value = tax_summary_to_gobl(&summary);
@@ -1206,12 +1214,16 @@ mod tests {
                 taxable_amount: dv("100.00"),
                 tax_amount: dv("21.00"),
                 tax_rate: Some(dv("21.00")),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "VAT-RED".into(),
                 taxable_amount: dv("50.00"),
                 tax_amount: dv("5.00"),
                 tax_rate: Some(dv("10.00")),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ];
         let value = tax_summary_to_gobl(&summary);

@@ -97,6 +97,8 @@ fn turkish_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(2000), // Turkey standard KDV/VAT 20%
             tax_rate: Some(DecimalValue::new(Decimal::new(2000, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -295,6 +297,8 @@ fn tr_doc(
             tax_amount: amt(tax_minor),
             // Scale-2 percentage so it renders e.g. "20.00" / "10.00" / "0.00".
             tax_rate: Some(DecimalValue::new(Decimal::new(rate_bps, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(base_minor),

@@ -838,6 +838,8 @@ mod tests {
                 taxable_amount: amt(100_000),
                 tax_amount: amt(15000),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1500, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             }],
             monetary_total: MonetaryTotal {
                 line_extension_amount: amt(100_000),
@@ -1118,12 +1120,16 @@ mod tests {
                 taxable_amount: amt(100_000),
                 tax_amount: DecimalValue::new(Decimal::MAX),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1500, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "S2".to_owned(),
                 taxable_amount: amt(100_000),
                 tax_amount: DecimalValue::new(Decimal::MAX),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1500, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ];
         let err = build_qr_fields(&doc, "2026-05-26T10:30:00Z")

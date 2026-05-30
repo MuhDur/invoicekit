@@ -114,6 +114,8 @@ fn argentine_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(2100),
             tax_rate: Some(DecimalValue::new(Decimal::new(2100, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -438,6 +440,8 @@ fn argentina_nota_de_credito_a_corrective_document() {
             taxable_amount: amt(10000),
             tax_amount: amt(2100),
             tax_rate: Some(DecimalValue::new(Decimal::new(2100, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -514,6 +518,8 @@ fn argentina_multiline_factura_a_21pct() {
             taxable_amount: amt(30000), // 300.00 net
             tax_amount: amt(6300),      // 63.00 IVA @ 21%
             tax_rate: Some(DecimalValue::new(Decimal::new(2100, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         total: MonetaryTotal {
             line_extension_amount: amt(30000),
@@ -582,6 +588,8 @@ fn argentina_factura_e_export_wsfex_zero_rated() {
             taxable_amount: amt(50000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         total: MonetaryTotal {
             line_extension_amount: amt(50000),
@@ -646,6 +654,8 @@ fn argentina_wsmtxca_detailed_reduced_rate() {
             taxable_amount: amt(20000), // 200.00 net
             tax_amount: amt(2100),      // 21.00 IVA @ 10.5%
             tax_rate: Some(DecimalValue::new(Decimal::new(1050, 2))), // 10.50
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         total: MonetaryTotal {
             line_extension_amount: amt(20000),
@@ -843,6 +853,8 @@ fn argentina_credit_note_and_export_paths_are_byte_deterministic() {
             taxable_amount: amt(10000),
             tax_amount: amt(2100),
             tax_rate: Some(DecimalValue::new(Decimal::new(2100, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -872,6 +884,8 @@ fn argentina_credit_note_and_export_paths_are_byte_deterministic() {
             taxable_amount: amt(50000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         total: MonetaryTotal {
             line_extension_amount: amt(50000),

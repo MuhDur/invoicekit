@@ -100,6 +100,8 @@ fn polish_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(2300),
             tax_rate: Some(DecimalValue::new(Decimal::new(2300, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -301,6 +303,8 @@ fn polish_corrective_invoice() -> CommercialDocument {
             tax_amount: amt(1150),
             // Standard Polish VAT rate is 23 %.
             tax_rate: Some(DecimalValue::new(Decimal::new(2300, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(5000),
@@ -385,18 +389,24 @@ fn polish_mixed_rate_invoice() -> CommercialDocument {
                 taxable_amount: amt(10000),
                 tax_amount: amt(2300),
                 tax_rate: Some(DecimalValue::new(Decimal::new(2300, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "R".to_owned(),
                 taxable_amount: amt(20000),
                 tax_amount: amt(1600),
                 tax_rate: Some(DecimalValue::new(Decimal::new(800, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "Z".to_owned(),
                 taxable_amount: amt(30000),
                 tax_amount: amt(0),
                 tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {
@@ -458,6 +468,8 @@ fn polish_reverse_charge_invoice() -> CommercialDocument {
             taxable_amount: amt(100_000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(100_000),

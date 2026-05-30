@@ -119,6 +119,8 @@ fn vietnamese_invoice() -> CommercialDocument {
             taxable_amount: dong(10_000_000),
             tax_amount: dong(1_000_000),
             tax_rate: Some(DecimalValue::new(Decimal::new(1000, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: dong(10_000_000),
@@ -316,6 +318,8 @@ fn vietnamese_credit_note() -> CommercialDocument {
             taxable_amount: dong(5_000_000),
             tax_amount: dong(500_000),
             tax_rate: Some(DecimalValue::new(Decimal::new(1000, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: dong(5_000_000),
@@ -386,12 +390,16 @@ fn vietnamese_multiline_mixed_rate_invoice() -> CommercialDocument {
                 taxable_amount: dong(10_000_000),
                 tax_amount: dong(1_000_000),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1000, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "AA".to_owned(),
                 taxable_amount: dong(20_000_000),
                 tax_amount: dong(1_000_000),
                 tax_rate: Some(DecimalValue::new(Decimal::new(500, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {
@@ -451,6 +459,8 @@ fn vietnamese_export_zero_rated_invoice() -> CommercialDocument {
             taxable_amount: dong(100_000_000),
             tax_amount: dong(0),
             tax_rate: Some(DecimalValue::new(Decimal::new(0, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: dong(100_000_000),

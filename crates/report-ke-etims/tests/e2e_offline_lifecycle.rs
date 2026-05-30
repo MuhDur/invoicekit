@@ -99,6 +99,8 @@ fn kenyan_invoice() -> CommercialDocument {
             taxable_amount: amt(1_000_000),
             tax_amount: amt(160_000),
             tax_rate: Some(DecimalValue::new(Decimal::new(1600, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(1_000_000),
@@ -302,6 +304,8 @@ fn kenyan_invoice_with_tax(
             taxable_amount: amt(net_minor),
             tax_amount: amt(tax_minor),
             tax_rate: Some(DecimalValue::new(Decimal::new(rate_bp, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(net_minor),
@@ -474,12 +478,16 @@ fn kenya_mixed_b_and_a_lines_sum_only_taxable_vat() {
                 taxable_amount: amt(net_b),
                 tax_amount: amt(vat_b),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1600, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "A".to_owned(),
                 taxable_amount: amt(net_a),
                 tax_amount: amt(0),
                 tax_rate: Some(DecimalValue::new(Decimal::new(0, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {
@@ -577,6 +585,8 @@ fn kenya_credit_note_references_original_cu_invoice_and_clears() {
             taxable_amount: amt(9_000_000),
             tax_amount: amt(vat_minor(9_000_000, 1600)),
             tax_rate: Some(DecimalValue::new(Decimal::new(1600, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(9_000_000),

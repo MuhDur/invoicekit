@@ -216,6 +216,8 @@ mod tests {
                 taxable_amount: DecimalValue::new(unit),
                 tax_amount: DecimalValue::new(tax),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             }],
             monetary_total: MonetaryTotal {
                 line_extension_amount: DecimalValue::new(unit),

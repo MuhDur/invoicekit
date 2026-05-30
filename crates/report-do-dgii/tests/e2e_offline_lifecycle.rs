@@ -115,6 +115,8 @@ fn dominican_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(1800),
             tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),

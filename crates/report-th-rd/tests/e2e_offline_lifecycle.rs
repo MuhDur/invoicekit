@@ -102,6 +102,8 @@ fn thai_invoice() -> CommercialDocument {
             taxable_amount: amt(100_000),
             tax_amount: amt(7_000),
             tax_rate: Some(DecimalValue::new(Decimal::new(700, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(100_000),
@@ -286,6 +288,8 @@ fn thai_credit_note() -> CommercialDocument {
             taxable_amount: amt(50_000),
             tax_amount: amt(3_500),
             tax_rate: Some(DecimalValue::new(Decimal::new(700, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(50_000),
@@ -361,6 +365,8 @@ fn thai_mixed_standard_and_zero_rated_invoice() -> CommercialDocument {
                 taxable_amount: amt(100_000),
                 tax_amount: amt(7_000),
                 tax_rate: Some(DecimalValue::new(Decimal::new(700, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "Z".to_owned(),
@@ -368,6 +374,8 @@ fn thai_mixed_standard_and_zero_rated_invoice() -> CommercialDocument {
                 tax_amount: amt(0),
                 // Scale-2 zero so cbc:Percent renders "0.00", not bare "0".
                 tax_rate: Some(DecimalValue::new(Decimal::new(0, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {
@@ -431,6 +439,8 @@ fn thai_exempt_invoice() -> CommercialDocument {
             taxable_amount: amt(80_000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::new(0, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(80_000),

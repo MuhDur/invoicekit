@@ -169,6 +169,8 @@ fn dominican_credit_note() -> CommercialDocument {
             taxable_amount: amt(5000),
             tax_amount: amt(900), // 18% ITBIS on 50.00 == 9.00
             tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(5000),
@@ -317,6 +319,8 @@ fn factura_consumo_type_32_multiline_18pct_itbis() {
             taxable_amount: amt(10000), // 100.00
             tax_amount: amt(1800),      // 18.00
             tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -416,6 +420,8 @@ fn exportacion_type_46_is_itbis_exempt_zero_rated() {
             taxable_amount: amt(50000),
             tax_amount: amt(0), // ITBIS-exempt: no tax
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(50000),

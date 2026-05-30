@@ -822,6 +822,8 @@ mod tests {
                 taxable_amount: amt(10000),
                 tax_amount: amt(1800),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             }],
             monetary_total: MonetaryTotal {
                 line_extension_amount: amt(10000),
@@ -1004,12 +1006,16 @@ mod tests {
                 taxable_amount: near_max.clone(),
                 tax_amount: amt(0),
                 tax_rate: None,
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "S".to_owned(),
                 taxable_amount: near_max,
                 tax_amount: amt(0),
                 tax_rate: None,
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ];
         let err = to_inf_nfe_xml(&doc, &NfeContext::default())

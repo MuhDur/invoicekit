@@ -103,6 +103,8 @@ fn saudi_invoice() -> CommercialDocument {
             taxable_amount: amt(100_000),
             tax_amount: amt(15000),
             tax_rate: Some(DecimalValue::new(Decimal::new(1500, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(100_000),
@@ -325,6 +327,8 @@ fn saudi_credit_note() -> CommercialDocument {
             taxable_amount: amt(50000),
             tax_amount: amt(7500),
             tax_rate: Some(DecimalValue::new(Decimal::new(1500, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(50000),
@@ -412,6 +416,8 @@ fn saudi_zero_rated_export_invoice() -> CommercialDocument {
             taxable_amount: amt(120_000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(120_000),
@@ -473,6 +479,8 @@ fn saudi_exempt_invoice() -> CommercialDocument {
             taxable_amount: amt(80000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(80000),

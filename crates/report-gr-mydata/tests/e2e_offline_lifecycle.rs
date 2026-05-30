@@ -122,6 +122,8 @@ fn greek_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(2400),
             tax_rate: Some(DecimalValue::new(Decimal::new(2400, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -342,6 +344,8 @@ fn greek_credit_note() -> CommercialDocument {
             taxable_amount: amt(5000),
             tax_amount: amt(1200),
             tax_rate: Some(DecimalValue::new(Decimal::new(2400, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(5000),
@@ -480,12 +484,16 @@ fn greek_multiline_invoice() -> CommercialDocument {
                 taxable_amount: amt(10000),
                 tax_amount: amt(2400),
                 tax_rate: Some(DecimalValue::new(Decimal::new(2400, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "AA".to_owned(),
                 taxable_amount: amt(5000),
                 tax_amount: amt(650),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1300, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {
@@ -599,6 +607,8 @@ fn greek_exempt_invoice() -> CommercialDocument {
             taxable_amount: amt(20000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::new(0, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(20000),

@@ -841,6 +841,8 @@ mod tests {
                 taxable_amount: amt(100_000),
                 tax_amount: amt(16000),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1600, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             }],
             monetary_total: MonetaryTotal {
                 line_extension_amount: amt(100_000),
@@ -1136,12 +1138,16 @@ mod tests {
                 taxable_amount: amt(100_000),
                 tax_amount: DecimalValue::new(Decimal::MAX),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1600, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "S2".to_owned(),
                 taxable_amount: amt(100_000),
                 tax_amount: DecimalValue::new(Decimal::MAX),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1600, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ];
         let err = to_cfdi_xml(&doc, &CfdiContext::default())

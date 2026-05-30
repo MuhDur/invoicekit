@@ -108,6 +108,8 @@ fn french_invoice() -> CommercialDocument {
             tax_amount: amt(2000),
             // France's standard TVA rate is 20%.
             tax_rate: Some(DecimalValue::new(Decimal::new(2000, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -321,6 +323,8 @@ fn french_credit_note() -> CommercialDocument {
             tax_amount: amt(1000),
             // France's standard TVA rate is 20%.
             tax_rate: Some(DecimalValue::new(Decimal::new(2000, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(5000),
@@ -393,12 +397,16 @@ fn french_multiline_invoice() -> CommercialDocument {
                 taxable_amount: amt(10000),
                 tax_amount: amt(2000),
                 tax_rate: Some(DecimalValue::new(Decimal::new(2000, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "AA".to_owned(),
                 taxable_amount: amt(10000),
                 tax_amount: amt(550),
                 tax_rate: Some(DecimalValue::new(Decimal::new(550, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {
@@ -461,6 +469,8 @@ fn french_reverse_charge_invoice() -> CommercialDocument {
             // Reverse charge: no VAT charged by the supplier.
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::new(0, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),

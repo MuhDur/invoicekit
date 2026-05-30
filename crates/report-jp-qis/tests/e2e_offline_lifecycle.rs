@@ -103,6 +103,8 @@ fn japanese_invoice() -> CommercialDocument {
             taxable_amount: yen(100_000),
             tax_amount: yen(10_000),
             tax_rate: Some(DecimalValue::new(Decimal::from(10))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: yen(100_000),
@@ -329,6 +331,8 @@ fn dual_rate_invoice() -> CommercialDocument {
                 taxable_amount: yen(3_000),
                 tax_amount: yen(300),
                 tax_rate: Some(DecimalValue::new(Decimal::from(10))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             // 8% on 3,000 yen = 240 yen.
             TaxCategorySummary {
@@ -336,6 +340,8 @@ fn dual_rate_invoice() -> CommercialDocument {
                 taxable_amount: yen(3_000),
                 tax_amount: yen(240),
                 tax_rate: Some(DecimalValue::new(Decimal::from(8))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {
@@ -453,6 +459,8 @@ fn qualified_return_credit_note() -> CommercialDocument {
             taxable_amount: yen(50_000),
             tax_amount: yen(5_000),
             tax_rate: Some(DecimalValue::new(Decimal::from(10))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: yen(50_000),

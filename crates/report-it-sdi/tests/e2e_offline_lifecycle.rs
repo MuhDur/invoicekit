@@ -101,6 +101,8 @@ fn italian_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(2200),
             tax_rate: Some(DecimalValue::new(Decimal::new(2200, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -160,6 +162,8 @@ fn italian_credit_note() -> CommercialDocument {
             taxable_amount: amt(5000),
             tax_amount: amt(1100),
             tax_rate: Some(DecimalValue::new(Decimal::new(2200, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(5000),
@@ -233,12 +237,16 @@ fn italian_multiline_mixed_rate_invoice() -> CommercialDocument {
                 taxable_amount: amt(10000),
                 tax_amount: amt(2200),
                 tax_rate: Some(DecimalValue::new(Decimal::new(2200, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "R".to_owned(),
                 taxable_amount: amt(20000),
                 tax_amount: amt(2000),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1000, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {
@@ -303,6 +311,8 @@ fn italian_reverse_charge_invoice() -> CommercialDocument {
             // Scale-2 zero so AliquotaIVA renders "0.00" (fmt_amount keeps the
             // input scale; a scale-0 Decimal::ZERO would render bare "0").
             tax_rate: Some(DecimalValue::new(Decimal::new(0, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(100_000),

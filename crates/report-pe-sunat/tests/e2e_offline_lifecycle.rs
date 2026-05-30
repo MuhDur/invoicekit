@@ -110,6 +110,8 @@ fn peruvian_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(1800),
             tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -191,6 +193,8 @@ fn pe_single_line(
             taxable_amount: amt(net_minor),
             tax_amount: amt(igv_minor),
             tax_rate: Some(DecimalValue::new(Decimal::new(igv_rate_bp, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(net_minor),
@@ -568,12 +572,16 @@ fn pe_multi_line_mixed() -> CommercialDocument {
                 taxable_amount: amt(10_000),
                 tax_amount: amt(1_800),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1_800, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "20".to_owned(),
                 taxable_amount: amt(5_000),
                 tax_amount: amt(0),
                 tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {

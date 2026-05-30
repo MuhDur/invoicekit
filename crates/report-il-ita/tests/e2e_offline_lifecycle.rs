@@ -105,6 +105,8 @@ fn israeli_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(1700),
             tax_rate: Some(DecimalValue::new(Decimal::new(1700, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -300,6 +302,8 @@ fn israeli_credit_note() -> CommercialDocument {
             taxable_amount: amt(5000),
             tax_amount: amt(900),
             tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(5000),
@@ -370,6 +374,8 @@ fn israeli_multiline_invoice() -> CommercialDocument {
             taxable_amount: amt(25000),
             tax_amount: amt(4500),
             tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(25000),
@@ -431,6 +437,8 @@ fn israeli_zero_rated_export() -> CommercialDocument {
             taxable_amount: amt(80000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::new(0, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(80000),

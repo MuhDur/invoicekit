@@ -511,6 +511,8 @@ fn tax_summary(config: &FixtureConfig, amounts: &Amounts) -> Vec<TaxCategorySumm
             config.vat.rate_hundredths,
             2,
         ))),
+        exemption_reason: None,
+        exemption_reason_code: None,
     }]
 }
 

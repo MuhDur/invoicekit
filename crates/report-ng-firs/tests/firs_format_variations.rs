@@ -171,6 +171,8 @@ fn nigerian_credit_note() -> CommercialDocument {
             taxable_amount: amt(5000),
             tax_amount: amt(375),
             tax_rate: Some(rate(750)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(5000),
@@ -307,12 +309,16 @@ fn nigerian_mixed_rate_invoice() -> CommercialDocument {
                 taxable_amount: amt(10000),
                 tax_amount: amt(750),
                 tax_rate: Some(rate(750)),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "Z".to_owned(),
                 taxable_amount: amt(20000),
                 tax_amount: amt(0),
                 tax_rate: Some(rate(0)),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {
@@ -419,6 +425,8 @@ fn nigerian_no_tax_invoice(category: &str, number: &str, description: &str) -> C
             taxable_amount: amt(40000),
             tax_amount: amt(0),
             tax_rate: Some(rate(0)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(40000),

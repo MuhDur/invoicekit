@@ -104,6 +104,8 @@ fn za_invoice() -> CommercialDocument {
             taxable_amount: amt(100_000),
             tax_amount: amt(15000),
             tax_rate: Some(DecimalValue::new(Decimal::new(1500, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(100_000),
@@ -288,6 +290,8 @@ fn za_credit_note() -> CommercialDocument {
             taxable_amount: amt(50000),
             tax_amount: amt(7500),
             tax_rate: Some(DecimalValue::new(Decimal::new(1500, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(50000),
@@ -361,6 +365,8 @@ fn za_multiline_mixed_rate_invoice() -> CommercialDocument {
                 taxable_amount: amt(100_000),
                 tax_amount: amt(15000),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1500, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "Z".to_owned(),
@@ -368,6 +374,8 @@ fn za_multiline_mixed_rate_invoice() -> CommercialDocument {
                 tax_amount: amt(0),
                 // Scale-2 zero so cbc:Percent renders "0.00" like the 15% band.
                 tax_rate: Some(DecimalValue::new(Decimal::new(0, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {
@@ -429,6 +437,8 @@ fn za_zero_rated_export_invoice() -> CommercialDocument {
             taxable_amount: amt(200_000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::new(0, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(200_000),
@@ -487,6 +497,8 @@ fn za_exempt_supply_invoice() -> CommercialDocument {
             taxable_amount: amt(300_000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::new(0, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(300_000),

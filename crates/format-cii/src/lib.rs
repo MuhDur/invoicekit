@@ -188,6 +188,8 @@ pub enum CiiError {
 /// #             taxable_amount: amount.clone(),
 /// #             tax_amount: DecimalValue::new(Decimal::new(1900, 2)),
 /// #             tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+/// #             exemption_reason: None,
+/// #             exemption_reason_code: None,
 /// #         }],
 /// #         monetary_total: MonetaryTotal {
 /// #             line_extension_amount: amount.clone(),
@@ -1271,6 +1273,8 @@ impl TaxSummaryBuilder {
                 "ram:ApplicableTradeTax/ram:CalculatedAmount",
             ))?,
             tax_rate: self.tax_rate,
+            exemption_reason: None,
+            exemption_reason_code: None,
         })
     }
 }
@@ -5372,6 +5376,8 @@ mod tests {
                 taxable_amount: amount.clone(),
                 tax_amount: DecimalValue::new(tax),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             }],
             monetary_total: MonetaryTotal {
                 line_extension_amount: amount.clone(),

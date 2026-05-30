@@ -194,6 +194,8 @@ fn red_letter_credit_note() -> CommercialDocument {
         tax_amount: amt(-6_000),
         // 6% modern-services VAT band.
         tax_rate: Some(rate(600)),
+        exemption_reason: None,
+        exemption_reason_code: None,
     }];
     let monetary_total = MonetaryTotal {
         line_extension_amount: amt(-100_000),
@@ -282,12 +284,16 @@ fn mixed_band_invoice() -> CommercialDocument {
             taxable_amount: amt(100_000),
             tax_amount: amt(13_000), // 13% of 1000.00
             tax_rate: Some(rate(1300)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         },
         TaxCategorySummary {
             category_code: "S".to_owned(),
             taxable_amount: amt(50_000),
             tax_amount: amt(3_000), // 6% of 500.00
             tax_rate: Some(rate(600)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         },
     ];
     let monetary_total = MonetaryTotal {
@@ -377,6 +383,8 @@ fn zero_rated_export_invoice() -> CommercialDocument {
         taxable_amount: amt(200_000),
         tax_amount: amt(0),
         tax_rate: Some(rate(0)),
+        exemption_reason: None,
+        exemption_reason_code: None,
     }];
     let monetary_total = MonetaryTotal {
         line_extension_amount: amt(200_000),

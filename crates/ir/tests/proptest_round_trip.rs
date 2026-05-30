@@ -174,6 +174,9 @@ fn build_document(config: &DocConfig) -> CommercialDocument {
             taxable_amount: DecimalValue::new(line_total),
             tax_amount: DecimalValue::new(tax_amount),
             tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+            // Exercise the exemption fields' round-trip on every generated doc.
+            exemption_reason: Some("Exempt under Article 132".to_owned()),
+            exemption_reason_code: Some("VATEX-EU-132".to_owned()),
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: DecimalValue::new(line_total),

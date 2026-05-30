@@ -678,6 +678,8 @@ mod tests {
                 taxable_amount: amt(10000),
                 tax_amount: amt(2700),
                 tax_rate: Some(DecimalValue::new(Decimal::new(2700, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             }],
             monetary_total: MonetaryTotal {
                 line_extension_amount: amt(10000),
@@ -936,6 +938,8 @@ mod tests {
             taxable_amount: DecimalValue::new(Decimal::MAX),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::from(27))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }];
         let err = to_invoice_data_xml(&doc)
             .expect_err("MAX * 27 VAT product must overflow before the divide");

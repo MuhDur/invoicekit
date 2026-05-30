@@ -358,6 +358,8 @@ fn set_standard_rate_totals(parts: &mut CommercialDocumentParts, base: Decimal) 
         taxable_amount: DecimalValue::new(base),
         tax_amount: DecimalValue::new(tax),
         tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+        exemption_reason: None,
+        exemption_reason_code: None,
     }];
 }
 
@@ -376,6 +378,8 @@ fn zero_amount_parts() -> CommercialDocumentParts {
         taxable_amount: DecimalValue::new(Decimal::ZERO),
         tax_amount: DecimalValue::new(Decimal::ZERO),
         tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+        exemption_reason: None,
+        exemption_reason_code: None,
     }];
     parts
 }
@@ -424,6 +428,8 @@ fn allowance_over_totals_parts() -> CommercialDocumentParts {
         taxable_amount: DecimalValue::new(tax_exclusive),
         tax_amount: DecimalValue::new(tax_amount),
         tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+        exemption_reason: None,
+        exemption_reason_code: None,
     }];
     parts
 }
@@ -468,12 +474,16 @@ fn mixed_vat_parts() -> CommercialDocumentParts {
             taxable_amount: DecimalValue::new(standard_line),
             tax_amount: DecimalValue::new(standard_tax),
             tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         },
         TaxCategorySummary {
             category_code: "Z".to_owned(),
             taxable_amount: DecimalValue::new(zero_line),
             tax_amount: DecimalValue::new(Decimal::ZERO),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         },
     ];
     parts

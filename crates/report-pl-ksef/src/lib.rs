@@ -674,6 +674,8 @@ mod tests {
                 taxable_amount: amt(10000),
                 tax_amount: amt(2300),
                 tax_rate: Some(DecimalValue::new(Decimal::new(2300, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             }],
             monetary_total: MonetaryTotal {
                 line_extension_amount: amt(10000),
@@ -782,12 +784,16 @@ mod tests {
                 taxable_amount: huge.clone(),
                 tax_amount: amt(0),
                 tax_rate: Some(DecimalValue::new(Decimal::new(2300, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "R".to_owned(),
                 taxable_amount: huge,
                 tax_amount: amt(0),
                 tax_rate: Some(DecimalValue::new(Decimal::new(800, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ];
         let err = to_fa3_xml(&doc, &Fa3Context::default())
@@ -807,12 +813,16 @@ mod tests {
                 taxable_amount: amt(0),
                 tax_amount: huge.clone(),
                 tax_rate: Some(DecimalValue::new(Decimal::new(2300, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "R".to_owned(),
                 taxable_amount: amt(0),
                 tax_amount: huge,
                 tax_rate: Some(DecimalValue::new(Decimal::new(800, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ];
         let err = to_fa3_xml(&doc, &Fa3Context::default())

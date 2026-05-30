@@ -100,6 +100,8 @@ fn malaysian_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(600),
             tax_rate: Some(DecimalValue::new(Decimal::new(600, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -329,6 +331,8 @@ fn malaysian_credit_note() -> CommercialDocument {
             taxable_amount: amt(5000),
             tax_amount: amt(300),
             tax_rate: Some(DecimalValue::new(Decimal::new(600, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(5000),
@@ -441,6 +445,8 @@ fn malaysian_multiline_invoice() -> CommercialDocument {
             taxable_amount: amt(30000),
             tax_amount: amt(1800),
             tax_rate: Some(DecimalValue::new(Decimal::new(600, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(30000),
@@ -539,6 +545,8 @@ fn malaysia_tax_exempt_invoice_carries_zero_tax_and_exempt_category() {
             taxable_amount: amt(20000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(20000),

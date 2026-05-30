@@ -103,6 +103,8 @@ fn indonesian_invoice() -> CommercialDocument {
             taxable_amount: amt(10_000_000),
             tax_amount: amt(1_100_000),
             tax_rate: Some(DecimalValue::new(Decimal::new(1100, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10_000_000),
@@ -316,6 +318,8 @@ fn indonesian_multiline_invoice() -> CommercialDocument {
                 taxable_amount: amt(10_000_000),
                 tax_amount: amt(1_100_000),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1100, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             // Exempt: zero tax, 0% rate.
             TaxCategorySummary {
@@ -323,6 +327,8 @@ fn indonesian_multiline_invoice() -> CommercialDocument {
                 taxable_amount: amt(3_000_000),
                 tax_amount: amt(0),
                 tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {
@@ -388,6 +394,8 @@ fn indonesian_credit_note() -> CommercialDocument {
             taxable_amount: amt(5_000_000),
             tax_amount: amt(550_000),
             tax_rate: Some(DecimalValue::new(Decimal::new(1100, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(5_000_000),

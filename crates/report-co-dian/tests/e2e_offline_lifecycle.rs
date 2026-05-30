@@ -104,6 +104,8 @@ fn colombian_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(1900),
             tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -296,6 +298,8 @@ fn colombian_credit_note() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(1900),
             tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -375,12 +379,16 @@ fn colombian_mixed_tax_invoice() -> CommercialDocument {
                 taxable_amount: amt(20000),
                 tax_amount: amt(3800),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "E".to_owned(),
                 taxable_amount: amt(5000),
                 tax_amount: amt(0),
                 tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {
@@ -457,6 +465,8 @@ fn colombian_export_invoice() -> CommercialDocument {
             taxable_amount: amt(50000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             // No IVA on an export: payable == net.

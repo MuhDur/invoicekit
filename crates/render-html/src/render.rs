@@ -538,6 +538,8 @@ mod tests {
                 taxable_amount: dv("200.00"),
                 tax_amount: dv("42.00"),
                 tax_rate: Some(dv("21.00")),
+                exemption_reason: None,
+                exemption_reason_code: None,
             }],
             monetary_total: MonetaryTotal {
                 line_extension_amount: dv("200.00"),

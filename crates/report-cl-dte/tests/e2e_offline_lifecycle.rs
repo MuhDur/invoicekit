@@ -128,6 +128,8 @@ fn chilean_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(1900),
             tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -331,6 +333,8 @@ fn chilean_credit_note() -> CommercialDocument {
             taxable_amount: amt(5000),
             tax_amount: amt(950),
             tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(5000),
@@ -396,6 +400,8 @@ fn chilean_exempt_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             // No IVA: tax-inclusive == tax-exclusive == net.
@@ -466,6 +472,8 @@ fn chilean_multiline_invoice() -> CommercialDocument {
             taxable_amount: amt(35000),
             tax_amount: amt(6650),
             tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(35000),

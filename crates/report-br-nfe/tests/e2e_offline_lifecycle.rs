@@ -99,6 +99,8 @@ fn brazil_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(1800),
             tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -354,6 +356,8 @@ fn brazil_credit_note_serializes_as_devolucao_fin_nfe_4() {
             taxable_amount: amt(5000),
             tax_amount: amt(900),
             tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         MonetaryTotal {
             line_extension_amount: amt(5000),
@@ -403,6 +407,8 @@ fn brazil_debit_note_is_unsupported_document_type() {
             taxable_amount: amt(1000),
             tax_amount: amt(0),
             tax_rate: None,
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         MonetaryTotal {
             line_extension_amount: amt(1000),
@@ -444,6 +450,8 @@ fn brazil_multi_line_invoice_numbers_det_and_aggregates_total() {
             taxable_amount: amt(56000),
             tax_amount: amt(10080),
             tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         MonetaryTotal {
             line_extension_amount: amt(56000),
@@ -492,6 +500,8 @@ fn brazil_consumer_recipient_emits_cpf_not_cnpj() {
             taxable_amount: amt(15000),
             tax_amount: amt(2700),
             tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         MonetaryTotal {
             line_extension_amount: amt(15000),
@@ -537,6 +547,8 @@ fn brazil_tax_exempt_line_serializes_zero_icms() {
             taxable_amount: amt(0),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -641,6 +653,8 @@ fn brazil_foreign_recipient_uses_ex_uf() {
             taxable_amount: amt(0),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         MonetaryTotal {
             line_extension_amount: amt(30000),

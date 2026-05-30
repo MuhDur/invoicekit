@@ -98,6 +98,8 @@ fn mexican_invoice() -> CommercialDocument {
             taxable_amount: amt(100_000),
             tax_amount: amt(16000),
             tax_rate: Some(DecimalValue::new(Decimal::new(1600, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(100_000),
@@ -288,6 +290,8 @@ fn mexican_credit_note() -> CommercialDocument {
             taxable_amount: amt(20000),
             tax_amount: amt(3200),
             tax_rate: Some(DecimalValue::new(Decimal::new(1600, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(20000),
@@ -369,12 +373,16 @@ fn mexican_border_region_invoice() -> CommercialDocument {
                 taxable_amount: amt(100_000),
                 tax_amount: amt(16000),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1600, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "AA".to_owned(),
                 taxable_amount: amt(50000),
                 tax_amount: amt(4000),
                 tax_rate: Some(DecimalValue::new(Decimal::new(800, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {
@@ -441,6 +449,8 @@ fn mexican_zero_rate_publico_general() -> CommercialDocument {
             taxable_amount: amt(100_000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(100_000),

@@ -108,6 +108,8 @@ fn ecuadorian_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(1500),
             tax_rate: Some(DecimalValue::new(Decimal::new(1500, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -403,6 +405,8 @@ fn ecuadorian_credit_note() -> CommercialDocument {
             taxable_amount: amt(5000),
             tax_amount: amt(750), // 15% of 50.00
             tax_rate: Some(DecimalValue::new(Decimal::new(1500, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(5000),
@@ -485,12 +489,16 @@ fn ecuadorian_multiline_invoice() -> CommercialDocument {
                 taxable_amount: amt(10000),
                 tax_amount: amt(1500), // 15%
                 tax_rate: Some(DecimalValue::new(Decimal::new(1500, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "Z".to_owned(),
                 taxable_amount: amt(10000),
                 tax_amount: amt(0), // tarifa 0%
                 tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {

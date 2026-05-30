@@ -109,6 +109,8 @@ fn korean_invoice() -> CommercialDocument {
             // Korean VAT is a flat 10%.
             tax_amount: won(100_000),
             tax_rate: Some(DecimalValue::new(Decimal::from(10))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: won(1_000_000),
@@ -221,6 +223,8 @@ fn korean_exempt_invoice() -> CommercialDocument {
             // Exempt supply: no output VAT charged.
             tax_amount: won(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: won(800_000),
@@ -283,6 +287,8 @@ fn korean_correction_note() -> CommercialDocument {
             // 10% Korean VAT on the corrected (reduced) amount.
             tax_amount: won(50_000),
             tax_rate: Some(DecimalValue::new(Decimal::from(10))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: won(500_000),
@@ -353,6 +359,8 @@ fn korean_multiline_invoice() -> CommercialDocument {
             // 10% of 3,000,000 won.
             tax_amount: won(300_000),
             tax_rate: Some(DecimalValue::new(Decimal::from(10))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: won(3_000_000),

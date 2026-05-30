@@ -145,6 +145,8 @@ fn egyptian_invoice() -> CommercialDocument {
             taxable_amount: amt(100_000),
             tax_amount: amt(14_000),
             tax_rate: Some(DecimalValue::new(Decimal::new(1400, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(100_000),
@@ -355,6 +357,8 @@ fn egyptian_multiline_invoice() -> CommercialDocument {
             taxable_amount: amt(500_000),
             tax_amount: amt(70_000),
             tax_rate: Some(DecimalValue::new(Decimal::new(1400, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(500_000),
@@ -412,6 +416,8 @@ fn egyptian_credit_note(original_uuid: &str) -> CommercialDocument {
             taxable_amount: amt(50_000),
             tax_amount: amt(7_000),
             tax_rate: Some(DecimalValue::new(Decimal::new(1400, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(50_000),
@@ -472,6 +478,8 @@ fn egyptian_exempt_invoice() -> CommercialDocument {
             taxable_amount: amt(100_000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(100_000),
@@ -543,6 +551,8 @@ fn egyptian_export_invoice() -> CommercialDocument {
             taxable_amount: amt(100_000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(100_000),

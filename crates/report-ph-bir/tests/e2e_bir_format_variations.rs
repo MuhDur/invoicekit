@@ -164,6 +164,8 @@ fn zero_rated_sale() -> CommercialDocument {
             taxable_amount: amt(250_000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(250_000),
@@ -273,6 +275,8 @@ fn vat_exempt_sale() -> CommercialDocument {
             tax_amount: amt(0),
             // VAT-exempt: no rate is asserted on the line at all.
             tax_rate: None,
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(150_000),
@@ -370,6 +374,8 @@ fn credit_memo() -> CommercialDocument {
             taxable_amount: amt(50_000),
             tax_amount: amt(6_000),
             tax_rate: Some(DecimalValue::new(Decimal::new(1200, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(50_000),
@@ -496,6 +502,8 @@ fn official_receipt_multiline() -> CommercialDocument {
             taxable_amount: amt(150_000),
             tax_amount: amt(18_000),
             tax_rate: Some(DecimalValue::new(Decimal::new(1200, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(150_000),

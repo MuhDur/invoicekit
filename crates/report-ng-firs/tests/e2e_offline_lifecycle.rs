@@ -104,6 +104,8 @@ fn nigerian_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(750),
             tax_rate: Some(DecimalValue::new(Decimal::new(750, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),

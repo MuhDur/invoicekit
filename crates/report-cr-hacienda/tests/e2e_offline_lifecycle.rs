@@ -100,6 +100,8 @@ fn costa_rican_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(1300),
             tax_rate: Some(DecimalValue::new(Decimal::new(1300, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -297,12 +299,16 @@ fn costa_rican_export_invoice() -> CommercialDocument {
                 taxable_amount: amt(10000),
                 tax_amount: amt(1300),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1300, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "Z".to_owned(),
                 taxable_amount: amt(10000),
                 tax_amount: amt(0),
                 tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {
@@ -364,6 +370,8 @@ fn costa_rican_credit_note() -> CommercialDocument {
             taxable_amount: amt(5000),
             tax_amount: amt(650),
             tax_rate: Some(DecimalValue::new(Decimal::new(1300, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(5000),

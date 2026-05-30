@@ -105,6 +105,8 @@ fn ph_invoice() -> CommercialDocument {
             taxable_amount: amt(100_000),
             tax_amount: amt(12_000),
             tax_rate: Some(DecimalValue::new(Decimal::new(1200, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(100_000),

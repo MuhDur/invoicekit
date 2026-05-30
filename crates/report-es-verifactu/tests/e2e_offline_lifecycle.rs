@@ -106,6 +106,8 @@ fn spanish_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(2100),
             tax_rate: Some(DecimalValue::new(Decimal::new(2100, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -371,6 +373,8 @@ fn corrective_credit_note(original_number: &str) -> CommercialDocument {
             // 21% standard Spanish IVA on a 20.00 base = 4.20.
             tax_amount: amt(420),
             tax_rate: Some(DecimalValue::new(Decimal::new(2100, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(2000),
@@ -496,6 +500,8 @@ fn multi_rate_invoice() -> CommercialDocument {
                 taxable_amount: amt(10000),
                 tax_amount: amt(2100),
                 tax_rate: Some(DecimalValue::new(Decimal::new(2100, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             // 10% reducido on 50.00 => 5.00.
             TaxCategorySummary {
@@ -503,6 +509,8 @@ fn multi_rate_invoice() -> CommercialDocument {
                 taxable_amount: amt(5000),
                 tax_amount: amt(500),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1000, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             // Exempt: 0 tax on a 30.00 base.
             TaxCategorySummary {
@@ -510,6 +518,8 @@ fn multi_rate_invoice() -> CommercialDocument {
                 taxable_amount: amt(3000),
                 tax_amount: amt(0),
                 tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {

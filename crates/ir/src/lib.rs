@@ -656,6 +656,16 @@ pub struct TaxCategorySummary {
     /// Optional tax rate.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tax_rate: Option<DecimalValue>,
+    /// Optional VAT exemption reason text (EN 16931 BT-120), for an exempt /
+    /// zero-rated / reverse-charge category. Carried verbatim from the producer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exemption_reason: Option<String>,
+    /// Optional VAT exemption reason code (EN 16931 BT-121), from a controlled
+    /// list such as CEF `VATEX` or IT `Natura`. Carried verbatim from the
+    /// producer — InvoiceKit serializes whatever code is supplied and does not
+    /// invent one (the national code-list mapping is a separate concern).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exemption_reason_code: Option<String>,
 }
 
 impl TaxCategorySummary {
@@ -1677,6 +1687,28 @@ mod tests {
         assert_eq!(classification.code, "0901");
         assert_eq!(classification.scheme_id, "HSN");
         assert_eq!(classification.scheme_version.as_deref(), Some("2017"));
+    }
+
+    #[test]
+    fn tax_exemption_reason_round_trips_and_defaults_to_none() {
+        // Absent exemption fields deserialize to None (additive, backward-compatible).
+        let baseline = CommercialDocument::try_from_value(synthetic_document_json()).unwrap();
+        assert!(baseline.tax_summary[0].exemption_reason.is_none());
+        assert!(baseline.tax_summary[0].exemption_reason_code.is_none());
+
+        // A present reason + code round-trips verbatim (EN 16931 BT-120 / BT-121).
+        let mut input = synthetic_document_json();
+        input["tax_summary"][0]["exemption_reason"] = json!("Reverse charge");
+        input["tax_summary"][0]["exemption_reason_code"] = json!("VATEX-EU-AE");
+        let doc = CommercialDocument::try_from_value(input).unwrap();
+        assert_eq!(
+            doc.tax_summary[0].exemption_reason.as_deref(),
+            Some("Reverse charge")
+        );
+        assert_eq!(
+            doc.tax_summary[0].exemption_reason_code.as_deref(),
+            Some("VATEX-EU-AE")
+        );
     }
 
     #[test]

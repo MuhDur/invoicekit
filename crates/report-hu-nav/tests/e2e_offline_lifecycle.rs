@@ -111,6 +111,8 @@ fn hungarian_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(2700),
             tax_rate: Some(DecimalValue::new(Decimal::new(2700, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -400,12 +402,16 @@ fn hungary_native_invoice_data_multiline_aggregates_summary() {
                 taxable_amount: amt(10000),
                 tax_amount: amt(2700),
                 tax_rate: Some(DecimalValue::new(Decimal::new(2700, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "R5".to_owned(),
                 taxable_amount: amt(3000),
                 tax_amount: amt(150),
                 tax_rate: Some(DecimalValue::new(Decimal::new(500, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {
@@ -548,6 +554,8 @@ fn hungarian_credit_note() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(2700),
             tax_rate: Some(DecimalValue::new(Decimal::new(2700, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -648,6 +656,8 @@ fn hungary_multi_line_mixed_rate_invoice_reports_each_band() {
         taxable_amount: amt(taxable_minor),
         tax_amount: amt(tax_minor),
         tax_rate: Some(DecimalValue::new(Decimal::new(rate_minor, 2))),
+        exemption_reason: None,
+        exemption_reason_code: None,
     };
 
     let doc = CommercialDocument::new(CommercialDocumentParts {
@@ -760,6 +770,8 @@ fn hungary_domestic_reverse_charge_invoice_carries_no_vat() {
             // Reverse charge: supplier charges no VAT.
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(500_000),
@@ -842,6 +854,8 @@ fn hungary_subjective_exemption_invoice_is_zero_rated() {
             taxable_amount: amt(80000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(80000),

@@ -203,6 +203,8 @@ pub enum UblError {
 /// #             taxable_amount: amount.clone(),
 /// #             tax_amount: DecimalValue::new(Decimal::new(1900, 2)),
 /// #             tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+/// #             exemption_reason: None,
+/// #             exemption_reason_code: None,
 /// #         }],
 /// #         monetary_total: MonetaryTotal {
 /// #             line_extension_amount: amount.clone(),
@@ -1109,6 +1111,8 @@ impl TaxSummaryBuilder {
                 .tax_amount
                 .ok_or(UblError::MissingElement("cbc:TaxAmount"))?,
             tax_rate: self.tax_rate,
+            exemption_reason: None,
+            exemption_reason_code: None,
         })
     }
 }
@@ -2342,12 +2346,16 @@ mod tests {
                 taxable_amount: DecimalValue::new(Decimal::MAX),
                 tax_amount: DecimalValue::new(Decimal::MAX),
                 tax_rate: None,
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "AA".to_owned(),
                 taxable_amount: DecimalValue::new(Decimal::MAX),
                 tax_amount: DecimalValue::new(Decimal::MAX),
                 tax_rate: None,
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ];
         let err = to_xml(&document)
@@ -3275,6 +3283,8 @@ mod tests {
                 taxable_amount: amount.clone(),
                 tax_amount: DecimalValue::new(tax),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1900, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             }],
             monetary_total: MonetaryTotal {
                 line_extension_amount: amount.clone(),

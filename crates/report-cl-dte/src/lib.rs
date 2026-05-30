@@ -833,6 +833,8 @@ mod tests {
                 taxable_amount: peso(10000),
                 tax_amount: peso(1900),
                 tax_rate: Some(DecimalValue::new(Decimal::from(19))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             }],
             monetary_total: MonetaryTotal {
                 line_extension_amount: peso(10000),
@@ -963,6 +965,8 @@ mod tests {
             taxable_amount: peso(10000),
             tax_amount: peso(0),
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }];
         doc.monetary_total.tax_inclusive_amount = peso(10000);
         doc.monetary_total.payable_amount = peso(10000);
@@ -989,12 +993,16 @@ mod tests {
                 taxable_amount: huge.clone(),
                 tax_amount: peso(0),
                 tax_rate: Some(DecimalValue::new(Decimal::from(19))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "S".to_owned(),
                 taxable_amount: huge,
                 tax_amount: peso(0),
                 tax_rate: Some(DecimalValue::new(Decimal::from(19))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ];
         let err = to_dte_xml(&doc, &sample_ctx())

@@ -105,6 +105,8 @@ fn taiwanese_invoice() -> CommercialDocument {
             taxable_amount: amt(100_000),
             tax_amount: amt(5_000),
             tax_rate: Some(DecimalValue::new(Decimal::new(500, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(100_000),
@@ -274,6 +276,8 @@ fn taiwanese_allowance() -> CommercialDocument {
             taxable_amount: amt(50_000),
             tax_amount: amt(2_500),
             tax_rate: Some(DecimalValue::new(Decimal::new(500, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(50_000),
@@ -347,6 +351,8 @@ fn taiwanese_mixed_standard_and_zero_rated_invoice() -> CommercialDocument {
                 taxable_amount: amt(100_000),
                 tax_amount: amt(5_000),
                 tax_rate: Some(DecimalValue::new(Decimal::new(500, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "Z".to_owned(),
@@ -354,6 +360,8 @@ fn taiwanese_mixed_standard_and_zero_rated_invoice() -> CommercialDocument {
                 tax_amount: amt(0),
                 // Scale-2 zero so the UBL Percent renders "0.00".
                 tax_rate: Some(DecimalValue::new(Decimal::new(0, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {

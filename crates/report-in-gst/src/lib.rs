@@ -993,6 +993,8 @@ mod inv01_tests {
                 taxable_amount: amt(1_000_000),
                 tax_amount: amt(180_000),
                 tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             }],
             monetary_total: MonetaryTotal {
                 line_extension_amount: amt(1_000_000),
@@ -1363,6 +1365,8 @@ mod inv01_tests {
             taxable_amount: raw(Decimal::MAX),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }];
 
         let err = to_inv01_json(&doc, &Inv01Context::default())

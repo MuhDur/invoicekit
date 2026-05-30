@@ -100,6 +100,8 @@ fn belgian_invoice() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(2100), // 21% Belgian standard rate
             tax_rate: Some(DecimalValue::new(Decimal::new(2100, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -337,6 +339,8 @@ fn belgian_credit_note() -> CommercialDocument {
             taxable_amount: amt(10000),
             tax_amount: amt(2100), // 21% Belgian standard rate
             tax_rate: Some(DecimalValue::new(Decimal::new(2100, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(10000),
@@ -415,12 +419,16 @@ fn belgian_multi_rate_invoice() -> CommercialDocument {
                 taxable_amount: amt(10000),
                 tax_amount: amt(2100), // 21%
                 tax_rate: Some(DecimalValue::new(Decimal::new(2100, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
             TaxCategorySummary {
                 category_code: "S".to_owned(),
                 taxable_amount: amt(10000),
                 tax_amount: amt(600), // 6%
                 tax_rate: Some(DecimalValue::new(Decimal::new(600, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             },
         ],
         monetary_total: MonetaryTotal {

@@ -779,6 +779,8 @@ mod tests {
                 taxable_amount: amt(10000),
                 tax_amount: amt(2400),
                 tax_rate: Some(DecimalValue::new(Decimal::new(2400, 2))),
+                exemption_reason: None,
+                exemption_reason_code: None,
             }],
             monetary_total: MonetaryTotal {
                 line_extension_amount: amt(10000),
@@ -914,6 +916,8 @@ mod tests {
             taxable_amount: amt(10000),
             tax_amount: amt(0),
             tax_rate: Some(DecimalValue::new(Decimal::new(0, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }];
         let xml = to_invoices_doc_xml(&doc, &MyDataDocContext::default()).unwrap();
         assert!(xml.contains("<vatCategory>7</vatCategory>"));
@@ -1157,6 +1161,8 @@ mod tests {
             taxable_amount: DecimalValue::new(Decimal::from(2)),
             tax_amount: huge,
             tax_rate: Some(DecimalValue::new(Decimal::new(2400, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }];
         let err = to_invoices_doc_xml(&doc, &MyDataDocContext::default())
             .expect_err("MAX * MAX pro-rate product must overflow");

@@ -100,6 +100,8 @@ fn indian_invoice() -> CommercialDocument {
             taxable_amount: amt(1_000_000),     // 10000.00
             tax_amount: amt(180_000),           // 1800.00
             tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))), // 18.00
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(1_000_000), // 10000.00
@@ -378,6 +380,8 @@ fn india_native_inv01_intra_state_splits_cgst_sgst() {
             taxable_amount: amt(1_000_000),
             tax_amount: amt(180_000),
             tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))),
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(1_000_000),
@@ -517,6 +521,8 @@ fn indian_credit_note() -> CommercialDocument {
             taxable_amount: amt(200_000), // 2000.00
             tax_amount: amt(36_000),      // 360.00
             tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))), // 18.00
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(200_000), // 2000.00
@@ -577,6 +583,8 @@ fn indian_multiline_invoice() -> CommercialDocument {
             taxable_amount: amt(1_700_000), // 17000.00
             tax_amount: amt(306_000),       // 3060.00
             tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))), // 18.00
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(1_700_000), // 17000.00
@@ -658,6 +666,8 @@ fn indian_export_lut_invoice() -> CommercialDocument {
             taxable_amount: amt(5_000_000), // 50000.00
             tax_amount: amt(0),             // 0.00
             tax_rate: Some(DecimalValue::new(Decimal::ZERO)), // 0
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(5_000_000), // 50000.00
@@ -853,6 +863,8 @@ fn india_intra_state_reverse_charge_invoice_registers() {
             taxable_amount: amt(1_000_000), // 10000.00
             tax_amount: amt(180_000),       // 1800.00 (9% CGST + 9% SGST)
             tax_rate: Some(DecimalValue::new(Decimal::new(1800, 2))), // 18.00
+            exemption_reason: None,
+            exemption_reason_code: None,
         }],
         monetary_total: MonetaryTotal {
             line_extension_amount: amt(1_000_000), // 10000.00
