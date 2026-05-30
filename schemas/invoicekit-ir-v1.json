@@ -35,6 +35,24 @@
         "null"
       ]
     },
+    "invoice_period": {
+      "description": "Optional invoice billing period (EN 16931 BG-14).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/InvoicePeriod"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "delivery_date": {
+      "description": "Optional actual delivery date (EN 16931 BT-72).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "document_number": {
       "description": "Document number.",
       "type": "string"
@@ -129,6 +147,24 @@
       },
       "default": []
     },
+    "allowance_charges": {
+      "description": "Document-level allowances (EN 16931 BG-20) and charges (BG-21).",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DocumentAllowanceCharge"
+      }
+    },
+    "deliver_to": {
+      "description": "Optional deliver-to information (EN 16931 BG-13 / BG-15).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeliverToParty"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "meta": {
       "description": "Operational metadata.",
       "$ref": "#/$defs/DocumentMeta"
@@ -186,6 +222,26 @@
           "const": "self_billed"
         }
       ]
+    },
+    "InvoicePeriod": {
+      "description": "Invoice billing period (EN 16931 BG-14).\n\n The date range the invoice covers (e.g. a periodic or summary invoice). At\n least one of `start_date` (BT-73) or `end_date` (BT-74) must be present when\n the group is used.",
+      "type": "object",
+      "properties": {
+        "start_date": {
+          "description": "Period start date (BT-73).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "end_date": {
+          "description": "Period end date (BT-74).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
     },
     "Party": {
       "description": "Commercial party.",
@@ -433,6 +489,13 @@
             "null"
           ]
         },
+        "classifications": {
+          "description": "Commodity/service classifications (EN 16931 BG-? / BT-158; national\n schemes such as HSN/SAC, NCM, `ClaveProdServ`). Empty when unclassified.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemClassification"
+          }
+        },
         "extensions": {
           "description": "Line-level jurisdiction extensions.",
           "type": "array",
@@ -447,6 +510,31 @@
         "quantity",
         "unit_price",
         "line_extension_amount"
+      ]
+    },
+    "ItemClassification": {
+      "description": "Commodity or service classification of a line item.\n\n Models EN 16931 BT-158 *Item classification identifier* together with its\n scheme identifier (BT-158-1) and optional scheme version (BT-158-2). The\n `scheme_id` is an open list (e.g. UNTDID 7143 codes such as `HS`/`SRV`, or a\n national scheme name like `HSN`, `SAC`, `NCM`, `ClaveProdServ`, `UNSPSC`),\n mirroring the open `scheme` on [`PartyTaxId`]. A line may carry several\n classifications, so consumers select the scheme they need (a UBL/CII\n serializer emits all of them; a national report picks its own scheme).",
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "Classification code value (EN 16931 BT-158).",
+          "type": "string"
+        },
+        "scheme_id": {
+          "description": "Scheme/list identifier the code belongs to (EN 16931 BT-158-1 `listID`).",
+          "type": "string"
+        },
+        "scheme_version": {
+          "description": "Optional scheme version (EN 16931 BT-158-2 `listVersionID`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "scheme_id"
       ]
     },
     "JurisdictionExtension": {
@@ -484,6 +572,20 @@
         },
         "tax_rate": {
           "description": "Optional tax rate.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exemption_reason": {
+          "description": "Optional VAT exemption reason text (EN 16931 BT-120), for an exempt /\n zero-rated / reverse-charge category. Carried verbatim from the producer.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exemption_reason_code": {
+          "description": "Optional VAT exemption reason code (EN 16931 BT-121), from a controlled\n list such as CEF `VATEX` or IT `Natura`. Carried verbatim from the\n producer — InvoiceKit serializes whatever code is supplied and does not\n invent one (the national code-list mapping is a separate concern).",
           "type": [
             "string",
             "null"
@@ -610,6 +712,97 @@
         "language",
         "text"
       ]
+    },
+    "DocumentAllowanceCharge": {
+      "description": "Document-level allowance (EN 16931 BG-20) or charge (BG-21).\n\n Both groups share an identical structure distinguished by `is_charge`; only\n the business-term numbers differ (allowance BT-92..98 / charge BT-99..105).\n The detail is carried verbatim from the producer — InvoiceKit serializes the\n supplied amounts/codes faithfully and does not recompute or reconcile them\n against the document totals (that is the reference validator's responsibility).",
+      "type": "object",
+      "properties": {
+        "is_charge": {
+          "description": "`true` = charge (BG-21), `false` = allowance (BG-20).",
+          "type": "boolean"
+        },
+        "amount": {
+          "description": "Allowance/charge amount (BT-92 / BT-99).",
+          "type": "string"
+        },
+        "base_amount": {
+          "description": "Optional base amount the percentage applies to (BT-93 / BT-100).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "percentage": {
+          "description": "Optional percentage of the base amount (BT-94 / BT-101).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tax_category": {
+          "description": "Optional VAT category code for the allowance/charge (BT-95 / BT-102).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tax_rate": {
+          "description": "Optional VAT rate (BT-96 / BT-103).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "description": "Optional reason text (BT-97 / BT-104).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason_code": {
+          "description": "Optional reason code (BT-98 / BT-105), from UNCL 5189 (allowances) or\n UNCL 7161 (charges); carried verbatim.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "is_charge",
+        "amount"
+      ]
+    },
+    "DeliverToParty": {
+      "description": "Deliver-to information (EN 16931 BG-13): where the goods or services are\n delivered, when that differs from the buyer.\n\n The actual delivery date (BT-72) is the separate top-level `delivery_date`\n field; this group carries the deliver-to party name (BT-70), location\n identifier (BT-71), and address (EN 16931 BG-15).",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Deliver-to party name (BT-70).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "location_id": {
+          "description": "Deliver-to location identifier (BT-71).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "address": {
+          "description": "Deliver-to address (EN 16931 BG-15).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PostalAddress"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
     },
     "DocumentMeta": {
       "description": "Operational metadata for a document.",
