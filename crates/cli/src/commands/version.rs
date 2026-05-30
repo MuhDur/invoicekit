@@ -22,7 +22,7 @@
 //! `build_profile` is `dev` or `release`, derived from
 //! `debug_assertions`. We do not emit a commit hash or rustc
 //! version: there is no build script to capture them, and the
-//! crate carries only the fields [`VersionInfo`] actually holds
+//! crate carries only the fields `VersionInfo` actually holds
 //! (`name`, `version`, `build_profile`).
 //!
 //! Always exits `0`. Usage error exits `2`.

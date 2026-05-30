@@ -99,7 +99,7 @@ impl ParticipantId {
     /// in SMP URLs.
     ///
     /// The scheme and value are percent-encoded with
-    /// [`percent_encode_segment`] so that a hostile identifier
+    /// `percent_encode_segment` so that a hostile identifier
     /// carrying `/`, `?`, `#`, `%`, or `..` cannot break out of
     /// its SMP path segment. The structural `iso6523-actorid-upis::`
     /// prefix and the `:` separator are fixed literals and stay
@@ -150,7 +150,7 @@ impl DocumentTypeId {
     /// URL segment form used in SMP requests.
     ///
     /// The scheme and value are percent-encoded with
-    /// [`percent_encode_segment`] so that a hostile document-type
+    /// `percent_encode_segment` so that a hostile document-type
     /// identifier cannot break out of its SMP path segment. The
     /// `::` separator is a fixed literal and stays readable.
     #[must_use]

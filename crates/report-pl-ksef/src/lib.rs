@@ -392,7 +392,7 @@ const NIP_WEIGHTS: [u32; 9] = [6, 5, 7, 2, 3, 4, 5, 6, 7];
 /// digits whose official weighted-modulo-11 checksum matches the final digit.
 ///
 /// The checksum sums each of the first nine digits multiplied by its weight
-/// [`NIP_WEIGHTS`], takes the result modulo 11, and compares it to the tenth
+/// `NIP_WEIGHTS`, takes the result modulo 11, and compares it to the tenth
 /// digit. A modulo result of 10 makes the NIP invalid by construction (no NIP
 /// is issued with a check value of 10), which this function rejects.
 ///

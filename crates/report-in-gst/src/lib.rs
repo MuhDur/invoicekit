@@ -101,7 +101,7 @@ pub enum Inv01Error {
 /// fields mapped from the IR: `SellerDtls`/`BuyerDtls.Addr1` (+ optional
 /// `Addr2`), `BuyerDtls.Pos` (place of supply), and per-item `PrdDesc`,
 /// `IsServc`, and `Unit` (the IR unit code mapped to the IRP UQC set via
-/// [`unit_uqc`]). The per-line `HsnCd` is sourced from the IR line
+/// `unit_uqc`). The per-line `HsnCd` is sourced from the IR line
 /// classification (EN 16931 BT-158, e.g. an `HSN`/`SAC`-scheme classification):
 /// the serializer uses the chosen classification's `code` as `HsnCd`, falling
 /// back to the generic SAC heading `"9983"` only when the line carries no
