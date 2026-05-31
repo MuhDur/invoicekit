@@ -1,23 +1,122 @@
 {
   "list": "iso-4217",
-  "version": "seed-2024",
+  "version": "iso-4217-2026-05-31",
   "effective_from": "2024-01-01",
   "effective_to": null,
   "source_url": "https://www.six-group.com/en/products-services/financial-information/data-standards.html",
-  "retrieved_at": "2026-05-26",
+  "retrieved_at": "2026-05-31",
   "signature_alg": "sha256:identity",
-  "signature": "b7ef2c28fa3a57adcc7daa65f03e328601f8e0a5e3ac4cc065306c176487efcf",
+  "signature": "f429761a4e7fb9e25b2a1ebe94f6285bcd464fa81e55571d3cb159382e7ec588",
   "entries": [
-    { "code": "BRL", "label": "Brazilian Real", "valid_from": null, "valid_to": null, "attrs": { "minor_units": "2", "numeric": "986" } },
-    { "code": "EUR", "label": "Euro", "valid_from": null, "valid_to": null, "attrs": { "minor_units": "2", "numeric": "978" } },
-    { "code": "GBP", "label": "Pound Sterling", "valid_from": null, "valid_to": null, "attrs": { "minor_units": "2", "numeric": "826" } },
-    { "code": "INR", "label": "Indian Rupee", "valid_from": null, "valid_to": null, "attrs": { "minor_units": "2", "numeric": "356" } },
-    { "code": "JPY", "label": "Yen", "valid_from": null, "valid_to": null, "attrs": { "minor_units": "0", "numeric": "392" } },
-    { "code": "MXN", "label": "Mexican Peso", "valid_from": null, "valid_to": null, "attrs": { "minor_units": "2", "numeric": "484" } },
-    { "code": "MYR", "label": "Malaysian Ringgit", "valid_from": null, "valid_to": null, "attrs": { "minor_units": "2", "numeric": "458" } },
-    { "code": "PLN", "label": "Zloty", "valid_from": null, "valid_to": null, "attrs": { "minor_units": "2", "numeric": "985" } },
-    { "code": "SAR", "label": "Saudi Riyal", "valid_from": null, "valid_to": null, "attrs": { "minor_units": "2", "numeric": "682" } },
-    { "code": "TRY", "label": "Turkish Lira", "valid_from": null, "valid_to": null, "attrs": { "minor_units": "2", "numeric": "949" } },
-    { "code": "USD", "label": "US Dollar", "valid_from": null, "valid_to": null, "attrs": { "minor_units": "2", "numeric": "840" } }
+    {
+      "code": "BRL",
+      "label": "Brazilian Real",
+      "valid_from": null,
+      "valid_to": null,
+      "attrs": {
+        "minor_units": "2",
+        "numeric": "986"
+      }
+    },
+    {
+      "code": "EUR",
+      "label": "Euro",
+      "valid_from": null,
+      "valid_to": null,
+      "attrs": {
+        "minor_units": "2",
+        "numeric": "978"
+      }
+    },
+    {
+      "code": "GBP",
+      "label": "Pound Sterling",
+      "valid_from": null,
+      "valid_to": null,
+      "attrs": {
+        "minor_units": "2",
+        "numeric": "826"
+      }
+    },
+    {
+      "code": "INR",
+      "label": "Indian Rupee",
+      "valid_from": null,
+      "valid_to": null,
+      "attrs": {
+        "minor_units": "2",
+        "numeric": "356"
+      }
+    },
+    {
+      "code": "JPY",
+      "label": "Yen",
+      "valid_from": null,
+      "valid_to": null,
+      "attrs": {
+        "minor_units": "0",
+        "numeric": "392"
+      }
+    },
+    {
+      "code": "MXN",
+      "label": "Mexican Peso",
+      "valid_from": null,
+      "valid_to": null,
+      "attrs": {
+        "minor_units": "2",
+        "numeric": "484"
+      }
+    },
+    {
+      "code": "MYR",
+      "label": "Malaysian Ringgit",
+      "valid_from": null,
+      "valid_to": null,
+      "attrs": {
+        "minor_units": "2",
+        "numeric": "458"
+      }
+    },
+    {
+      "code": "PLN",
+      "label": "Zloty",
+      "valid_from": null,
+      "valid_to": null,
+      "attrs": {
+        "minor_units": "2",
+        "numeric": "985"
+      }
+    },
+    {
+      "code": "SAR",
+      "label": "Saudi Riyal",
+      "valid_from": null,
+      "valid_to": null,
+      "attrs": {
+        "minor_units": "2",
+        "numeric": "682"
+      }
+    },
+    {
+      "code": "TRY",
+      "label": "Turkish Lira",
+      "valid_from": null,
+      "valid_to": null,
+      "attrs": {
+        "minor_units": "2",
+        "numeric": "949"
+      }
+    },
+    {
+      "code": "USD",
+      "label": "US Dollar",
+      "valid_from": null,
+      "valid_to": null,
+      "attrs": {
+        "minor_units": "2",
+        "numeric": "840"
+      }
+    }
   ]
 }
