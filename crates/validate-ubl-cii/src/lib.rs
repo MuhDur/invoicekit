@@ -1249,6 +1249,17 @@ fn document_allowance_charges_all<'doc>(ctx: &ValidationContext<'doc>) -> Vec<&'
     }
 }
 
+fn cii_has_only_document_allowance_nodes(ctx: &ValidationContext<'_>) -> bool {
+    if ctx.syntax != DocumentSyntax::Cii {
+        return false;
+    }
+    let nodes = document_allowance_charges_all(ctx);
+    !nodes.is_empty()
+        && nodes
+            .iter()
+            .all(|node| indicator_selects_charge(node, false))
+}
+
 fn line_allowance_charges_all<'doc>(
     ctx: &ValidationContext<'doc>,
     line: &'doc XmlNode,
@@ -3428,7 +3439,7 @@ fn br_co_12(
 ) -> Result<(), En16931Error> {
     let charges = document_allowance_charges(ctx, true);
     let total = header_amount(ctx, "ChargeTotalAmount");
-    if charges.is_empty() && (total.is_none() || ctx.syntax == DocumentSyntax::Cii) {
+    if charges.is_empty() && (total.is_none() || cii_has_only_document_allowance_nodes(ctx)) {
         return Ok(());
     }
     let sum = rounded_2(
@@ -4196,13 +4207,29 @@ mod tests {
 
     #[test]
     fn cii_charge_total_without_charge_nodes_does_not_emit_br_co_12() {
+        let xml = insert_before(
+            valid_cii(),
+            "<ram:SpecifiedTradeSettlementHeaderMonetarySummation>",
+            "<ram:SpecifiedTradeAllowanceCharge><ram:ChargeIndicator><udt:Indicator>false</udt:Indicator></ram:ChargeIndicator><ram:ActualAmount>1.00</ram:ActualAmount><ram:Reason>Discount</ram:Reason><ram:CategoryTradeTax><ram:TypeCode>VAT</ram:TypeCode><ram:CategoryCode>S</ram:CategoryCode></ram:CategoryTradeTax></ram:SpecifiedTradeAllowanceCharge>",
+        );
+        let xml = replace(
+            &xml,
+            "<ram:TaxBasisTotalAmount>100.00</ram:TaxBasisTotalAmount>",
+            "<ram:ChargeTotalAmount>15.00</ram:ChargeTotalAmount><ram:TaxBasisTotalAmount>100.00</ram:TaxBasisTotalAmount>",
+        );
+
+        assert_not_emits_rule(&xml, "BR-CO-12");
+    }
+
+    #[test]
+    fn cii_charge_total_without_any_allowance_charge_nodes_still_emits_br_co_12() {
         let xml = replace(
             valid_cii(),
             "<ram:TaxBasisTotalAmount>100.00</ram:TaxBasisTotalAmount>",
             "<ram:ChargeTotalAmount>15.00</ram:ChargeTotalAmount><ram:TaxBasisTotalAmount>100.00</ram:TaxBasisTotalAmount>",
         );
 
-        assert_not_emits_rule(&xml, "BR-CO-12");
+        assert_emits_rule(&xml, "BR-CO-12");
     }
 
     #[test]

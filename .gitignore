@@ -45,5 +45,13 @@ venv/
 # Tooling caches
 .cargo/registry/
 
+# Local agent/runtime state
+/.claude/scheduled_tasks.lock
+/.ntm/pids/
+/.ntm/rate_limits.json
+
+# Local downloaded/private corpora and customer-specific artifacts
+/files/
+
 # T-1300 docker-compose: operator-managed secret files
 deploy/secrets/

@@ -80,10 +80,14 @@ pub enum CiiError {
         actual: String,
     },
     /// The CII type code is not mapped to the current InvoiceKit IR.
-    #[error("unsupported CII document type code `{0}`; hint: use 380 for invoice or 381 for credit note")]
+    #[error(
+        "unsupported CII document type code `{0}`; hint: use a supported EN 16931 UNTDID 1001 document type code"
+    )]
     UnsupportedTypeCode(String),
     /// The IR document type cannot be serialized as this CII family member.
-    #[error("document type `{0:?}` is not supported by the CII serializer; hint: use Invoice or CreditNote")]
+    #[error(
+        "document type `{0:?}` is not supported by the CII serializer; hint: add a CII document type mapping before serializing this IR document type"
+    )]
     UnsupportedDocumentType(DocumentType),
     /// A required CII element was missing.
     #[error("missing required CII element `{0}`; hint: include the element needed to build InvoiceKit IR")]
@@ -135,9 +139,9 @@ pub enum CiiError {
 ///
 /// # Errors
 ///
-/// Returns [`CiiError::UnsupportedDocumentType`] for document types other than
-/// [`DocumentType::Invoice`] and [`DocumentType::CreditNote`], or a canonical
-/// XML error if the generated XML cannot be canonicalized.
+/// Returns [`CiiError::UnsupportedTypeCode`] when an explicit CII type-code
+/// extension is unknown or conflicts with [`CommercialDocument::document_type`],
+/// or a canonical XML error if the generated XML cannot be canonicalized.
 ///
 /// # Examples
 ///
