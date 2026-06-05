@@ -38,7 +38,9 @@ const CII_UDT_NAMESPACE_URI: &str = "urn:un:unece:uncefact:data:standard:Unquali
 const CII_QDT_NAMESPACE_URI: &str = "urn:un:unece:uncefact:data:standard:QualifiedDataType:100";
 const CORE_GUIDELINE_ID: &str = "urn:cen.eu:en16931:2017";
 const DEFAULT_LANGUAGE: &str = "und";
+const CII_DOCUMENT_TYPE_CODE_KEY: &str = "document_type_code";
 const CII_PRESERVED_XML_KEY: &str = "preserved_xml";
+const CII_PARENT_LINE_ID_KEY: &str = "parent_line_id";
 const CII_PRESERVED_CONTAINER_KEY: &str = "container";
 const CII_PRESERVED_ELEMENT_KEY: &str = "element";
 const CII_PRESERVED_XML_FRAGMENT_KEY: &str = "xml";
@@ -439,6 +441,7 @@ struct ParseState {
     metadata_tenant_id: Option<String>,
     metadata_trace_id: Option<String>,
     metadata_source_system: Option<String>,
+    cii_document_type_code: Option<String>,
     cii_buyer_reference: Option<String>,
     cii_business_process_context_ids: Vec<String>,
     cii_guideline_context_ids: Vec<String>,
@@ -612,6 +615,10 @@ impl ParseState {
         if let Some(line) = self.current_line.as_mut() {
             if path_ends(stack, &["AssociatedDocumentLineDocument", "LineID"]) {
                 line.id = Some(value.to_owned());
+                return Ok(());
+            }
+            if path_ends(stack, &["AssociatedDocumentLineDocument", "ParentLineID"]) {
+                line.parent_line_id = Some(value.to_owned());
                 return Ok(());
             }
             if path_ends(stack, &["BilledQuantity"]) || path_ends(stack, &["CreditedQuantity"]) {
@@ -800,7 +807,11 @@ impl ParseState {
         if path_ends(stack, &["ExchangedDocument", "ID"]) {
             self.document_number = Some(value.to_owned());
         } else if path_ends(stack, &["ExchangedDocument", "TypeCode"]) {
-            self.document_type = Some(document_type(value)?);
+            let document_type = document_type(value)?;
+            if default_document_type_code(document_type) != value {
+                self.cii_document_type_code = Some(value.to_owned());
+            }
+            self.document_type = Some(document_type);
         } else if path_ends(stack, &["IssueDateTime", "DateTimeString"]) {
             self.issue_date = Some(cii_date_to_iso("ExchangedDocument/IssueDateTime", value)?);
         } else if path_ends(stack, &["TaxPointDate", "DateString"]) {
@@ -908,6 +919,9 @@ impl ParseState {
             .unwrap_or_else(|| format!("{BEAD_ID}:{document_number}"));
         let mut extensions = Vec::<JurisdictionExtension>::new();
         let mut cii_document_fields = Map::new();
+        if let Some(value) = self.cii_document_type_code {
+            cii_document_fields.insert(CII_DOCUMENT_TYPE_CODE_KEY.to_owned(), Value::String(value));
+        }
         if let Some(value) = self.cii_buyer_reference {
             cii_document_fields.insert("buyer_reference".to_owned(), Value::String(value));
         }
@@ -1205,13 +1219,7 @@ impl PartyBuilder {
             name: self.name.ok_or(CiiError::MissingElement(field))?,
             tax_ids: self.tax_ids,
             address: PostalAddress {
-                lines: if self.address_lines.is_empty() {
-                    return Err(CiiError::MissingElement(
-                        "ram:PostalTradeAddress/ram:LineOne",
-                    ));
-                } else {
-                    self.address_lines
-                },
+                lines: self.address_lines,
                 city: self.city.ok_or(CiiError::MissingElement(
                     "ram:PostalTradeAddress/ram:CityName",
                 ))?,
@@ -1239,6 +1247,7 @@ struct LineBuilder {
     tax_category: Option<String>,
     classifications: Vec<ItemClassification>,
     current_classification: Option<ClassificationBuilder>,
+    parent_line_id: Option<String>,
 }
 
 /// Accumulates a single EN 16931 BT-158 commodity classification while the
@@ -1266,6 +1275,18 @@ impl ClassificationBuilder {
 
 impl LineBuilder {
     fn build(self) -> Result<DocumentLine, CiiError> {
+        let mut extensions = Vec::new();
+        if let Some(parent_line_id) = self.parent_line_id {
+            let mut payload = Map::new();
+            payload.insert(
+                CII_PARENT_LINE_ID_KEY.to_owned(),
+                Value::String(parent_line_id),
+            );
+            extensions.push(JurisdictionExtension::new(
+                mapping::CII_LINE_FIELDS_EXTENSION_URN,
+                Value::Object(payload),
+            )?);
+        }
         Ok(DocumentLine {
             id: self.id.ok_or(CiiError::MissingElement(
                 "ram:AssociatedDocumentLineDocument/ram:LineID",
@@ -1285,7 +1306,7 @@ impl LineBuilder {
             ))?,
             tax_category: self.tax_category,
             classifications: self.classifications,
-            extensions: Vec::new(),
+            extensions,
             allowance_charges: Vec::new(),
         })
     }
@@ -2076,6 +2097,27 @@ fn cii_document_field_value<'a>(document: &'a CommercialDocument, key: &str) -> 
         .and_then(Value::as_str)
 }
 
+fn cii_line_field_value<'a>(line: &'a DocumentLine, key: &str) -> Option<&'a str> {
+    line.extensions
+        .iter()
+        .find(|extension| extension.urn == mapping::CII_LINE_FIELDS_EXTENSION_URN)
+        .and_then(|extension| extension.payload.get(key))
+        .and_then(Value::as_str)
+}
+
+fn cii_line_parent_id(line: &DocumentLine) -> Option<&str> {
+    cii_line_field_value(line, CII_PARENT_LINE_ID_KEY).and_then(non_blank)
+}
+
+fn non_blank(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
 fn cii_document_field_values<'a>(document: &'a CommercialDocument, key: &str) -> Vec<&'a str> {
     extension_payload_value(document, mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN, key)
         .and_then(Value::as_array)
@@ -2664,14 +2706,45 @@ fn write_line(
         Some(&line.id),
         "AssociatedDocumentLineDocument",
     )?;
+    let associated_document_path = format!("{line_path}/AssociatedDocumentLineDocument");
     xml.push_str("<ram:AssociatedDocumentLineDocument>");
-    write_text_element(xml, "ram:LineID", &line.id);
-    write_preserved_xml_after_all(
+    write_preserved_xml_before(
         xml,
         document,
-        &format!("{line_path}/AssociatedDocumentLineDocument"),
+        &associated_document_path,
         Some(&line.id),
+        "LineID",
     )?;
+    write_text_element(xml, "ram:LineID", &line.id);
+    let parent_line_id = cii_line_parent_id(line);
+    if let Some(parent_line_id) = parent_line_id {
+        write_preserved_xml(
+            xml,
+            document,
+            &associated_document_path,
+            Some(&line.id),
+            cii_child_order("AssociatedDocumentLineDocument", "LineID"),
+            cii_child_order("AssociatedDocumentLineDocument", "ParentLineID"),
+        )?;
+        write_text_element(xml, "ram:ParentLineID", parent_line_id);
+        write_preserved_xml(
+            xml,
+            document,
+            &associated_document_path,
+            Some(&line.id),
+            cii_child_order("AssociatedDocumentLineDocument", "ParentLineID"),
+            None,
+        )?;
+    } else {
+        write_preserved_xml(
+            xml,
+            document,
+            &associated_document_path,
+            Some(&line.id),
+            cii_child_order("AssociatedDocumentLineDocument", "LineID"),
+            None,
+        )?;
+    }
     xml.push_str("</ram:AssociatedDocumentLineDocument>");
     write_preserved_xml_before(
         xml,
@@ -3201,17 +3274,35 @@ fn iso_date_to_cii(date: &DateOnly) -> Result<String, CiiError> {
 
 fn document_type(code: &str) -> Result<DocumentType, CiiError> {
     match code {
-        "380" => Ok(DocumentType::Invoice),
-        "381" => Ok(DocumentType::CreditNote),
+        "71" | "82" | "102" | "130" | "202" | "203" | "204" | "211" | "218" | "219" | "331"
+        | "380" | "382" | "384" | "385" | "386" | "387" | "388" | "393" | "395" | "553" | "575"
+        | "623" | "780" | "817" | "870" | "875" | "876" | "877" => Ok(DocumentType::Invoice),
+        "81" | "83" | "261" | "381" | "396" | "532" => Ok(DocumentType::CreditNote),
+        "80" | "84" | "383" => Ok(DocumentType::DebitNote),
+        "325" | "326" => Ok(DocumentType::ProForma),
+        "389" => Ok(DocumentType::SelfBilled),
         other => Err(CiiError::UnsupportedTypeCode(other.to_owned())),
     }
 }
 
-fn document_type_code(document: &CommercialDocument) -> Result<&'static str, CiiError> {
-    match document.document_type {
-        DocumentType::Invoice => Ok("380"),
-        DocumentType::CreditNote => Ok("381"),
-        other => Err(CiiError::UnsupportedDocumentType(other)),
+fn document_type_code(document: &CommercialDocument) -> Result<&str, CiiError> {
+    if let Some(code) = cii_document_field_value(document, CII_DOCUMENT_TYPE_CODE_KEY) {
+        let mapped_type = document_type(code)?;
+        if mapped_type == document.document_type {
+            return Ok(code);
+        }
+        return Err(CiiError::UnsupportedTypeCode(code.to_owned()));
+    }
+    Ok(default_document_type_code(document.document_type))
+}
+
+fn default_document_type_code(document_type: DocumentType) -> &'static str {
+    match document_type {
+        DocumentType::Invoice => "380",
+        DocumentType::CreditNote => "381",
+        DocumentType::DebitNote => "383",
+        DocumentType::ProForma => "325",
+        DocumentType::SelfBilled => "389",
     }
 }
 
@@ -3524,7 +3615,7 @@ fn known_cii_children(parent: &str) -> Option<&'static [&'static str]> {
             "SpecifiedLineTradeDelivery",
             "SpecifiedLineTradeSettlement",
         ]),
-        "AssociatedDocumentLineDocument" => Some(&["LineID"]),
+        "AssociatedDocumentLineDocument" => Some(&["LineID", "ParentLineID"]),
         "SpecifiedTradeProduct" => {
             Some(&["Name", "Description", "DesignatedProductClassification"])
         }
@@ -4574,8 +4665,9 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{
-        crate_name, from_xml, mapping, to_xml, CiiError, CII_QDT_NAMESPACE_URI,
-        CII_RAM_NAMESPACE_URI, CII_RSM_NAMESPACE_URI, CII_UDT_NAMESPACE_URI,
+        crate_name, from_xml, mapping, to_xml, CiiError, CII_DOCUMENT_TYPE_CODE_KEY,
+        CII_PARENT_LINE_ID_KEY, CII_QDT_NAMESPACE_URI, CII_RAM_NAMESPACE_URI,
+        CII_RSM_NAMESPACE_URI, CII_UDT_NAMESPACE_URI,
     };
     use invoicekit_canonical::canonicalize_xml;
     use invoicekit_ir::{
@@ -4645,6 +4737,158 @@ mod tests {
         let xml = to_xml(&document).unwrap();
         let parsed = parse_document(&xml);
         assert_eq!(parsed, document);
+    }
+
+    #[test]
+    fn parser_accepts_and_preserves_non_default_en16931_type_codes() {
+        let document = fixture(DocumentType::Invoice, 13);
+        let xml =
+            to_xml(&document)
+                .unwrap()
+                .replacen(">380</ram:TypeCode>", ">384</ram:TypeCode>", 1);
+
+        let parsed = parse_document(&xml);
+        assert_eq!(parsed.document_type, DocumentType::Invoice);
+        let extension = parsed
+            .extensions
+            .iter()
+            .find(|extension| extension.urn == mapping::CII_DOCUMENT_FIELDS_EXTENSION_URN)
+            .unwrap();
+        assert_eq!(
+            extension
+                .payload
+                .get(CII_DOCUMENT_TYPE_CODE_KEY)
+                .and_then(Value::as_str),
+            Some("384")
+        );
+
+        let serialized = to_xml(&parsed).unwrap();
+        assert!(serialized.contains(">384</ram:TypeCode>"));
+        assert_eq!(parse_document(&serialized), parsed);
+    }
+
+    #[test]
+    fn parser_round_trips_supported_en16931_type_codes() {
+        let cases = [
+            ("71", DocumentType::Invoice),
+            ("80", DocumentType::DebitNote),
+            ("81", DocumentType::CreditNote),
+            ("82", DocumentType::Invoice),
+            ("83", DocumentType::CreditNote),
+            ("84", DocumentType::DebitNote),
+            ("102", DocumentType::Invoice),
+            ("130", DocumentType::Invoice),
+            ("202", DocumentType::Invoice),
+            ("203", DocumentType::Invoice),
+            ("204", DocumentType::Invoice),
+            ("211", DocumentType::Invoice),
+            ("218", DocumentType::Invoice),
+            ("219", DocumentType::Invoice),
+            ("261", DocumentType::CreditNote),
+            ("325", DocumentType::ProForma),
+            ("326", DocumentType::ProForma),
+            ("331", DocumentType::Invoice),
+            ("380", DocumentType::Invoice),
+            ("381", DocumentType::CreditNote),
+            ("382", DocumentType::Invoice),
+            ("383", DocumentType::DebitNote),
+            ("384", DocumentType::Invoice),
+            ("385", DocumentType::Invoice),
+            ("386", DocumentType::Invoice),
+            ("387", DocumentType::Invoice),
+            ("388", DocumentType::Invoice),
+            ("389", DocumentType::SelfBilled),
+            ("393", DocumentType::Invoice),
+            ("395", DocumentType::Invoice),
+            ("396", DocumentType::CreditNote),
+            ("532", DocumentType::CreditNote),
+            ("553", DocumentType::Invoice),
+            ("575", DocumentType::Invoice),
+            ("623", DocumentType::Invoice),
+            ("780", DocumentType::Invoice),
+            ("817", DocumentType::Invoice),
+            ("870", DocumentType::Invoice),
+            ("875", DocumentType::Invoice),
+            ("876", DocumentType::Invoice),
+            ("877", DocumentType::Invoice),
+        ];
+
+        for (index, (code, expected_type)) in cases.iter().enumerate() {
+            let document = fixture(DocumentType::Invoice, 100 + index as u32);
+            let xml = to_xml(&document).unwrap().replacen(
+                ">380</ram:TypeCode>",
+                &format!(">{code}</ram:TypeCode>"),
+                1,
+            );
+
+            let parsed = parse_document(&xml);
+            assert_eq!(
+                parsed.document_type, *expected_type,
+                "unexpected document type for TypeCode {code}"
+            );
+            let serialized = to_xml(&parsed).unwrap();
+            assert!(
+                serialized.contains(&format!(">{code}</ram:TypeCode>")),
+                "TypeCode {code} did not round-trip:\n{serialized}"
+            );
+            assert_eq!(parse_document(&serialized), parsed);
+        }
+    }
+
+    #[test]
+    fn parser_maps_self_billed_type_code() {
+        let document = fixture(DocumentType::Invoice, 14);
+        let xml =
+            to_xml(&document)
+                .unwrap()
+                .replacen(">380</ram:TypeCode>", ">389</ram:TypeCode>", 1);
+
+        let parsed = parse_document(&xml);
+        assert_eq!(parsed.document_type, DocumentType::SelfBilled);
+        let serialized = to_xml(&parsed).unwrap();
+        assert!(serialized.contains(">389</ram:TypeCode>"));
+        assert_eq!(parse_document(&serialized), parsed);
+    }
+
+    #[test]
+    fn parser_allows_optional_postal_address_line_one() {
+        let document = fixture(DocumentType::Invoice, 15);
+        let xml = to_xml(&document)
+            .unwrap()
+            .replacen("<ram:LineOne>Main Street 1</ram:LineOne>", "", 1)
+            .replacen("<ram:LineTwo>Suite 2</ram:LineTwo>", "", 1);
+
+        let parsed = parse_document(&xml);
+        assert!(parsed.supplier.address.lines.is_empty());
+        let serialized = to_xml(&parsed).unwrap();
+        assert_eq!(parse_document(&serialized), parsed);
+    }
+
+    #[test]
+    fn parser_maps_and_emits_parent_line_id() {
+        let document = fixture(DocumentType::Invoice, 16);
+        let xml = to_xml(&document).unwrap().replacen(
+            ">1</ram:LineID>",
+            ">1</ram:LineID><ram:ParentLineID>01</ram:ParentLineID>",
+            1,
+        );
+
+        let parsed = parse_document(&xml);
+        let line_extension = parsed.lines[0]
+            .extensions
+            .iter()
+            .find(|extension| extension.urn == mapping::CII_LINE_FIELDS_EXTENSION_URN)
+            .unwrap();
+        assert_eq!(
+            line_extension
+                .payload
+                .get(CII_PARENT_LINE_ID_KEY)
+                .and_then(Value::as_str),
+            Some("01")
+        );
+        let serialized = to_xml(&parsed).unwrap();
+        assert!(serialized.contains(">01</ram:ParentLineID>"));
+        assert_eq!(parse_document(&serialized), parsed);
     }
 
     #[test]
@@ -6492,7 +6736,7 @@ mod tests {
 
     #[test]
     fn mapping_decisions_name_standard_field_boundaries() {
-        assert_eq!(mapping::NAMED_MAPPING_DECISIONS.len(), 7);
+        assert_eq!(mapping::NAMED_MAPPING_DECISIONS.len(), 9);
         assert!(mapping::NAMED_MAPPING_DECISIONS.iter().any(|decision| {
             decision.element == "HeaderTradeAgreementType/BuyerReference"
                 && decision.class == "cii_document_field_extension"
@@ -6628,11 +6872,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsupported_document_type_on_serialize() {
+    fn serializes_self_billed_document_type() {
         let mut document = fixture(DocumentType::Invoice, 7);
-        document.document_type = DocumentType::DebitNote;
-        let err = to_xml(&document).unwrap_err();
-        assert!(matches!(err, CiiError::UnsupportedDocumentType(_)));
+        document.document_type = DocumentType::SelfBilled;
+        let xml = to_xml(&document).unwrap();
+        assert!(xml.contains(">389</ram:TypeCode>"));
+        assert_eq!(parse_document(&xml), document);
     }
 
     proptest! {

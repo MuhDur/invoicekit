@@ -359,9 +359,6 @@ pub struct PostalAddress {
 
 impl PostalAddress {
     fn validate(&self) -> Result<(), IrError> {
-        if self.lines.is_empty() {
-            return Err(IrError::EmptyCollection("party.address.lines"));
-        }
         for line in &self.lines {
             validate_non_empty(line, "party.address.lines")?;
         }
@@ -1850,6 +1847,14 @@ mod tests {
         input["lines"] = json!([]);
         let err = CommercialDocument::try_from_value(input).unwrap_err();
         assert!(matches!(err, IrError::EmptyCollection("lines")));
+    }
+
+    #[test]
+    fn empty_party_address_lines_are_allowed() {
+        let mut input = synthetic_document_json();
+        input["supplier"]["address"]["lines"] = json!([]);
+        let document = CommercialDocument::try_from_value(input).unwrap();
+        assert!(document.supplier.address.lines.is_empty());
     }
 
     #[test]

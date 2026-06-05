@@ -28,6 +28,10 @@ pub const CII_DOCUMENT_FIELDS_EXTENSION_URN: &str = "urn:invoicekit:cii:d16b:doc
 /// carried by CII document-context parameters.
 pub const CII_PROFILE_CONTEXT_EXTENSION_URN: &str = "urn:invoicekit:cii:d16b:profile-context";
 
+/// CII line-field extension URN for standard line fields that do not yet have
+/// direct core IR fields.
+pub const CII_LINE_FIELDS_EXTENSION_URN: &str = "urn:invoicekit:cii:d16b:line-fields";
+
 /// Application context parameter ID used to carry InvoiceKit operational
 /// metadata inside CII without overloading CII business fields.
 pub const INVOICEKIT_CII_METADATA_EXTENSION_URN: &str = "urn:invoicekit:cii:extension:metadata:v1";
@@ -49,10 +53,22 @@ pub struct CiiMappingDecision {
 /// InvoiceKit operational metadata.
 pub const NAMED_MAPPING_DECISIONS: &[CiiMappingDecision] = &[
     CiiMappingDecision {
+        element: "ExchangedDocumentType/TypeCode",
+        class: "cii_document_field_extension",
+        representation: "CommercialDocument.extensions[urn:invoicekit:cii:d16b:document-fields].document_type_code",
+        rationale: "The IR document_type captures the semantic family; non-default UNTDID 1001 BT-3 codes must still round-trip exactly.",
+    },
+    CiiMappingDecision {
         element: "HeaderTradeAgreementType/BuyerReference",
         class: "cii_document_field_extension",
         representation: "CommercialDocument.extensions[urn:invoicekit:cii:d16b:document-fields].buyer_reference",
         rationale: "BuyerReference is the buyer-assigned business reference; it is never tenant_id.",
+    },
+    CiiMappingDecision {
+        element: "LineDocumentType/ParentLineID",
+        class: "cii_line_field_extension",
+        representation: "DocumentLine.extensions[urn:invoicekit:cii:d16b:line-fields].parent_line_id",
+        rationale: "Factur-X EXTENDED sub-invoice-line hierarchy is line-local CII structure and must not be flattened away.",
     },
     CiiMappingDecision {
         element: "ExchangedDocumentContextType/BusinessProcessSpecifiedDocumentContextParameter",

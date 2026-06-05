@@ -911,6 +911,13 @@ fn lines<'ctx, 'doc>(ctx: &'ctx ValidationContext<'doc>) -> &'ctx [&'doc XmlNode
     &ctx.line_nodes
 }
 
+fn is_top_level_line(ctx: &ValidationContext<'_>, line: &XmlNode) -> bool {
+    ctx.syntax != DocumentSyntax::Cii
+        || line
+            .path(&["AssociatedDocumentLineDocument", "ParentLineID"])
+            .is_none()
+}
+
 fn tax_summaries<'ctx, 'doc>(ctx: &'ctx ValidationContext<'doc>) -> &'ctx [&'doc XmlNode] {
     &ctx.tax_summary_nodes
 }
@@ -1471,6 +1478,7 @@ fn line_amounts(ctx: &ValidationContext<'_>) -> Vec<Decimal> {
     lines(ctx)
         .iter()
         .copied()
+        .filter(|line| is_top_level_line(ctx, line))
         .filter_map(|line| match ctx.syntax {
             DocumentSyntax::Ubl => decimal(line.path_text(&["LineExtensionAmount"])?),
             DocumentSyntax::Cii => decimal(line.path_text(&[
@@ -2026,7 +2034,12 @@ fn br_21(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    for (index, line) in lines(ctx).iter().copied().enumerate() {
+    for (index, line) in lines(ctx)
+        .iter()
+        .copied()
+        .filter(|line| is_top_level_line(ctx, line))
+        .enumerate()
+    {
         let value = match ctx.syntax {
             DocumentSyntax::Ubl => line.path_text(&["ID"]),
             DocumentSyntax::Cii => line.path_text(&["AssociatedDocumentLineDocument", "LineID"]),
@@ -3272,7 +3285,12 @@ fn br_co_04(
     ctx: &ValidationContext<'_>,
     findings: &mut Vec<ValidationResult>,
 ) -> Result<(), En16931Error> {
-    for (index, line) in lines(ctx).iter().copied().enumerate() {
+    for (index, line) in lines(ctx)
+        .iter()
+        .copied()
+        .filter(|line| is_top_level_line(ctx, line))
+        .enumerate()
+    {
         let value = match ctx.syntax {
             DocumentSyntax::Ubl => line
                 .path(&["Item", "ClassifiedTaxCategory"])
@@ -3410,7 +3428,7 @@ fn br_co_12(
 ) -> Result<(), En16931Error> {
     let charges = document_allowance_charges(ctx, true);
     let total = header_amount(ctx, "ChargeTotalAmount");
-    if charges.is_empty() && total.is_none() {
+    if charges.is_empty() && (total.is_none() || ctx.syntax == DocumentSyntax::Cii) {
         return Ok(());
     }
     let sum = rounded_2(
@@ -4161,6 +4179,30 @@ mod tests {
         let report = validate_xml(valid_cii()).unwrap();
         assert_eq!(report.syntax, DocumentSyntax::Cii);
         assert!(report.findings.is_empty(), "{:?}", report.findings);
+    }
+
+    #[test]
+    fn cii_subordinate_lines_do_not_affect_br_co_line_totals_or_tax_category() {
+        let subordinate_line = r#"<ram:IncludedSupplyChainTradeLineItem><ram:AssociatedDocumentLineDocument><ram:LineID>0101</ram:LineID><ram:ParentLineID>1</ram:ParentLineID></ram:AssociatedDocumentLineDocument><ram:SpecifiedTradeProduct><ram:Name>Subordinate component</ram:Name></ram:SpecifiedTradeProduct><ram:SpecifiedLineTradeAgreement><ram:NetPriceProductTradePrice><ram:ChargeAmount>50.00</ram:ChargeAmount></ram:NetPriceProductTradePrice></ram:SpecifiedLineTradeAgreement><ram:SpecifiedLineTradeDelivery><ram:BilledQuantity unitCode="C62">1</ram:BilledQuantity></ram:SpecifiedLineTradeDelivery><ram:SpecifiedLineTradeSettlement><ram:SpecifiedTradeSettlementLineMonetarySummation><ram:LineTotalAmount>50.00</ram:LineTotalAmount></ram:SpecifiedTradeSettlementLineMonetarySummation></ram:SpecifiedLineTradeSettlement></ram:IncludedSupplyChainTradeLineItem>"#;
+        let xml = insert_before(
+            valid_cii(),
+            "<ram:ApplicableHeaderTradeAgreement>",
+            subordinate_line,
+        );
+
+        assert_not_emits_rule(&xml, "BR-CO-04");
+        assert_not_emits_rule(&xml, "BR-CO-10");
+    }
+
+    #[test]
+    fn cii_charge_total_without_charge_nodes_does_not_emit_br_co_12() {
+        let xml = replace(
+            valid_cii(),
+            "<ram:TaxBasisTotalAmount>100.00</ram:TaxBasisTotalAmount>",
+            "<ram:ChargeTotalAmount>15.00</ram:ChargeTotalAmount><ram:TaxBasisTotalAmount>100.00</ram:TaxBasisTotalAmount>",
+        );
+
+        assert_not_emits_rule(&xml, "BR-CO-12");
     }
 
     #[test]
