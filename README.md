@@ -194,6 +194,6 @@ Apache 2.0. See [`LICENSE`](LICENSE).
 
 ### Work with me
 
-I bring **AI into production in the enterprise** — databases at scale, systems modernization, and AI in production, vendor-neutral (cloud or self-hosted). Building something hard in Oracle / Rust / AI? Reach out.
+I help enterprises with the hard parts — databases at scale, systems modernization, and AI in production, vendor-neutral (cloud or self-hosted). Building something hard in Oracle / Rust / AI? Reach out.
 
 → **[durakovic.ai](https://durakovic.ai)** · hello@durakovic.ai
