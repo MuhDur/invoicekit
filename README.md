@@ -188,3 +188,12 @@ For security issues, see [`SECURITY.md`](SECURITY.md) rather than filing a publi
 ## License
 
 Apache 2.0. See [`LICENSE`](LICENSE).
+
+
+---
+
+### Work with me
+
+I bring **AI into production in the enterprise** — Oracle change-impact audits, systems modernization, and AI on your data, vendor-neutral (cloud or self-hosted). Building something hard in Oracle / Rust / AI? Reach out.
+
+→ **[durakovic.ai](https://durakovic.ai)** · hello@durakovic.ai
